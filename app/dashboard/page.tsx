@@ -1,5 +1,4 @@
 'use client';
-<<<<<<< HEAD:app/dashboard/page.tsx
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -203,38 +202,11 @@ export default function DashboardPage() {
               <Skeleton className="h-40 w-full" />
             </CardContent>
           </Card>
-=======
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useZkLogin } from '@/contexts/ZkLoginContext';
-import { HiUser } from 'react-icons/hi';
-
-export default function Dashboard() {
-  const { isAuthenticated, isLoading: authLoading, userAddress, logout } = useZkLogin();
-  const router = useRouter();
-
-  // Redirect to login page if not authenticated
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.push('/login');
-    }
-  }, [isAuthenticated, authLoading, router]);
-
-  // Show loading state while checking authentication
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading</h2>
-          <p className="text-gray-600">Please wait while we verify your session...</p>
->>>>>>> master:src/app/dashboard/page.tsx
         </div>
       </div>
     );
   }
 
-<<<<<<< HEAD:app/dashboard/page.tsx
   if (!isAuthenticated) {
     return null; // This will be handled by the useEffect redirect
   }
@@ -399,62 +371,6 @@ export default function Dashboard() {
             </Table>
           </CardContent>
         </Card>
-=======
-  // Show nothing if not authenticated (will redirect)
-  if (!isAuthenticated) {
-    return null;
-  }
-  
-  // Format address for display
-  const formatAddress = (address: string | null) => {
-    if (!address) return "No address available";
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-  };
-
-  // Handle logout
-  const handleLogout = () => {
-    logout();
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-3xl mx-auto">
-          {/* Header */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <div className="flex flex-col md:flex-row justify-between items-center">
-              <h1 className="text-2xl font-bold text-gray-900 mb-4 md:mb-0">Welcome to zkLogin Demo</h1>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-
-          {/* Wallet Information */}
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800">Your Wallet</h2>
-            <div className="flex items-center p-4 bg-blue-50 rounded-lg">
-              <div className="p-3 rounded-full bg-blue-100 mr-4">
-                <HiUser className="h-6 w-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="font-medium text-gray-700">Your Wallet Address</p>
-                <p className="text-gray-500 text-sm mt-1 font-mono">{userAddress}</p>
-              </div>
-            </div>
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <h3 className="text-md font-medium text-gray-700 mb-2">About Zero Knowledge Login</h3>
-              <p className="text-gray-600 text-sm">
-                Your wallet address is generated using zero-knowledge proofs, allowing you to authenticate 
-                without revealing your actual credentials to the blockchain.
-              </p>
-            </div>
-          </div>
-        </div>
->>>>>>> master:src/app/dashboard/page.tsx
       </div>
     </div>
   );

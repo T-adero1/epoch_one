@@ -4,14 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:fix": "cross-env NEXT_TELEMETRY_DISABLED=1 next dev --no-trace",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "clean": "rimraf .next"
+    "lint": "next lint"
   },
   "dependencies": {
-<<<<<<< HEAD
     "@hookform/resolvers": "^5.0.1",
     "@mysten/sui": "^1.28.0",
     "@radix-ui/react-dialog": "^1.1.11",
@@ -24,19 +21,10 @@
     "@radix-ui/react-slot": "^1.2.0",
     "@radix-ui/themes": "^3.2.1",
     "class-variance-authority": "^0.7.1",
-=======
-    "@chakra-ui/icons": "^2.1.1",
-    "@chakra-ui/react": "^2.8.2",
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.0",
-    "@types/uuid": "^10.0.0",
-    "axios": "^1.8.4",
->>>>>>> master
     "clsx": "^2.1.1",
     "framer-motion": "^12.7.4",
     "lucide-react": "^0.503.0",
     "next": "15.3.1",
-<<<<<<< HEAD
     "next-auth": "^4.24.6",
     "prisma": "^5.12.0",
     "react": "^19.0.0",
@@ -56,28 +44,6 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "tailwindcss": "^4",
-=======
-    "next-themes": "^0.4.6",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-icons": "^5.5.0",
-    "swr": "^2.3.3",
-    "tailwind-merge": "^3.2.0",
-    "uuid": "^11.1.0"
-  },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "autoprefixer": "^10.4.21",
-    "cross-env": "^7.0.3",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.1",
-    "postcss": "^8.5.3",
-    "rimraf": "^5.0.10",
-    "tailwindcss": "^3.3.3",
->>>>>>> master
     "typescript": "^5"
   }
 }
