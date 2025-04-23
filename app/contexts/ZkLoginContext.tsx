@@ -4,7 +4,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { useRouter } from 'next/navigation';
 import { generateRandomness, generateNonce, jwtToAddress } from '@mysten/sui/zklogin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromB64 } from '@mysten/sui/utils';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 
@@ -24,7 +23,18 @@ interface ZkLoginState {
   randomness: string | null;
   jwt: string | null;
   maxEpoch: number | null;
-  zkProofs: any | null;
+  zkProofs: {
+    proofPoints: {
+      a: string[];
+      b: string[][];
+      c: string[];
+    };
+    issBase64Details: {
+      value: string;
+      indexMod4: number;
+    };
+    headerBase64: string;
+  } | null;
 }
 
 interface LoginState {
@@ -126,12 +136,26 @@ function loginReducer(state: LoginState, action: LoginAction): LoginState {
   }
 }
 
+// Define proof data type
+interface ZkProofData {
+  proofPoints: {
+    a: string[];
+    b: string[][];
+    c: string[];
+  };
+  issBase64Details: {
+    value: string;
+    indexMod4: number;
+  };
+  headerBase64: string;
+}
+
 // Define context type
 interface ZkLoginContextType extends LoginState {
   startLogin: () => Promise<string>;
   completeLogin: (jwt: string) => Promise<void>;
   logout: () => void;
-  generateProof: () => Promise<any>;
+  generateProof: () => Promise<ZkProofData | null>;
   clearError: () => void;
   updateUserProfile: (userData: Partial<User>) => void;
   checkSessionValidity: () => void;
@@ -157,7 +181,6 @@ export const useZkLogin = () => useContext(ZkLoginContext);
 const SESSION_STORAGE_KEY = 'epochone_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const NETWORK = 'testnet'; // Changed from 'testnet' to 'devnet'
-const SALT_SERVICE_URL = 'https://salt.api.mystenlabs.com/get_salt';
 const PROVER_SERVICE_URL = 'https://prover-dev.mystenlabs.com/v1'; // Updated to use dev endpoint
 
 export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
@@ -211,7 +234,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         dispatch({ type: 'LOGIN_FAILURE', payload: '' }); // Just to set isLoading to false
       }
     }
-  }, []);
+  }, [state.isLoading]);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -231,7 +254,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       return false;
     }
     return true;
-  }, [state.sessionExpiry, router]);
+  }, [state.sessionExpiry, router, dispatch]);
 
   // Set up periodic session checks
   useEffect(() => {
@@ -276,17 +299,16 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
 
   // Generate ZK Proof
   const getZkProof = useCallback(async (params: {
-    jwt: string,
-    salt: string,
-    keyPair: Ed25519Keypair,
-    maxEpoch: number,
-    randomness: string,
-  }): Promise<any> => {
+    jwt: string;
+    salt: string;
+    keyPair: Ed25519Keypair;
+    maxEpoch: number;
+    randomness: string;
+  }): Promise<ZkProofData> => {
     try {
       const { jwt, salt, keyPair, maxEpoch, randomness } = params;
       
       // Extract the necessary claims from the JWT
-      const jwtPayload = JSON.parse(atob(jwt.split('.')[1]));
       const extendedEphemeralPublicKey = Array.from(
         new Uint8Array([0, ...keyPair.getPublicKey().toSuiBytes()])
       );
@@ -495,35 +517,31 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     }
     
     try {
-      // First, make sure the session is valid
       if (!checkSessionValidity()) {
         throw new Error('Session expired');
       }
       
-      // We'll simply return a success message without actually executing a transaction
-      // This is because we're removing the transaction logic per the requirement
+      console.log('Transaction received:', txb);
+      
       return { digest: 'verification_only_no_actual_transaction' };
     } catch (error) {
       console.error('Transaction execution error:', error);
       throw error;
     }
-  }, [state, checkSessionValidity]);
+  }, [state.isAuthenticated, state.zkLoginState, checkSessionValidity]);
 
   // Generate a proof for an existing session
-  const generateProof = useCallback(async () => {
+  const generateProof = useCallback(async (): Promise<ZkProofData | null> => {
     console.log('Generating proof for existing session');
     if (!state.isAuthenticated || !state.zkLoginState) {
       throw new Error('User is not authenticated');
     }
     
     try {
-      // Check session validity
       if (!checkSessionValidity()) {
         throw new Error('Session expired');
       }
       
-      // For simplicity, we'll just return the existing zkProofs
-      // In a real implementation, you might want to regenerate the proof if it's close to expiry
       return state.zkLoginState.zkProofs;
     } catch (error) {
       console.error('Error generating proof:', error);
