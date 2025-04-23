@@ -1,0 +1,343 @@
+/**
+ * Session Timeout Manager
+ * 
+ * Manages user session timeouts based on inactivity and absolute session duration.
+ * Tracks user activity through page navigation and interaction events.
+ */
+
+import { clearSession, refreshSession, loadSession } from './sessionManager';
+
+// Configuration
+const DEFAULT_INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes
+const DEFAULT_SESSION_MAX_DURATION = 12 * 60 * 60 * 1000; // 12 hours
+const DEFAULT_WARNING_BEFORE_TIMEOUT = 60 * 1000; // 1 minute
+const LOCALSTORAGE_LAST_ACTIVITY = 'epoch_last_activity';
+const LOCALSTORAGE_SESSION_START = 'epoch_session_start';
+
+// Callback types
+type TimeoutCallback = () => void;
+type WarningCallback = (remainingMs: number) => void;
+
+// State
+let inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
+let warningTimeout: ReturnType<typeof setTimeout> | null = null;
+let absoluteSessionTimeout: ReturnType<typeof setTimeout> | null = null;
+let activityListenersAttached = false;
+let timeoutCallback: TimeoutCallback | null = null;
+let warningCallback: WarningCallback | null = null;
+let activityEvents = ['click', 'touchstart', 'keydown'];
+
+// Configuration object
+interface TimeoutConfig {
+  inactivityTimeout?: number;
+  sessionMaxDuration?: number;
+  warningBeforeTimeout?: number;
+  onTimeout?: TimeoutCallback;
+  onWarning?: WarningCallback;
+  activityEvents?: string[];
+}
+
+/**
+ * Initialize the session timeout manager
+ */
+export function initSessionTimeout(config?: TimeoutConfig): void {
+  if (typeof window === 'undefined') return;
+
+  // Clear any existing timeouts to prevent duplicates
+  resetTimers();
+
+  // Set configuration
+  const inactivityMs = config?.inactivityTimeout ?? DEFAULT_INACTIVITY_TIMEOUT;
+  const maxDurationMs = config?.sessionMaxDuration ?? DEFAULT_SESSION_MAX_DURATION;
+  const warningMs = config?.warningBeforeTimeout ?? DEFAULT_WARNING_BEFORE_TIMEOUT;
+
+  if (config?.onTimeout) {
+    timeoutCallback = config.onTimeout;
+  }
+
+  if (config?.onWarning) {
+    warningCallback = config.onWarning;
+  }
+
+  if (config?.activityEvents) {
+    activityEvents = config.activityEvents;
+  }
+
+  // Initialize session start time if not exists
+  if (!localStorage.getItem(LOCALSTORAGE_SESSION_START)) {
+    localStorage.setItem(LOCALSTORAGE_SESSION_START, Date.now().toString());
+  }
+
+  // Set up the absolute session timeout
+  const sessionStartTime = parseInt(localStorage.getItem(LOCALSTORAGE_SESSION_START) || Date.now().toString(), 10);
+  const elapsedTime = Date.now() - sessionStartTime;
+  const remainingSessionTime = Math.max(0, maxDurationMs - elapsedTime);
+
+  if (remainingSessionTime <= 0) {
+    // Session already expired
+    console.log('🕒 Session Timeout: Maximum session duration exceeded');
+    handleSessionTimeout();
+  } else {
+    // Set timeout for remaining session time
+    absoluteSessionTimeout = setTimeout(() => {
+      console.log('🕒 Session Timeout: Maximum session duration reached');
+      handleSessionTimeout();
+    }, remainingSessionTime);
+
+    console.log(`🕒 Session Timeout: Session will expire in ${Math.round(remainingSessionTime / 60000)} minutes`);
+    
+    // Initialize activity tracking
+    recordUserActivity();
+    initInactivityTimer(inactivityMs, warningMs);
+    attachActivityListeners();
+  }
+}
+
+/**
+ * Record current time as last user activity
+ */
+export function recordUserActivity(): void {
+  if (typeof window === 'undefined') return;
+
+  const currentTime = Date.now().toString();
+  localStorage.setItem(LOCALSTORAGE_LAST_ACTIVITY, currentTime);
+  
+  // Restart inactivity timer
+  if (timeoutCallback) {
+    resetInactivityTimer();
+  }
+}
+
+/**
+ * Set up activity listeners to track user interaction
+ */
+function attachActivityListeners(): void {
+  if (typeof window === 'undefined' || activityListenersAttached) return;
+
+  const activityHandler = () => {
+    recordUserActivity();
+  };
+
+  // Add event listeners for user activity
+  activityEvents.forEach(eventType => {
+    window.addEventListener(eventType, activityHandler, { passive: true });
+  });
+
+  // Track page navigation via route changes
+  if (typeof window !== 'undefined') {
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function(...args) {
+      recordUserActivity();
+      return originalPushState.apply(this, args);
+    };
+
+    history.replaceState = function(...args) {
+      recordUserActivity();
+      return originalReplaceState.apply(this, args);
+    };
+
+    window.addEventListener('popstate', activityHandler);
+  }
+
+  activityListenersAttached = true;
+  console.log('🕒 Session Timeout: Activity tracking initialized');
+}
+
+/**
+ * Initialize the inactivity timer (first time setup)
+ */
+function initInactivityTimer(timeout: number, warningTime: number): void {
+  // Set up warning timeout
+  const warningDelay = Math.max(0, timeout - warningTime);
+  if (warningDelay > 0 && warningCallback) {
+    warningTimeout = setTimeout(() => {
+      console.log(`🕒 Session Timeout: Warning - Session will expire in ${Math.round(warningTime / 1000)} seconds`);
+      if (warningCallback) warningCallback(warningTime);
+    }, warningDelay);
+  }
+
+  // Set up inactivity timeout
+  inactivityTimeout = setTimeout(() => {
+    console.log('🕒 Session Timeout: Session expired due to inactivity');
+    handleSessionTimeout();
+  }, timeout);
+}
+
+/**
+ * Start or restart the inactivity timer
+ */
+function startInactivityTimer(timeout: number, warningTime: number): void {
+  if (inactivityTimeout) {
+    clearTimeout(inactivityTimeout);
+    inactivityTimeout = null;
+  }
+  
+  if (warningTimeout) {
+    clearTimeout(warningTimeout);
+    warningTimeout = null;
+  }
+
+  // Set up warning timeout
+  const warningDelay = Math.max(0, timeout - warningTime);
+  if (warningDelay > 0 && warningCallback) {
+    warningTimeout = setTimeout(() => {
+      console.log(`🕒 Session Timeout: Warning - Session will expire in ${Math.round(warningTime / 1000)} seconds`);
+      if (warningCallback) warningCallback(warningTime);
+    }, warningDelay);
+  }
+
+  // Set up inactivity timeout
+  inactivityTimeout = setTimeout(() => {
+    console.log('🕒 Session Timeout: Session expired due to inactivity');
+    handleSessionTimeout();
+  }, timeout);
+}
+
+/**
+ * Reset inactivity timers
+ */
+function resetInactivityTimer(): void {
+  if (inactivityTimeout) {
+    clearTimeout(inactivityTimeout);
+    inactivityTimeout = null;
+  }
+  
+  if (warningTimeout) {
+    clearTimeout(warningTimeout);
+    warningTimeout = null;
+  }
+
+  // Restart the timers with the appropriate timeouts
+  const config = getConfig();
+  if (timeoutCallback) {
+    startInactivityTimer(
+      config.inactivityTimeout, 
+      config.warningBeforeTimeout
+    );
+  }
+}
+
+/**
+ * Reset all timers
+ */
+function resetTimers(): void {
+  if (inactivityTimeout) {
+    clearTimeout(inactivityTimeout);
+    inactivityTimeout = null;
+  }
+  
+  if (warningTimeout) {
+    clearTimeout(warningTimeout);
+    warningTimeout = null;
+  }
+  
+  if (absoluteSessionTimeout) {
+    clearTimeout(absoluteSessionTimeout);
+    absoluteSessionTimeout = null;
+  }
+}
+
+/**
+ * Handle session timeout
+ */
+function handleSessionTimeout(): void {
+  resetTimers();
+
+  // Clear user session
+  clearSession();
+  
+  // Reset session start time
+  localStorage.removeItem(LOCALSTORAGE_SESSION_START);
+  localStorage.removeItem(LOCALSTORAGE_LAST_ACTIVITY);
+  
+  // Call the timeout callback if provided
+  if (timeoutCallback) {
+    timeoutCallback();
+  } else {
+    // Default behavior: redirect to login page
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login?timeout=1';
+    }
+  }
+}
+
+/**
+ * Check if session is about to expire and return remaining time
+ */
+export function getTimeUntilExpiration(): { inactivity: number, session: number } {
+  if (typeof window === 'undefined') {
+    return { inactivity: 0, session: 0 };
+  }
+
+  const config = getConfig();
+  const lastActivity = parseInt(localStorage.getItem(LOCALSTORAGE_LAST_ACTIVITY) || Date.now().toString(), 10);
+  const sessionStart = parseInt(localStorage.getItem(LOCALSTORAGE_SESSION_START) || Date.now().toString(), 10);
+  
+  const inactivityTime = Date.now() - lastActivity;
+  const sessionTime = Date.now() - sessionStart;
+  
+  const remainingInactivity = Math.max(0, config.inactivityTimeout - inactivityTime);
+  const remainingSession = Math.max(0, config.sessionMaxDuration - sessionTime);
+  
+  return {
+    inactivity: remainingInactivity,
+    session: remainingSession
+  };
+}
+
+/**
+ * Extend the session (e.g. after user confirms they want to stay active)
+ */
+export function extendSession(): void {
+  if (typeof window === 'undefined') return;
+  
+  console.log('🕒 Session Timeout: Session extended');
+  recordUserActivity();
+  
+  // Refresh the session in the backend/storage
+  const session = loadSession();
+  if (session && session.isAuthenticated) {
+    refreshSession();
+  }
+}
+
+/**
+ * End the session (typically called on logout)
+ */
+export function endSession(): void {
+  console.log('🕒 Session Timeout: Session ended');
+  handleSessionTimeout();
+}
+
+/**
+ * Clean up event listeners and timers
+ */
+export function cleanup(): void {
+  resetTimers();
+  
+  if (typeof window !== 'undefined' && activityListenersAttached) {
+    const activityHandler = () => {
+      recordUserActivity();
+    };
+    
+    activityEvents.forEach(eventType => {
+      window.removeEventListener(eventType, activityHandler);
+    });
+    
+    window.removeEventListener('popstate', activityHandler);
+    activityListenersAttached = false;
+  }
+}
+
+/**
+ * Get current configuration
+ */
+function getConfig(): Required<Omit<TimeoutConfig, 'onTimeout' | 'onWarning' | 'activityEvents'>> {
+  return {
+    inactivityTimeout: DEFAULT_INACTIVITY_TIMEOUT,
+    sessionMaxDuration: DEFAULT_SESSION_MAX_DURATION,
+    warningBeforeTimeout: DEFAULT_WARNING_BEFORE_TIMEOUT,
+  };
+} 
