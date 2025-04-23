@@ -1,23 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CheckCircle, AlertCircle, Copy, ExternalLink, FileText, Plus, Search, Send } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Transaction } from '@mysten/sui/transactions';
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { FileText, Plus, Search, Send } from 'lucide-react';
 
 interface Contract {
   id: string;
@@ -30,16 +24,9 @@ interface Contract {
 }
 
 export default function DashboardPage() {
-  const { userAddress, isAuthenticated, isLoading, logout } = useZkLogin();
-  const router = useRouter();
-  const [verificationStatus, setVerificationStatus] = useState<{
-    status: 'idle' | 'loading' | 'success' | 'error';
-    message: string;
-  }>({ status: 'idle', message: '' });
-  const [copied, setCopied] = useState(false);
-  const [isTransactionInProgress, setIsTransactionInProgress] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-  const [client] = useState(() => new SuiClient({ url: getFullnodeUrl('testnet') }));
+  const { userAddress, isAuthenticated, isLoading } = useZkLogin();
+
+  
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [isCreatingContract, setIsCreatingContract] = useState(false);
   const [newContract, setNewContract] = useState({
@@ -48,69 +35,10 @@ export default function DashboardPage() {
     signers: [''],
   });
 
-  // Function to verify zkLogin authentication
-  const handleVerifyAuth = () => {
-    setVerificationStatus({ status: 'loading', message: 'Verifying zkLogin authentication...' });
-    
-    try {
-      // Simple verification that user is authenticated with zkLogin
-      if (isAuthenticated && userAddress) {
-        setVerificationStatus({
-          status: 'success',
-          message: 'zkLogin authentication verified successfully!'
-        });
-        
-        console.log('Verification successful for address:', userAddress);
-      } else {
-        throw new Error('Not authenticated');
-      }
-    } catch (error) {
-      console.error('Verification failed:', error);
-      setVerificationStatus({
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Verification failed for unknown reason'
-      });
-    }
-  };
+  
 
-  // Copy address to clipboard
-  const copyAddress = () => {
-    if (userAddress) {
-      navigator.clipboard.writeText(userAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
-  const handleExecuteTransaction = async () => {
-    try {
-      setIsTransactionInProgress(true);
-      setStatusMessage('Creating transaction...');
 
-      // Create a new transaction
-      const tx = new Transaction();
-      
-      // Add transaction operations here
-      // Example: tx.moveCall({ ... });
-      
-      // Build, sign and execute the transaction
-      setStatusMessage('Building transaction...');
-      const transactionBlock = await tx.build({ client });
-      
-      setStatusMessage('Signing transaction...');
-      // Add signing code here if needed
-      
-      setStatusMessage('Executing transaction...');
-      // Add execution code here
-      
-      setStatusMessage('Transaction completed successfully!');
-    } catch (error) {
-      console.error('Transaction execution failed:', error);
-      setStatusMessage('Transaction execution failed');
-    } finally {
-      setIsTransactionInProgress(false);
-    }
-  };
 
   // Mock data for contracts
   useEffect(() => {

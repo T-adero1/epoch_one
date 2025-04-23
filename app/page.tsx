@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { FaGoogle, FaShieldAlt, FaClock, FaExclamationTriangle } from 'react-icons/fa';
@@ -9,6 +9,14 @@ import Link from 'next/link';
 import { extractJwtFromUrl } from '@/utils/zkLogin';
 
 export default function HomePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <HomePageContent />
+    </Suspense>
+  );
+}
+
+function HomePageContent() {
   const { isAuthenticated, startLogin, completeLogin, isLoading, error } = useZkLogin();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -86,7 +94,7 @@ export default function HomePage() {
         console.error('⚡ Home Page: Error during dashboard redirect:', error);
       }
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, error, isLoading]);
 
   // Handle Google login click
   const handleGoogleLoginClick = async () => {
