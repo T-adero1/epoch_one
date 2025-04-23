@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 
 interface AuthGuardProps {
@@ -11,13 +11,20 @@ interface AuthGuardProps {
 const AuthGuard = ({ children }: AuthGuardProps) => {
   const { isAuthenticated, isLoading } = useZkLogin();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    console.log('AuthGuard: Checking auth state', {
+      isAuthenticated,
+      isLoading,
+      pathname
+    });
+
+    if (!isLoading && !isAuthenticated && pathname !== '/') {
       console.log('AuthGuard: User not authenticated, redirecting to home');
       router.replace('/');
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, router, pathname]);
 
   if (isLoading) {
     return (

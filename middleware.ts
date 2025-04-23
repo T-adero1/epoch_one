@@ -14,16 +14,17 @@ export function middleware(request: NextRequest) {
                        path.startsWith('/_next') || 
                        path.startsWith('/api/');
 
-  // Check if the user is authenticated by looking for the session token
-  const sessionCookie = request.cookies.get('epochone_session');
-  const isAuthenticated = !!sessionCookie;
+  // For client-side routes, we'll let the client-side auth guard handle it
+  if (path.startsWith('/dashboard')) {
+    return NextResponse.next();
+  }
 
-  // If the path is not public and the user is not authenticated, redirect to the login page
-  if (!isPublicPath && !isAuthenticated) {
+  // If the path is not public, redirect to the login page
+  if (!isPublicPath) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // Continue with the request if authenticated or accessing a public path
+  // Continue with the request if accessing a public path
   return NextResponse.next();
 }
 

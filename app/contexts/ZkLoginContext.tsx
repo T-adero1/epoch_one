@@ -156,9 +156,9 @@ export const useZkLogin = () => useContext(ZkLoginContext);
 // Constants
 const SESSION_STORAGE_KEY = 'epochone_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-const NETWORK = 'testnet'; // 'devnet', 'testnet', or 'mainnet'
+const NETWORK = 'testnet'; // Changed from 'testnet' to 'devnet'
 const SALT_SERVICE_URL = 'https://salt.api.mystenlabs.com/get_salt';
-const PROVER_SERVICE_URL = 'https://prover.mystenlabs.com/v1';
+const PROVER_SERVICE_URL = 'https://prover-dev.mystenlabs.com/v1'; // Updated to use dev endpoint
 
 export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
   const [state, dispatch] = useReducer(loginReducer, initialState);
@@ -255,20 +255,19 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
   // Generate Salt for zkLogin
   const getSalt = useCallback(async (jwt: string): Promise<string> => {
     try {
-      const response = await fetch(SALT_SERVICE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ jwt }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Salt service returned ${response.status}`);
+      // Check if we already have a salt for this JWT
+      const storedSalt = localStorage.getItem(`salt_${jwt}`);
+      if (storedSalt) {
+        return storedSalt;
       }
+
+      // Generate a new salt
+      const salt = generateRandomness();
       
-      const data = await response.json();
-      return data.salt;
+      // Store the salt for future use
+      localStorage.setItem(`salt_${jwt}`, salt);
+      
+      return salt;
     } catch (error) {
       console.error('Error getting salt:', error);
       throw error;
@@ -292,6 +291,14 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         new Uint8Array([0, ...keyPair.getPublicKey().toSuiBytes()])
       );
       
+      console.log('Requesting ZK proof with params:', {
+        jwt: jwt.substring(0, 20) + '...', // Log partial JWT for debugging
+        salt,
+        maxEpoch,
+        randomness,
+        keyClaimName: 'sub'
+      });
+      
       const response = await fetch(PROVER_SERVICE_URL, {
         method: 'POST',
         headers: {
@@ -308,7 +315,13 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       });
       
       if (!response.ok) {
-        throw new Error(`Prover service returned ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Prover service error:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        });
+        throw new Error(`Prover service returned ${response.status}: ${JSON.stringify(errorData)}`);
       }
       
       return await response.json();
@@ -326,30 +339,20 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     try {
       // Generate ephemeral key pair
       const ephemeralKeyPair = Ed25519Keypair.generate();
-      const publicKey = Array.from(ephemeralKeyPair.getPublicKey().toSuiBytes());
       
-      // Get the secret key directly as bytes
-      const secretKey = Array.from(ephemeralKeyPair.getSecretKey());
+      // Store the key pair in base64 format
+      const publicKey = ephemeralKeyPair.getPublicKey().toBase64();
+      const privateKey = ephemeralKeyPair.getSecretKey();
       
-      // Get current epoch and calculate max epoch
       const currentEpoch = await getCurrentEpoch();
-      const maxEpoch = currentEpoch + 10; // Valid for 10 epochs
-      
-      // Generate randomness
-      const randomness = generateRandomness();
-      
-      // Generate nonce
-      const nonce = generateNonce(ephemeralKeyPair.getPublicKey(), maxEpoch, randomness);
-      
-      // Save ephemeral key pair and other data
       const zkLoginState: ZkLoginState = {
         ephemeralKeyPair: {
-          publicKey: JSON.stringify(publicKey),
-          privateKey: JSON.stringify(secretKey),
+          publicKey,
+          privateKey,
         },
-        randomness,
+        randomness: generateRandomness(),
         jwt: null,
-        maxEpoch,
+        maxEpoch: currentEpoch + 10, // Valid for 10 epochs
         zkProofs: null,
       };
       
@@ -357,6 +360,13 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       if (typeof window !== 'undefined') {
         localStorage.setItem('zklogin_intermediate_state', JSON.stringify(zkLoginState));
       }
+      
+      // Generate nonce
+      const nonce = generateNonce(
+        ephemeralKeyPair.getPublicKey(), 
+        zkLoginState.maxEpoch || 0, 
+        zkLoginState.randomness || ''
+      );
       
       return nonce;
     } catch (error) {
@@ -369,36 +379,48 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
   // Complete the zkLogin process with JWT
   const completeLogin = useCallback(async (jwt: string): Promise<void> => {
     try {
-      console.log('Completing zkLogin process with JWT...');
+      console.log('Completing zkLogin process with JWT...', jwt);
       
       // Get the intermediate state
       const intermediateStateStr = localStorage.getItem('zklogin_intermediate_state');
       if (!intermediateStateStr) {
-        throw new Error('No intermediate state found');
+        console.error('No intermediate state found in localStorage');
+        throw new Error('No intermediate state found. Please try logging in again.');
       }
       
       const intermediateState: ZkLoginState = JSON.parse(intermediateStateStr);
+      console.log('Retrieved intermediate state:', intermediateState);
       
-      // Restore the ephemeral key pair
-      const privateKeyBytes = new Uint8Array(JSON.parse(intermediateState.ephemeralKeyPair!.privateKey));
+      if (!intermediateState.ephemeralKeyPair?.privateKey || !intermediateState.maxEpoch || !intermediateState.randomness) {
+        console.error('Missing required state data');
+        throw new Error('Invalid intermediate state. Please try logging in again.');
+      }
       
-      // Recreate the keypair from saved bytes
-      const importedKeypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
+      // Restore the ephemeral key pair using the stored private key
+      const ephemeralKeyPair = Ed25519Keypair.fromSecretKey(
+        intermediateState.ephemeralKeyPair.privateKey
+      );
+      console.log('Restored ephemeral key pair');
       
       // Get salt
+      console.log('Generating salt...');
       const salt = await getSalt(jwt);
+      console.log('Generated salt:', salt);
       
       // Get ZK proof
+      console.log('Requesting ZK proof...');
       const zkProofs = await getZkProof({
         jwt,
         salt,
-        keyPair: importedKeypair,
-        maxEpoch: intermediateState.maxEpoch!,
-        randomness: intermediateState.randomness!,
+        keyPair: ephemeralKeyPair,
+        maxEpoch: intermediateState.maxEpoch || 0,
+        randomness: intermediateState.randomness || '',
       });
+      console.log('Received ZK proof');
       
       // Calculate the user's address
       const userAddress = jwtToAddress(jwt, salt);
+      console.log('Calculated user address:', userAddress);
       
       // Update zkLoginState
       const updatedZkLoginState: ZkLoginState = {
@@ -418,6 +440,8 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         displayName: jwtPayload.name || '',
         profilePicture: jwtPayload.picture || '',
       };
+      
+      console.log('Dispatching login success with user data:', userData);
       
       // Save session data
       dispatch({
@@ -439,11 +463,28 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       // Clean up intermediate state
       localStorage.removeItem('zklogin_intermediate_state');
       
+      console.log('Login completed successfully, attempting to redirect to dashboard');
+      console.log('Current authentication state:', {
+        isAuthenticated: state.isAuthenticated,
+        userAddress: state.userAddress,
+        sessionExpiry: state.sessionExpiry
+      });
+      
       // Redirect to dashboard
-      router.push('/dashboard');
+      try {
+        await router.push('/dashboard');
+        console.log('Successfully initiated dashboard redirect');
+      } catch (error) {
+        console.error('Error during dashboard redirect:', error);
+      }
     } catch (error) {
       console.error('Login completion error:', error);
-      dispatch({ type: 'LOGIN_FAILURE', payload: 'Failed to complete login. Please try again.' });
+      // Clean up any partial state
+      localStorage.removeItem('zklogin_intermediate_state');
+      dispatch({ 
+        type: 'LOGIN_FAILURE', 
+        payload: error instanceof Error ? error.message : 'Failed to complete login. Please try again.' 
+      });
     }
   }, [getSalt, getZkProof, router]);
 

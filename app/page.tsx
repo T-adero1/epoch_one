@@ -71,9 +71,20 @@ export default function HomePage() {
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
+    console.log('⚡ Home Page: Checking authentication state', {
+      isAuthenticated,
+      isLoading,
+      error
+    });
+    
     if (isAuthenticated) {
-      console.log('⚡ Home Page: User already authenticated, redirecting to dashboard');
-      router.push('/dashboard');
+      console.log('⚡ Home Page: User authenticated, attempting to redirect to dashboard');
+      try {
+        router.push('/dashboard');
+        console.log('⚡ Home Page: Successfully initiated dashboard redirect');
+      } catch (error) {
+        console.error('⚡ Home Page: Error during dashboard redirect:', error);
+      }
     }
   }, [isAuthenticated, router]);
 

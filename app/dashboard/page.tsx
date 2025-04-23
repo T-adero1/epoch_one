@@ -8,11 +8,26 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CheckCircle, AlertCircle, Copy, ExternalLink } from 'lucide-react';
+import { CheckCircle, AlertCircle, Copy, ExternalLink, FileText, Plus, Search, Send } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+
+interface Contract {
+  id: string;
+  title: string;
+  description: string;
+  status: 'draft' | 'sent' | 'signed' | 'completed';
+  createdAt: string;
+  signers: string[];
+  owner: string;
+}
 
 export default function DashboardPage() {
   const { userAddress, isAuthenticated, isLoading, logout } = useZkLogin();
@@ -25,6 +40,13 @@ export default function DashboardPage() {
   const [isTransactionInProgress, setIsTransactionInProgress] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [client] = useState(() => new SuiClient({ url: getFullnodeUrl('testnet') }));
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [isCreatingContract, setIsCreatingContract] = useState(false);
+  const [newContract, setNewContract] = useState({
+    title: '',
+    description: '',
+    signers: [''],
+  });
 
   // Function to verify zkLogin authentication
   const handleVerifyAuth = () => {
@@ -90,6 +112,65 @@ export default function DashboardPage() {
     }
   };
 
+  // Mock data for contracts
+  useEffect(() => {
+    if (isAuthenticated) {
+      setContracts([
+        {
+          id: '1',
+          title: 'Employment Agreement',
+          description: 'Standard employment contract for new hires',
+          status: 'draft',
+          createdAt: '2024-04-23',
+          signers: ['0x123...456', '0x789...012'],
+          owner: userAddress || '',
+        },
+        {
+          id: '2',
+          title: 'NDA Agreement',
+          description: 'Non-disclosure agreement for partners',
+          status: 'sent',
+          createdAt: '2024-04-22',
+          signers: ['0x123...456', '0x789...012'],
+          owner: userAddress || '',
+        },
+      ]);
+    }
+  }, [isAuthenticated, userAddress]);
+
+  const handleCreateContract = () => {
+    if (!newContract.title || !newContract.description) return;
+
+    const contract: Contract = {
+      id: Date.now().toString(),
+      title: newContract.title,
+      description: newContract.description,
+      status: 'draft',
+      createdAt: new Date().toISOString().split('T')[0],
+      signers: newContract.signers.filter(s => s.trim() !== ''),
+      owner: userAddress || '',
+    };
+
+    setContracts([contract, ...contracts]);
+    setIsCreatingContract(false);
+    setNewContract({ title: '', description: '', signers: [''] });
+  };
+
+  const getStatusBadge = (status: Contract['status']) => {
+    const variants = {
+      draft: 'bg-blue-100 text-blue-800',
+      sent: 'bg-blue-100 text-blue-800',
+      signed: 'bg-blue-100 text-blue-800',
+      completed: 'bg-blue-100 text-blue-800',
+    };
+
+    return (
+      <Badge className={variants[status]}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-6">
@@ -132,195 +213,165 @@ export default function DashboardPage() {
 
   return (
     <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
-      
-      <Tabs defaultValue="overview" className="mb-8">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="verification">Verification</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="overview" className="mt-6">
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="border-primary/20">
-              <CardHeader className="bg-primary/5 rounded-t-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-xl">Welcome to EpochOne</CardTitle>
-                    <CardDescription>You're logged in with Sui zkLogin</CardDescription>
-                  </div>
-                  <Badge className="bg-green-100 text-green-800 hover:bg-green-200">Active</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-1">Your Wallet Address</h3>
-                    <div className="flex items-center gap-2">
-                      <div className="bg-secondary/20 p-3 rounded-lg flex-1 overflow-hidden group relative">
-                        <p className="font-mono text-sm truncate">{userAddress}</p>
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-background opacity-0 group-hover:opacity-100"></div>
-                      </div>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon" onClick={copyAddress} className="h-10 w-10">
-                              {copied ? <CheckCircle size={16} className="text-green-600" /> : <Copy size={16} />}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{copied ? 'Copied!' : 'Copy address'}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon" className="h-10 w-10" asChild>
-                              <a 
-                                href={`https://explorer.sui.io/address/${userAddress}?network=testnet`} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                              >
-                                <ExternalLink size={16} />
-                              </a>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>View on Sui Explorer</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-sm font-medium text-muted-foreground">Authentication Method</span>
-                      <div className="mt-1">
-                        <Badge variant="secondary" className="bg-blue-50 text-blue-800 hover:bg-blue-100">zkLogin</Badge>
-                      </div>
-                    </div>
-                    <Button onClick={handleVerifyAuth} variant="outline" size="sm">
-                      Verify Session
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter className="border-t bg-muted/10 pt-4">
-                <Button variant="ghost" onClick={logout} className="text-red-600 hover:text-red-700 hover:bg-red-50">Log out</Button>
-              </CardFooter>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Verification Status</CardTitle>
-                <CardDescription>Current zkLogin verification status</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {verificationStatus.status === 'idle' && (
-                  <div className="bg-muted/20 p-6 rounded-lg text-center">
-                    <p className="text-muted-foreground">No verification performed yet</p>
-                    <p className="text-sm text-muted-foreground/70 mt-2">Click "Verify Session" to check authentication</p>
-                  </div>
-                )}
-                
-                {verificationStatus.status === 'loading' && (
-                  <div className="bg-blue-50 p-6 rounded-lg flex items-center justify-center">
-                    <svg className="animate-spin mr-2 h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span className="text-blue-800 font-medium">{verificationStatus.message}</span>
-                  </div>
-                )}
-                
-                {verificationStatus.status === 'success' && (
-                  <Alert variant="default" className="bg-green-50 border-green-200">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                    <AlertTitle className="text-green-800">Verification Successful</AlertTitle>
-                    <AlertDescription className="text-green-700">
-                      Your zkLogin authentication is valid and active.
-                      <div className="mt-3 pt-3 border-t border-green-200">
-                        <p className="text-sm font-medium mb-1">Wallet Address:</p>
-                        <code className="block bg-white p-3 rounded-md text-xs overflow-auto break-all border border-green-100 font-mono">{userAddress}</code>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                )}
-                
-                {verificationStatus.status === 'error' && (
-                  <Alert variant="destructive" className="bg-red-50 border-red-200">
-                    <AlertCircle className="h-5 w-5 text-red-600" />
-                    <AlertTitle className="text-red-800">Verification Failed</AlertTitle>
-                    <AlertDescription className="text-red-700">
-                      {verificationStatus.message}
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        
-        <TabsContent value="verification" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>ZkLogin Authentication Details</CardTitle>
-              <CardDescription>Technical details about your current authentication session</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Account Address</h3>
-                  <div className="bg-muted p-4 rounded-md">
-                    <p className="font-mono text-sm break-all">{userAddress}</p>
-                  </div>
-                </div>
-                
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Authentication Type</h3>
-                  <div className="bg-muted p-4 rounded-md">
-                    <p className="font-mono text-sm">OAuth 2.0 with zkLogin</p>
-                  </div>
-                </div>
-                
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Network</h3>
-                  <div className="bg-muted p-4 rounded-md">
-                    <p className="font-mono text-sm">Sui Testnet</p>
-                  </div>
-                </div>
-                
-                <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-md">
-                  <h3 className="text-sm font-medium text-yellow-800 flex items-center mb-2">
-                    <AlertCircle className="h-4 w-4 mr-2 text-yellow-600" />
-                    Important Security Note
-                  </h3>
-                  <p className="text-xs text-yellow-700">
-                    For security reasons, never share your zkLogin credentials or session information with anyone.
-                    Your wallet address is the only information that can be safely shared.
-                  </p>
-                </div>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
+        <Dialog open={isCreatingContract} onOpenChange={setIsCreatingContract}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="mr-2 h-4 w-4" />
+              New Contract
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">Create New Contract</DialogTitle>
+              <DialogDescription className="text-gray-600">
+                Fill in the details below to create a new contract.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <label htmlFor="title" className="text-sm font-medium text-gray-900">
+                  Title
+                </label>
+                <Input
+                  id="title"
+                  value={newContract.title}
+                  onChange={(e) => setNewContract({ ...newContract, title: e.target.value })}
+                  placeholder="Contract title"
+                  className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                />
               </div>
-            </CardContent>
-            <CardFooter className="border-t flex justify-end pt-6">
-              <Button onClick={handleVerifyAuth} disabled={verificationStatus.status === 'loading'}>
-                {verificationStatus.status === 'loading' ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Verifying...
-                  </>
-                ) : 'Verify Authentication'}
+              <div className="grid gap-2">
+                <label htmlFor="description" className="text-sm font-medium text-gray-900">
+                  Description
+                </label>
+                <Textarea
+                  id="description"
+                  value={newContract.description}
+                  onChange={(e) => setNewContract({ ...newContract, description: e.target.value })}
+                  placeholder="Contract description"
+                  className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium text-gray-900">Signers</label>
+                {newContract.signers.map((signer, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      value={signer}
+                      onChange={(e) => {
+                        const newSigners = [...newContract.signers];
+                        newSigners[index] = e.target.value;
+                        setNewContract({ ...newContract, signers: newSigners });
+                      }}
+                      placeholder="Signer address"
+                      className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    />
+                    {index === newContract.signers.length - 1 && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setNewContract({ ...newContract, signers: [...newContract.signers, ''] })}
+                        className="border-gray-200 hover:bg-blue-50"
+                      >
+                        <Plus className="h-4 w-4 text-blue-600" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreatingContract(false)} className="border-gray-200 hover:bg-blue-50">
+                Cancel
               </Button>
-            </CardFooter>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              <Button onClick={handleCreateContract} className="bg-blue-600 hover:bg-blue-700">
+                Create Contract
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="grid gap-6">
+        <Card className="border-gray-100">
+          <CardHeader>
+            <CardTitle className="text-gray-900">Your Contracts</CardTitle>
+            <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+                <Input 
+                  placeholder="Search contracts..." 
+                  className="pl-8 border-gray-200 focus:border-blue-500 focus:ring-blue-500" 
+                />
+              </div>
+              <Select>
+                <SelectTrigger className="w-[180px] border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="sent">Sent</SelectItem>
+                  <SelectItem value="signed">Signed</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-gray-50">
+                  <TableHead className="text-gray-900">Title</TableHead>
+                  <TableHead className="text-gray-900">Status</TableHead>
+                  <TableHead className="text-gray-900">Created</TableHead>
+                  <TableHead className="text-gray-900">Signers</TableHead>
+                  <TableHead className="text-right text-gray-900">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {contracts.map((contract) => (
+                  <TableRow key={contract.id} className="hover:bg-gray-50">
+                    <TableCell className="font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-blue-600" />
+                        {contract.title}
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(contract.status)}</TableCell>
+                    <TableCell className="text-gray-600">{contract.createdAt}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        {contract.signers.map((signer, i) => (
+                          <Badge key={i} variant="secondary" className="bg-blue-100 text-blue-800">
+                            {signer.slice(0, 6)}...{signer.slice(-4)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" className="border-gray-200 hover:bg-blue-50">
+                          View
+                        </Button>
+                        {contract.status === 'draft' && (
+                          <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
+                            <Send className="mr-2 h-4 w-4" />
+                            Send
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 } 
