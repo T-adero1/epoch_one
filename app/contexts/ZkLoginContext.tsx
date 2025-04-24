@@ -277,25 +277,78 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     }
   }, [suiClient]);
 
-  // Generate Salt for zkLogin
+  // Updated getSalt function for ZkLoginContext.tsx
   const getSalt = useCallback(async (jwt: string): Promise<string> => {
     try {
-      // Check if we already have a salt for this JWT
-      const storedSalt = localStorage.getItem(`salt_${jwt}`);
-      if (storedSalt) {
-        return storedSalt;
+      // Extract payload to get user identifier for caching
+      const jwtParts = jwt.split('.');
+      if (jwtParts.length !== 3) {
+        throw new Error('Invalid JWT format');
       }
-
-      // Generate a new salt
-      const salt = generateRandomness();
       
-      // Store the salt for future use
-      localStorage.setItem(`salt_${jwt}`, salt);
+      const payload = JSON.parse(atob(jwtParts[1]));
+      const userIdentifier = payload.sub;
+      
+      if (!userIdentifier) {
+        throw new Error('JWT missing subject identifier');
+      }
+      
+      // Check if we already have a salt for this user in cache
+      const cacheKey = `zklogin_salt_${userIdentifier}`;
+      const cachedSalt = localStorage.getItem(cacheKey);
+      
+      if (cachedSalt) {
+        console.log('Using cached salt for user:', userIdentifier.substring(0, 8) + '...');
+        return cachedSalt;
+      }
+      
+      console.log('No cached salt found, requesting from server for user:', userIdentifier.substring(0, 8) + '...');
+      
+      // Call our deterministic salt API endpoint
+      const response = await fetch('/api/salt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: jwt
+        }),
+      });
+      
+      if (!response.ok) {
+        // Try to get error details
+        const errorText = await response.text();
+        console.error('Salt service error:', {
+          status: response.status,
+          errorText,
+        });
+        throw new Error(`Salt service failed: ${response.status} ${errorText}`);
+      }
+      
+      const data = await response.json();
+      const salt = data.salt;
+      
+      if (!salt) {
+        throw new Error('Salt service returned no salt');
+      }
+      
+      console.log('Received salt from server:', salt.substring(0, 8) + '...');
+      
+      // Cache the salt for future use
+      localStorage.setItem(cacheKey, salt);
       
       return salt;
     } catch (error) {
       console.error('Error getting salt:', error);
-      throw error;
+      
+      // As a last resort fallback (only if the server is unreachable),
+      // generate a random salt and warn the user
+      console.warn('CRITICAL: Falling back to random salt generation. User will get a different wallet on next login!');
+      const fallbackSalt = generateRandomness();
+      
+      // Don't cache this random salt as it's just a temporary fallback
+      
+      return fallbackSalt;
     }
   }, []);
 
