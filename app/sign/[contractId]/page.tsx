@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { Button } from '@/components/ui/button'
@@ -11,12 +11,42 @@ import { canUserSignContract, getUserSignatureStatus } from '@/app/utils/signatu
 import { format } from 'date-fns'
 import { SignZkLoginModal } from '@/components/SignZkLoginModal'
 
+// Define a proper interface for the contract object used in this component
+interface ContractDetail {
+  id: string;
+  title: string;
+  description: string | null;
+  content: string;
+  status: string;
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  metadata?: {
+    signers?: string[];
+  } | null;
+  owner?: {
+    id: string;
+    name: string | null;
+    email: string;
+  };
+  signatures?: {
+    id: string;
+    status: string;
+    signedAt: Date | null;
+    user: {
+      id: string;
+      name: string | null;
+      email: string;
+    };
+  }[];
+}
+
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
   const { isAuthenticated, isLoading, user, userAddress } = useZkLogin()
   const router = useRouter()
   
-  const [contract, setContract] = useState<any>(null)
+  const [contract, setContract] = useState<ContractDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [canSign, setCanSign] = useState(false)
@@ -26,45 +56,8 @@ export default function ContractSigningPage() {
   const [showLoginModal, setShowLoginModal] = useState(false)
   const [requiredEmail, setRequiredEmail] = useState<string | null>(null)
   
-  // Load contract data and check if login is needed
-  useEffect(() => {
-    console.log('[ContractSigning] Auth state update:', { 
-      isLoading, 
-      isAuthenticated, 
-      userEmail: user?.email,
-      contractId,
-      location: typeof window !== 'undefined' ? window.location.href : 'SSR'
-    });
-    
-    if (isLoading) {
-      console.log('[ContractSigning] Still loading auth state...');
-      return
-    }
-    
-    if (!isAuthenticated) {
-      console.log('[ContractSigning] User not authenticated, showing login modal');
-      setShowLoginModal(true)
-      
-      // Check if we have a stored redirect path
-      const storedPath = localStorage.getItem('zkLoginRedirectPath')
-      console.log('[ContractSigning] Found stored redirect path:', storedPath)
-      
-      // Check if we have a stored contract ID
-      const storedContractId = localStorage.getItem('pendingSignatureContractId')
-      console.log('[ContractSigning] Found stored pending contract ID:', storedContractId)
-      
-      // Fetch basic contract info to get the signer email
-      console.log('[ContractSigning] Fetching basic contract info to determine required email')
-      fetchContractBasicInfo()
-      return
-    }
-    
-    console.log('[ContractSigning] User authenticated, fetching full contract')
-    fetchContract()
-  }, [contractId, isAuthenticated, isLoading, user?.email])
-  
   // Fetch just enough contract info to get the required signer email
-  const fetchContractBasicInfo = async () => {
+  const fetchContractBasicInfo = useCallback(async () => {
     console.log('[ContractSigning] Starting basic contract info fetch for contractId:', contractId)
     try {
       const apiUrl = `/api/contracts/${contractId}/public`
@@ -94,10 +87,10 @@ export default function ContractSigningPage() {
     } catch (err) {
       console.error('[ContractSigning] Error fetching basic contract info:', err)
     }
-  }
+  }, [contractId, setError, setRequiredEmail])
   
   // Fetch full contract details when authenticated
-  const fetchContract = async () => {
+  const fetchContract = useCallback(async () => {
     if (!user?.email) {
       console.log('[ContractSigning] Cannot fetch contract: No user email available')
       return
@@ -168,7 +161,44 @@ export default function ContractSigningPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [contractId, user, setLoading, setContract, setCanSign, setSignatureStatus, setRequiredEmail, setShowLoginModal, setError])
+  
+  // Load contract data and check if login is needed
+  useEffect(() => {
+    console.log('[ContractSigning] Auth state update:', { 
+      isLoading, 
+      isAuthenticated, 
+      userEmail: user?.email,
+      contractId,
+      location: typeof window !== 'undefined' ? window.location.href : 'SSR'
+    });
+    
+    if (isLoading) {
+      console.log('[ContractSigning] Still loading auth state...');
+      return
+    }
+    
+    if (!isAuthenticated) {
+      console.log('[ContractSigning] User not authenticated, showing login modal');
+      setShowLoginModal(true)
+      
+      // Check if we have a stored redirect path
+      const storedPath = localStorage.getItem('zkLoginRedirectPath')
+      console.log('[ContractSigning] Found stored redirect path:', storedPath)
+      
+      // Check if we have a stored contract ID
+      const storedContractId = localStorage.getItem('pendingSignatureContractId')
+      console.log('[ContractSigning] Found stored pending contract ID:', storedContractId)
+      
+      // Fetch basic contract info to get the signer email
+      console.log('[ContractSigning] Fetching basic contract info to determine required email')
+      fetchContractBasicInfo()
+      return
+    }
+    
+    console.log('[ContractSigning] User authenticated, fetching full contract')
+    fetchContract()
+  }, [contractId, isAuthenticated, isLoading, user?.email, fetchContractBasicInfo, fetchContract]);
   
   const handleSignatureCapture = (data: string) => {
     console.log('[ContractSigning] Signature captured, data length:', data.length)

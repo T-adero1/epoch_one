@@ -5,7 +5,7 @@ import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Mail, AlertCircle } from 'lucide-react'
-import Image from 'next/image'
+
 
 interface ZkLoginModalProps {
   isOpen: boolean
@@ -14,7 +14,7 @@ interface ZkLoginModalProps {
   redirectUrl?: string
 }
 
-export function ZkLoginModal({ isOpen, onClose, targetEmail, redirectUrl }: ZkLoginModalProps) {
+export function ZkLoginModal({ isOpen, onClose, targetEmail }: ZkLoginModalProps) {
   const { startLogin, isAuthenticated, user } = useZkLogin()
   const [error, setError] = useState<string | null>(null)
 
@@ -67,7 +67,7 @@ export function ZkLoginModal({ isOpen, onClose, targetEmail, redirectUrl }: ZkLo
         </div>
         
         <div className="text-center text-sm text-gray-500">
-          Your email will be used to verify your identity. We don't store your password.
+          Your email will be used to verify your identity. We don&apos;t store your password.
         </div>
       </DialogContent>
     </Dialog>

@@ -1,7 +1,11 @@
 type LogLevel = 'info' | 'error' | 'warn' | 'debug';
 
+interface LogMetadata {
+  [key: string]: string | number | boolean | null | undefined;
+}
+
 interface LogFunction {
-  (message: string, meta?: any): void;
+  (message: string, meta?: LogMetadata): void;
 }
 
 interface Logger {
@@ -12,7 +16,7 @@ interface Logger {
 }
 
 const createLogger = (): Logger => {
-  const formatLog = (level: LogLevel, message: string, meta?: any) => {
+  const formatLog = (level: LogLevel, message: string, meta?: LogMetadata) => {
     const timestamp = new Date().toISOString();
     return {
       timestamp,
@@ -23,16 +27,16 @@ const createLogger = (): Logger => {
   };
 
   return {
-    info: (message: string, meta?: any) => {
+    info: (message: string, meta?: LogMetadata) => {
       console.log(JSON.stringify(formatLog('info', message, meta)));
     },
-    error: (message: string, meta?: any) => {
+    error: (message: string, meta?: LogMetadata) => {
       console.error(JSON.stringify(formatLog('error', message, meta)));
     },
-    warn: (message: string, meta?: any) => {
+    warn: (message: string, meta?: LogMetadata) => {
       console.warn(JSON.stringify(formatLog('warn', message, meta)));
     },
-    debug: (message: string, meta?: any) => {
+    debug: (message: string, meta?: LogMetadata) => {
       if (process.env.NODE_ENV !== 'production') {
         console.debug(JSON.stringify(formatLog('debug', message, meta)));
       }
@@ -40,4 +44,4 @@ const createLogger = (): Logger => {
   };
 };
 
-export const log = createLogger(); 
+export const log = createLogger();

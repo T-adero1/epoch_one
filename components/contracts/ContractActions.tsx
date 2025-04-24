@@ -9,12 +9,8 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { MoreVertical, Copy, Pencil, Trash2, Send, FileText, Share2, Info as InfoIcon } from 'lucide-react'
+import { MoreVertical, Copy, Pencil, Trash2, Send, FileText } from 'lucide-react'
 import { ContractStatus } from '@prisma/client'
-import { useState } from 'react'
-import { generateSigningLink } from '@/app/utils/signatures'
-import { toast } from '@/components/ui/use-toast'
-import { Check } from 'lucide-react'
 
 interface ContractActionsProps {
   contractId: string
@@ -26,31 +22,12 @@ interface ContractActionsProps {
 }
 
 export default function ContractActions({ 
-  contractId, 
   status, 
   onView, 
   onEdit, 
   onDelete, 
   onSend 
 }: ContractActionsProps) {
-  const [copiedSigner, setCopiedSigner] = useState<string | null>(null)
-
-  const copySigningLink = (email: string) => {
-    const link = generateSigningLink(contractId)
-    navigator.clipboard.writeText(link)
-    
-    setCopiedSigner(email)
-    
-    toast({
-      description: `Signing link for ${email} copied to clipboard`,
-      duration: 3000,
-    })
-    
-    setTimeout(() => {
-      setCopiedSigner(null)
-    }, 3000)
-  }
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

@@ -33,7 +33,9 @@ export const createContract = async (data: {
   description?: string;
   content: string;
   ownerId: string;
-  metadata?: any;
+  metadata?: {
+    signers?: string[];
+  };
 }) => {
   const response = await fetch('/api/contracts', {
     method: 'POST',
@@ -51,7 +53,9 @@ export const updateContract = async (
     description?: string;
     content?: string;
     status?: ContractStatus;
-    metadata?: any;
+    metadata?: {
+      signers?: string[];
+    };
   }
 ) => {
   const response = await fetch('/api/contracts', {

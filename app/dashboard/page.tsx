@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FileText, Plus, Search, ChevronDown } from 'lucide-react';
 import { getContracts, createContract, deleteContract } from '@/app/utils/contracts';
-import { ContractStatus } from '@prisma/client';
 import { format } from 'date-fns';
 import {
   DropdownMenu,
@@ -39,18 +38,18 @@ import ContractActions from '@/components/contracts/ContractActions';
 import ContractDetails from '@/components/contracts/ContractDetails';
 import ContractEditor from '@/components/contracts/ContractEditor';
 
-// Rename this interface to avoid conflict with imported Contract type
+// Define the interface for the dashboard page
 interface ContractWithRelations {
   id: string;
   title: string;
   description: string | null;
   content: string;
-  status: ContractStatus;
+  status: string;
   ownerId: string;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
-  metadata: any | null;
+  metadata: { signers?: string[] } | null;
   owner: {
     id: string;
     name: string | null;
@@ -58,7 +57,7 @@ interface ContractWithRelations {
   };
   signatures: {
     id: string;
-    status: 'PENDING' | 'SIGNED' | 'REJECTED' | 'EXPIRED';
+    status: string;
     signedAt: Date | null;
     user: {
       id: string;
@@ -69,7 +68,7 @@ interface ContractWithRelations {
 }
 
 export default function DashboardPage() {
-  const {  isAuthenticated, isLoading, logout, user } = useZkLogin();
+  const { isAuthenticated, isLoading, logout, user } = useZkLogin();
   
   const [contracts, setContracts] = useState<ContractWithRelations[]>([]);
   const [isCreatingContract, setIsCreatingContract] = useState(false);
@@ -98,24 +97,24 @@ export default function DashboardPage() {
     }
     return names[0].substring(0, 2).toUpperCase();
   };
+  
+  const loadContracts = useCallback(async () => {
+    if (!user?.email) return;
+    try {
+      const data = await getContracts(user.email);
+      setContracts(data as unknown as ContractWithRelations[]);
+    } catch (error) {
+      console.error('Error loading contracts:', error);
+    }
+  }, [user?.email]);
 
   // Load actual contracts
   useEffect(() => {
     if (isAuthenticated && user?.email) {
       loadContracts();
     }
-  }, [isAuthenticated, user?.email]);
+  }, [isAuthenticated, user?.email, loadContracts]);
   
-  const loadContracts = async () => {
-    if (!user?.email) return;
-    try {
-      const data = await getContracts(user.email);
-      setContracts(data);
-    } catch (error) {
-      console.error('Error loading contracts:', error);
-    }
-  };
-
   const handleCreateContract = async () => {
     if (!newContract.title || !newContract.description || !user?.email) return;
 
@@ -130,7 +129,7 @@ export default function DashboardPage() {
         },
       });
 
-      setContracts([contract, ...contracts]);
+      setContracts([contract as unknown as ContractWithRelations, ...contracts]);
       setIsCreatingContract(false);
       setNewContract({ title: '', description: '', content: '', signers: [''] });
     } catch (error) {
@@ -454,7 +453,7 @@ export default function DashboardPage() {
                 {filteredContracts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                      No contracts found. Create your first contract by clicking the "New Contract" button.
+                      No contracts found. Create your first contract by clicking the &quot;New Contract&quot; button.
                     </TableCell>
                   </TableRow>
                 ) : (

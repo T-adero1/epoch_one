@@ -5,7 +5,7 @@ import { log } from '@/app/utils/logger';
 // Define types for contract metadata and signature with user
 interface ContractMetadata {
   signers?: string[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface SignatureWithUser {
@@ -290,7 +290,7 @@ export async function GET(request: Request) {
     log.info('Successfully fetched signatures', { 
       contractId, 
       count: signatures.length,
-      signerEmails: signatures.map(sig => sig.user.email)
+      signerEmails: signatures.map((sig: SignatureWithUser) => sig.user.email)
     });
     
     return NextResponse.json(signatures);

@@ -13,14 +13,14 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X, FileText, Plus, Trash2, User, Send } from 'lucide-react'
-import { updateContract } from '@/app/utils/contracts'
-import { ContractStatus } from '@prisma/client'
+import { Save, X,  Plus, Trash2, User, Send } from 'lucide-react'
+import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
+
 
 interface ContractEditorProps {
-  contract: any
-  onSave: (updatedContract: any) => void
-  onCancel: () => void
+  contract: ContractWithRelations;
+  onSave: (updatedContract: ContractWithRelations) => void;
+  onCancel: () => void;
 }
 
 // Define an interface for the original values

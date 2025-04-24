@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect } from 'react'
 import SignatureCanvas from 'react-signature-canvas'
 import { Button } from '@/components/ui/button'
-import { Undo2, Save, FileSignature } from 'lucide-react'
+import { Undo2, FileSignature } from 'lucide-react'
 
 interface SignatureProps {
   onSave: (signatureData: string) => void

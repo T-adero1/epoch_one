@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { FileSignature, ChevronRight, Mail, Calendar, User } from 'lucide-react'
+import { FileSignature, ChevronRight, Calendar, User } from 'lucide-react'
 import { format } from 'date-fns'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SignZkLoginModal } from '@/components/SignZkLoginModal'
@@ -28,6 +28,37 @@ export default function SignPage() {
   const [loading, setLoading] = useState(true)
   const [showLoginModal, setShowLoginModal] = useState(false)
   const router = useRouter()
+
+  // Define fetchContractsToSign with useCallback to avoid unnecessary recreations
+  const fetchContractsToSign = useCallback(async () => {
+    if (!user?.email) {
+      console.log('SignPage - Cannot fetch contracts: No user email available');
+      return
+    }
+    
+    console.log('SignPage - Fetching contracts to sign for user:', user.email);
+    
+    try {
+      setLoading(true)
+      const url = `/api/signatures/pending?email=${encodeURIComponent(user.email)}`
+      console.log('SignPage - Fetching from:', url);
+      
+      const response = await fetch(url)
+      console.log('SignPage - API response status:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch contracts: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json()
+      console.log('SignPage - Fetched contracts:', data.length > 0 ? data : 'No contracts found');
+      setContracts(data)
+    } catch (error) {
+      console.error('SignPage - Error fetching contracts to sign:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [user?.email]);
 
   // Check authentication status and show login modal if needed
   useEffect(() => {
@@ -73,37 +104,7 @@ export default function SignPage() {
       console.log('[SignPage] User authenticated, fetching contracts');
       fetchContractsToSign();
     }
-  }, [isLoading, isAuthenticated, user?.email, router]);
-
-  const fetchContractsToSign = async () => {
-    if (!user?.email) {
-      console.log('SignPage - Cannot fetch contracts: No user email available');
-      return
-    }
-    
-    console.log('SignPage - Fetching contracts to sign for user:', user.email);
-    
-    try {
-      setLoading(true)
-      const url = `/api/signatures/pending?email=${encodeURIComponent(user.email)}`
-      console.log('SignPage - Fetching from:', url);
-      
-      const response = await fetch(url)
-      console.log('SignPage - API response status:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch contracts: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json()
-      console.log('SignPage - Fetched contracts:', data.length > 0 ? data : 'No contracts found');
-      setContracts(data)
-    } catch (error) {
-      console.error('SignPage - Error fetching contracts to sign:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [isLoading, isAuthenticated, user?.email, router, fetchContractsToSign]);
 
   const handleViewContract = (contractId: string) => {
     console.log('SignPage - Navigating to contract:', contractId);
@@ -149,7 +150,7 @@ export default function SignPage() {
               <FileSignature className="h-12 w-12 mx-auto text-gray-400 mb-4" />
               <p className="text-gray-500 font-medium mb-1">No documents to sign</p>
               <p className="text-sm text-gray-400">
-                You don't have any pending documents that require your signature
+                You don&apos;t have any pending documents that require your signature
               </p>
             </div>
           ) : (

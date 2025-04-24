@@ -6,7 +6,6 @@ import {
   Card, 
   CardContent, 
   CardDescription, 
-  CardFooter, 
   CardHeader, 
   CardTitle 
 } from '@/components/ui/card'
@@ -19,26 +18,58 @@ import {
   Edit, 
   UserCheck, 
   Send, 
-  Copy, 
   Share2 
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { ContractStatus } from '@prisma/client'
+import { ContractStatus, SignatureStatus } from '@prisma/client'
 import ContractEditor from './ContractEditor'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback} from '@/components/ui/avatar'
 import { generateSigningLink, areAllSignaturesDone } from '@/app/utils/signatures'
 
+// Define interface for the contract used in this component
+interface ContractSignature {
+  id: string;
+  status: SignatureStatus;
+  signedAt: Date | null;
+  user: {
+    id: string;
+    name: string | null;
+    email: string;
+  };
+}
+
+interface Contract {
+  id: string;
+  title: string;
+  description: string | null;
+  content: string;
+  status: ContractStatus;
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date | null;
+  metadata?: {
+    signers?: string[];
+  } | null;
+  owner?: {
+    id: string;
+    name: string | null;
+    email: string;
+  };
+  signatures?: ContractSignature[];
+}
+
 interface ContractDetailsProps {
-  contract: any
-  onBack: () => void
-  onUpdate: (updatedContract: any) => void
+  contract: Contract;
+  onBack: () => void;
+  onUpdate: (updatedContract: Contract) => void;
 }
 
 export default function ContractDetails({ contract, onBack, onUpdate }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
   
-  const handleSave = (updatedContract: any) => {
+  const handleSave = (updatedContract: Contract) => {
     setIsEditing(false)
     onUpdate(updatedContract)
   }
@@ -137,7 +168,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
                 <div className="space-y-4">
                   {contract.metadata.signers.map((signer: string, i: number) => {
                     const signature = contract.signatures?.find(
-                      (sig: any) => sig.user.email.toLowerCase() === signer.toLowerCase()
+                      (sig: ContractSignature) => sig.user.email.toLowerCase() === signer.toLowerCase()
                     );
                     const hasSigned = signature?.status === 'SIGNED';
                     
@@ -153,7 +184,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
                             <p className="font-medium">{signer}</p>
                             <p className="text-sm text-gray-500">
                               {hasSigned 
-                                ? `Signed on ${format(new Date(signature.signedAt), 'MMM dd, yyyy')}`
+                                ? `Signed on ${format(new Date(signature.signedAt!), 'MMM dd, yyyy')}`
                                 : 'Pending signature'}
                             </p>
                           </div>
@@ -203,7 +234,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
                 <p className="text-sm text-gray-600">
                   {areAllSignaturesDone(contract.metadata?.signers || [], contract.signatures)
                     ? "All signatures collected! The contract is now complete."
-                    : `Waiting for ${contract.metadata?.signers?.length - (contract.signatures?.length || 0)} more signatures.`
+                    : `Waiting for ${contract.metadata?.signers?.length || 0 - (contract.signatures?.length || 0)} more signatures.`
                   }
                 </p>
               </div>

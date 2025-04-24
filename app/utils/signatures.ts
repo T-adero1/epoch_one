@@ -13,7 +13,15 @@ export const canUserSignContract = (signerEmail: string, contractSigners: string
 };
 
 // Function to check if all signatures are collected
-export const areAllSignaturesDone = (signers: string[], signatures: any[]): boolean => {
+export const areAllSignaturesDone = (
+  signers: string[], 
+  signatures: Array<{
+    user: {
+      email: string;
+    };
+    status: 'SIGNED' | 'PENDING';
+  }>
+): boolean => {
   // If there are no signers, return false
   if (!signers || signers.length === 0) return false;
   
@@ -31,8 +39,18 @@ export const areAllSignaturesDone = (signers: string[], signatures: any[]): bool
 
 // Function to get the signature status for a user
 export const getUserSignatureStatus = (
-  userEmail: string, 
-  contract: any
+  userEmail: string,
+  contract: {
+    metadata?: {
+      signers?: string[];
+    };
+    signatures?: Array<{
+      user: {
+        email: string;
+      };
+      status: 'SIGNED' | 'PENDING';
+    }>;
+  }
 ): 'SIGNED' | 'PENDING' | 'NOT_REQUIRED' => {
   const signers = contract.metadata?.signers || [];
   if (!signers.some(s => s.toLowerCase() === userEmail.toLowerCase())) {
@@ -40,8 +58,8 @@ export const getUserSignatureStatus = (
   }
   
   const signature = contract.signatures?.find(
-    (sig: any) => sig.user.email.toLowerCase() === userEmail.toLowerCase()
+    sig => sig.user.email.toLowerCase() === userEmail.toLowerCase()
   );
   
   return signature?.status === 'SIGNED' ? 'SIGNED' : 'PENDING';
-}; 
+};

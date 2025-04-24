@@ -31,7 +31,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
         userEmail: user?.email || 'none'
       }
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check if user is using the right email if required
   useEffect(() => {
@@ -54,7 +54,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
       console.log('[SignZkLoginModal] User authenticated successfully with correct email:', user.email);
       setError(null);
     }
-  }, [isAuthenticated, user?.email, requiredEmail]);
+  }, [isAuthenticated, user?.email, requiredEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Track when modal opens/closes
   useEffect(() => {
@@ -65,7 +65,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
         isLoading
       }
     });
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLoginClick = useCallback(async () => {
     try {
