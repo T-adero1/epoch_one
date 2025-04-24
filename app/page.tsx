@@ -50,8 +50,7 @@ function HomePageContent() {
     }
   }, [searchParams]);
 
-  // Log page state
-  console.log('⚡ Home Page: Rendering login screen', { isAuthenticated, isLoading });
+  
 
   // Check for JWT token in URL (from OAuth callback)
   useEffect(() => {
@@ -79,46 +78,83 @@ function HomePageContent() {
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
-    console.log('⚡ Home Page: Checking authentication state', {
-      isAuthenticated,
-      isLoading,
-      error
-    });
-    
-    if (isAuthenticated) {
-      console.log('⚡ Home Page: User authenticated, attempting to redirect to dashboard');
-      try {
-        router.push('/dashboard');
-        console.log('⚡ Home Page: Successfully initiated dashboard redirect');
-      } catch (error) {
-        console.error('⚡ Home Page: Error during dashboard redirect:', error);
+    if (isAuthenticated && !isLoading) {
+      console.log('⚡ Home Page: User authenticated, checking for existing redirects');
+      
+      // Check for the explicit redirect flag
+      const redirectInProgress = localStorage.getItem('zklogin_redirect_in_progress');
+      
+      if (redirectInProgress === 'true') {
+        console.log('⚡ Home Page: Redirect in progress from context, skipping dashboard redirect');
+        return; // Skip our redirect
       }
+      
+      // Also check for a stored redirect path as a backup
+      const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
+      
+      if (storedRedirectPath) {
+        console.log('⚡ Home Page: Found existing redirect path, skipping dashboard redirect:', storedRedirectPath);
+        return; // Skip our redirect
+      }
+      
+      // No redirect in progress, proceed with dashboard redirect
+      console.log('⚡ Home Page: No existing redirect, redirecting to dashboard');
+      router.push('/dashboard');
+      console.log('⚡ Home Page: Successfully initiated dashboard redirect');
     }
-  }, [isAuthenticated, router, error, isLoading]);
+  }, [isAuthenticated, isLoading, router]);
 
   // Handle Google login click
   const handleGoogleLoginClick = async () => {
-    console.log('⚡ Home Page: Google login button clicked');
+    console.log('[OAUTH][START] Initiating Google login flow');
     setLoginAnimation(true);
     
     try {
       // Get the nonce from Sui zkLogin
       const nonce = await startLogin();
-      console.log('⚡ Home Page: Got nonce for Google login', nonce);
+      console.log('[OAUTH][NONCE] Generated nonce:', nonce);
       
       // Google OAuth parameters
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!;
       const redirectUri = `${window.location.origin}`;
-      const scope = 'openid';
+      // Update scope to include email and profile
+      const scope = 'openid email profile';
       const responseType = 'id_token';
       
+      // Log OAuth configuration
+      console.log('[OAUTH][CONFIG] Preparing OAuth request:', {
+        clientId: googleClientId?.substring(0, 8) + '...',
+        redirectUri,
+        scope,
+        responseType,
+        hasNonce: Boolean(nonce)
+      });
+      
       // Construct Google OAuth URL with nonce
-      const googleOAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=${responseType}&nonce=${nonce}`;
+      const googleOAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      googleOAuthUrl.searchParams.append('client_id', googleClientId);
+      googleOAuthUrl.searchParams.append('redirect_uri', redirectUri);
+      googleOAuthUrl.searchParams.append('scope', scope);
+      googleOAuthUrl.searchParams.append('response_type', responseType);
+      googleOAuthUrl.searchParams.append('nonce', nonce);
+      
+      // Log the final URL (with sensitive data masked)
+      console.log('[OAUTH][URL] Generated OAuth URL:', {
+        baseUrl: googleOAuthUrl.origin + googleOAuthUrl.pathname,
+        params: {
+          client_id: '***',
+          redirect_uri: redirectUri,
+          scope,
+          response_type: responseType,
+          nonce: '***'
+        }
+      });
       
       // Redirect to Google OAuth login
-      window.location.href = googleOAuthUrl;
+      console.log('[OAUTH][REDIRECT] Redirecting to Google OAuth...');
+      window.location.href = googleOAuthUrl.toString();
     } catch (error) {
-      console.error('⚡ Home Page: Error starting login process', error);
+      console.error('[OAUTH][ERROR] Login process failed:', error);
       setStatusMessage({
         type: 'error',
         message: 'Failed to start authentication. Please try again.'
@@ -138,6 +174,9 @@ function HomePageContent() {
     }
   }, [error]);
 
+  // Log page state
+  console.log('⚡ Home Page: Rendering login screen', { isAuthenticated, isLoading });
+  
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <div className="w-full max-w-md px-6">

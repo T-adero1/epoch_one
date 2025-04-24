@@ -7,6 +7,8 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 
+/* eslint-disable react-hooks/exhaustive-deps */
+
 // Define state types
 interface User {
   address: string;
@@ -390,6 +392,19 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         zkLoginState.randomness || ''
       );
       
+      // In startLogin function:
+      const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!;
+      const redirectUri = `${window.location.origin}`;
+      const scope = 'openid email profile';
+      
+      // Add these logs
+      console.log('[OAUTH][DEBUG] Starting Google OAuth flow with params:', {
+        clientId: googleClientId,
+        redirectUri,
+        scope,
+        currentOrigin: window.location.origin
+      });
+      
       return nonce;
     } catch (error) {
       console.error('Login error:', error);
@@ -454,14 +469,83 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       // Calculate session expiry
       const expiry = Date.now() + SESSION_DURATION;
       
-      // Create user data
-      const jwtPayload = JSON.parse(atob(jwt.split('.')[1]));
+      // Add detailed JWT parsing logs
+      console.log('[JWT][DEBUG] Raw JWT received:', {
+        jwtLength: jwt.length,
+        jwtStart: jwt.substring(0, 20) + '...',
+      });
+
+      // Log JWT parts
+      const jwtParts = jwt.split('.');
+      console.log('[JWT][DEBUG] JWT structure:', {
+        numberOfParts: jwtParts.length,
+        hasHeader: Boolean(jwtParts[0]),
+        hasPayload: Boolean(jwtParts[1]),
+        hasSignature: Boolean(jwtParts[2])
+      });
+
+      // Decode and log the raw payload before parsing
+      const rawPayload = atob(jwtParts[1]);
+      console.log('[JWT][DEBUG] Raw decoded payload:', rawPayload);
+
+      // Parse and log the full payload
+      const jwtPayload = JSON.parse(rawPayload);
+      console.log('[JWT][DEBUG] Parsed JWT payload:', {
+        allFields: Object.keys(jwtPayload),
+        email: jwtPayload.email,
+        emailField: {
+          exists: 'email' in jwtPayload,
+          type: typeof jwtPayload.email,
+          value: jwtPayload.email
+        },
+        sub: jwtPayload.sub,
+        // Log other potential email fields that might be present
+        alternativeFields: {
+          mail: jwtPayload.mail,
+          userEmail: jwtPayload.userEmail,
+          emailAddress: jwtPayload.emailAddress,
+        }
+      });
+
+      // Create user data with detailed logging
       const userData: User = {
         address: userAddress,
         email: jwtPayload.email || '',
         displayName: jwtPayload.name || '',
         profilePicture: jwtPayload.picture || '',
       };
+
+      console.log('[USER][DEBUG] Created user data:', {
+        userData,
+        sourceFields: {
+          address: {
+            value: userAddress,
+            source: 'jwtToAddress calculation'
+          },
+          email: {
+            value: jwtPayload.email,
+            fallback: '',
+            final: userData.email
+          },
+          displayName: {
+            value: jwtPayload.name,
+            fallback: '',
+            final: userData.displayName
+          },
+          profilePicture: {
+            value: jwtPayload.picture,
+            fallback: '',
+            final: userData.profilePicture
+          }
+        }
+      });
+      
+      // Save user to database
+      try {
+        await saveUserToDatabase(userData);
+      } catch (saveError) {
+        console.error('Could not save user to database, but continuing login:', saveError);
+      }
       
       console.log('Dispatching login success with user data:', userData);
       
@@ -485,20 +569,77 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       // Clean up intermediate state
       localStorage.removeItem('zklogin_intermediate_state');
       
-      console.log('Login completed successfully, attempting to redirect to dashboard');
+      console.log('Login completed successfully, checking for redirect');
       console.log('Current authentication state:', {
         isAuthenticated: state.isAuthenticated,
         userAddress: state.userAddress,
         sessionExpiry: state.sessionExpiry
       });
       
-      // Redirect to dashboard
+      // Check for a stored redirect path
+      let redirectPath = '/dashboard'; // Default to dashboard
       try {
-        await router.push('/dashboard');
-        console.log('Successfully initiated dashboard redirect');
+        const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
+        console.log('Found stored redirect path:', storedRedirectPath);
+        
+        if (storedRedirectPath) {
+          // Use the stored path
+          redirectPath = storedRedirectPath;
+          
+          // Set a flag to prevent homepage from redirecting
+          localStorage.setItem('zklogin_redirect_in_progress', 'true');
+          
+          // Clear the redirect path after using it
+          localStorage.removeItem('zkLoginRedirectPath');
+        }
+        
+        // Check if there was a pending signature
+        const pendingContractId = localStorage.getItem('pendingSignatureContractId');
+        if (pendingContractId) {
+          console.log('Found pending contract ID:', pendingContractId);
+          // If we're not already redirecting to sign/[contractId], update redirect path
+          if (!redirectPath.includes(`/sign/${pendingContractId}`)) {
+            redirectPath = `/sign/${pendingContractId}`;
+            
+            // Set a flag to prevent homepage from redirecting
+            localStorage.setItem('zklogin_redirect_in_progress', 'true');
+          }
+          // Clear the stored contract ID
+          localStorage.removeItem('pendingSignatureContractId');
+        }
+        
+        console.log('Redirecting user to:', redirectPath);
+        await router.push(redirectPath);
+        console.log('Successfully initiated redirect to:', redirectPath);
+        
+        // After a short delay, remove the flag
+        setTimeout(() => {
+          localStorage.removeItem('zklogin_redirect_in_progress');
+        }, 3000);
       } catch (error) {
-        console.error('Error during dashboard redirect:', error);
+        console.error('Error during redirect:', error);
+        // Clean up the flag on error
+        localStorage.removeItem('zklogin_redirect_in_progress');
       }
+
+      // In completeLogin function, after decoding JWT:
+      // Analyze JWT structure and contents
+      console.log('[JWT][FULL_DEBUG] Complete JWT analysis:', {
+        header: JSON.parse(atob(jwt.split('.')[0])),
+        payload: {
+          raw: atob(jwt.split('.')[1]),
+          parsed: JSON.parse(atob(jwt.split('.')[1])),
+          scopes: jwt.split('.')[1].includes('scope') ? JSON.parse(atob(jwt.split('.')[1])).scope : 'no scope found',
+          claims: {
+            sub: JSON.parse(atob(jwt.split('.')[1])).sub,
+            email: JSON.parse(atob(jwt.split('.')[1])).email,
+            email_verified: JSON.parse(atob(jwt.split('.')[1])).email_verified,
+            name: JSON.parse(atob(jwt.split('.')[1])).name,
+            picture: JSON.parse(atob(jwt.split('.')[1])).picture,
+          }
+        },
+        hasSignature: Boolean(jwt.split('.')[2])
+      });
     } catch (error) {
       console.error('Login completion error:', error);
       // Clean up any partial state
@@ -585,6 +726,43 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       }));
     }
   }, [state.isAuthenticated, state.user]);
+
+  // Add this new function in the ZkLoginProvider component:
+  const saveUserToDatabase = async (userData: User) => {
+    try {
+      console.log('Saving user to database:', userData);
+      
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: userData.email,
+          walletAddress: userData.address,
+          name: userData.displayName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to save user to database:', {
+          status: response.status,
+          error: errorText
+        });
+        throw new Error(`Failed to save user to database: ${response.status} ${errorText}`);
+      }
+
+      const savedUser = await response.json();
+      console.log('User saved to database successfully:', savedUser);
+      return savedUser;
+    } catch (error) {
+      console.error('Error during user saving:', error);
+      // We don't want to fail login if user saving fails
+      // Just log the error and continue
+      return null;
+    }
+  };
 
   // Context value with state and actions
   const value: ZkLoginContextType = {

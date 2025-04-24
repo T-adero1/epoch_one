@@ -1,0 +1,81 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  walletAddress String    @unique
+  name          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  contracts     Contract[] @relation("ContractOwner")
+  signatures    Signature[]
+  settings      UserSettings?
+}
+
+model UserSettings {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id])
+  theme         String    @default("light")
+  notifications Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Contract {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  content     String      // Contract content (draft text, trimmed after Walrus upload)
+  status      ContractStatus @default(DRAFT)
+  ownerId     String
+  owner       User        @relation("ContractOwner", fields: [ownerId], references: [id])
+  signatures  Signature[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  expiresAt   DateTime?
+  metadata    Json?       // Additional contract metadata
+}
+
+model Signature {
+  id          String    @id @default(cuid())
+  contractId  String
+  contract    Contract  @relation(fields: [contractId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  signedAt    DateTime?
+  status      SignatureStatus @default(PENDING)
+  walletAddress String
+  signature   String?   // Actual signature data or hash
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING
+  ACTIVE
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum SignatureStatus {
+  PENDING
+  SIGNED
+  REJECTED
+  EXPIRED
+}
