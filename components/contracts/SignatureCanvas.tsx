@@ -12,8 +12,59 @@ interface SignatureProps {
 
 export default function SignatureDrawingCanvas({ onSave, disabled = false }: SignatureProps) {
   const sigCanvas = useRef<SignatureCanvas>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [isEmpty, setIsEmpty] = useState(true)
   const [signatureSaved, setSignatureSaved] = useState(false)
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
+
+  // Handle resizing and canvas dimensions
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const { offsetWidth, offsetHeight } = containerRef.current;
+        
+        // Set dimensions for the canvas
+        setDimensions({
+          width: offsetWidth,
+          height: offsetHeight
+        });
+      }
+    };
+
+    // Initial calculation
+    updateDimensions();
+    
+    // Recalculate on window resize
+    window.addEventListener('resize', updateDimensions);
+    
+    return () => {
+      window.removeEventListener('resize', updateDimensions);
+    };
+  }, []);
+
+  // Manually fix the canvas scaling when dimensions change
+  useEffect(() => {
+    if (dimensions.width > 0 && dimensions.height > 0 && sigCanvas.current) {
+      const canvas = sigCanvas.current.getCanvas();
+      
+      // Clear any existing content
+      sigCanvas.current.clear();
+      setIsEmpty(true);
+      
+      // Set the canvas dimensions to match the container
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+      
+      // Reset the transformation matrix
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+      
+      // Apply any necessary scaling
+      sigCanvas.current.fromData([]);
+    }
+  }, [dimensions]);
 
   // Disable the signature pad when the disabled prop is true
   useEffect(() => {
@@ -53,19 +104,30 @@ export default function SignatureDrawingCanvas({ onSave, disabled = false }: Sig
       </div>
       
       <div 
+        ref={containerRef}
         className={`border-2 ${disabled ? 'bg-gray-50' : 'bg-white'} border-dashed border-gray-300 rounded-md`}
-        style={disabled ? { pointerEvents: 'none' } : {}}
+        style={{ 
+          height: '200px',
+          position: 'relative',
+          pointerEvents: disabled ? 'none' : 'auto' 
+        }}
       >
-        <SignatureCanvas
-          ref={sigCanvas}
-          penColor='black'
-          canvasProps={{
-            width: 500,
-            height: 200,
-            className: 'signature-canvas w-full'
-          }}
-          onBegin={handleBegin}
-        />
+        {dimensions.width > 0 && (
+          <SignatureCanvas
+            ref={sigCanvas}
+            penColor='black'
+            canvasProps={{
+              width: dimensions.width,
+              height: dimensions.height,
+              style: {
+                width: '100%',
+                height: '100%',
+                touchAction: 'none'
+              }
+            }}
+            onBegin={handleBegin}
+          />
+        )}
       </div>
       
       {disabled && (

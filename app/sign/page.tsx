@@ -117,14 +117,20 @@ export default function SignPage() {
       <div className="container mx-auto p-6 max-w-4xl">
         <Card>
           <CardHeader>
-            <Skeleton className="h-8 w-64 mb-2" />
-            <Skeleton className="h-4 w-48" />
+            <CardTitle className="text-2xl">Documents Awaiting Your Signature</CardTitle>
+            <CardDescription>
+              The following documents have been shared with you for signature
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {[1, 2, 3].map(i => (
-                <Skeleton key={i} className="h-24 w-full" />
-              ))}
+            <div className="opacity-40 pointer-events-none">
+              <div className="text-center py-12 border rounded-md bg-gray-50">
+                <FileSignature className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                <p className="text-gray-500 font-medium mb-1">Loading documents...</p>
+                <p className="text-sm text-gray-400">
+                  Please wait while we retrieve your documents
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

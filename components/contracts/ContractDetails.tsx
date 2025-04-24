@@ -7,7 +7,8 @@ import {
   CardContent, 
   CardDescription, 
   CardHeader, 
-  CardTitle 
+  CardTitle,
+  CardFooter
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -123,20 +124,6 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
               </CardTitle>
               <CardDescription>{contract.description}</CardDescription>
             </div>
-          </div>
-          <div className="flex gap-2">
-            {contract.status === ContractStatus.DRAFT && (
-              <>
-                <Button variant="outline" onClick={() => setIsEditing(true)}>
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit
-                </Button>
-                <Button>
-                  <Send className="h-4 w-4 mr-2" />
-                  Send for Signature
-                </Button>
-              </>
-            )}
           </div>
         </div>
       </CardHeader>
@@ -271,6 +258,19 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
           </TabsContent>
         </Tabs>
       </CardContent>
+      
+      {contract.status === ContractStatus.DRAFT && (
+        <CardFooter className="flex justify-end gap-2 pt-4 border-t">
+          <Button variant="outline" onClick={() => setIsEditing(true)}>
+            <Edit className="h-4 w-4 mr-2" />
+            Edit
+          </Button>
+          <Button className="bg-blue-600 hover:bg-blue-700">
+            <Send className="h-4 w-4 mr-2" />
+            Send for Signature
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 } 

@@ -235,24 +235,47 @@ export default function DashboardPage() {
     return matches;
   });
 
+  // Show loading state
   if (isLoading) {
     return (
-      <div className="container mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-8">Loading Dashboard</h1>
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <Skeleton className="h-8 w-3/4 mb-2" />
-              <Skeleton className="h-4 w-1/2" />
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <Skeleton className="h-6 w-full" />
-                <Skeleton className="h-6 w-full" />
-                <Skeleton className="h-6 w-full" />
+      <div className="container mx-auto py-6 px-4 md:px-6 flex-1">
+        <div className="flex min-h-screen">
+          {/* Main content area */}
+          <main className="flex-1">
+            {/* Skip loading text and just render the UI with opacity */}
+            <div className="opacity-50 pointer-events-none">
+              <div className="flex justify-between items-center mb-6">
+                <h1 className="text-3xl font-bold">Dashboard</h1>
               </div>
-            </CardContent>
-          </Card>
+              
+              <div className="grid gap-6 md:grid-cols-3 mb-6">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">-</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">-</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">-</div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </main>
         </div>
       </div>
     );

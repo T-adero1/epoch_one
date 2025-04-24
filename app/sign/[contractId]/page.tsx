@@ -289,13 +289,45 @@ export default function ContractSigningPage() {
       <div className="container mx-auto p-6 max-w-4xl">
         <Card>
           <CardHeader>
-            <CardTitle>Loading Contract...</CardTitle>
+            <CardTitle>Contract</CardTitle>
           </CardHeader>
-          <CardContent className="min-h-[500px] flex items-center justify-center">
-            <div className="animate-pulse flex flex-col items-center">
-              <div className="rounded-full bg-slate-200 h-16 w-16 mb-4"></div>
-              <div className="h-4 bg-slate-200 rounded w-32 mb-2"></div>
-              <div className="h-4 bg-slate-200 rounded w-24"></div>
+          <CardContent className="min-h-[500px]">
+            <div className="opacity-40">
+              <div className="border rounded-md p-6 bg-gray-50 mb-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-lg font-medium">Contract Details</h3>
+                </div>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-500">Created By:</span>
+                      <p className="h-4 bg-slate-200 rounded w-32 mb-2"></p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-500">Created On:</span>
+                      <p className="h-4 bg-slate-200 rounded w-24"></p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-500">Status:</span>
+                      <p className="h-4 bg-slate-200 rounded w-24"></p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-500">Signers:</span>
+                      <p className="h-4 bg-slate-200 rounded w-24"></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="border rounded-md p-6">
+                <div className="prose max-w-none">
+                  <h3 className="text-lg font-medium mb-4">Contract Content</h3>
+                  <div className="h-4 bg-slate-200 rounded w-full mb-2"></div>
+                  <div className="h-4 bg-slate-200 rounded w-full mb-2"></div>
+                  <div className="h-4 bg-slate-200 rounded w-3/4 mb-2"></div>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

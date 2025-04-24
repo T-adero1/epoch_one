@@ -9,12 +9,26 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { MoreVertical, Copy, Pencil, Trash2, Send, FileText } from 'lucide-react'
+import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText } from 'lucide-react'
 import { ContractStatus } from '@prisma/client'
+import { generateContractPDF } from '@/app/utils/pdf'
+import { useToast } from '@/components/ui/use-toast'
 
 interface ContractActionsProps {
   contractId: string
   status: ContractStatus
+  contract?: {
+    id: string;
+    title: string;
+    description?: string | null;
+    content: string;
+    createdAt: Date;
+    status: string;
+    ownerId: string;
+    metadata?: {
+      signers?: string[];
+    } | null;
+  }
   onView: () => void
   onEdit: () => void
   onDelete: () => void
@@ -22,12 +36,128 @@ interface ContractActionsProps {
 }
 
 export default function ContractActions({ 
+  contractId,
   status, 
+  contract,
   onView, 
   onEdit, 
   onDelete, 
   onSend 
 }: ContractActionsProps) {
+  const { toast } = useToast();
+
+  const handleDownloadPDF = async () => {
+    try {
+      console.log('Download PDF - Contract object:', contract);
+      console.log('Download PDF - Contract ID:', contractId);
+      
+      // Show preparing toast and create a reference to it
+      toast({
+        title: "Preparing PDF",
+        description: "Your contract is being converted to PDF...",
+      });
+      
+      // If contract is not provided, we'll create a minimal one using the contractId
+      if (!contract) {
+        console.warn('Contract object not provided, attempting to fetch from API...');
+        
+        try {
+          // Fetch contract data from API
+          const response = await fetch(`/api/contracts/${contractId}`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch contract: ${response.status}`);
+          }
+          
+          const contractData = await response.json();
+          console.log('Successfully fetched contract data:', contractData);
+          
+          // Use the fetched data for PDF generation
+          await generateContractFromData(contractData);
+        } catch (fetchError) {
+          console.error('Error fetching contract data:', fetchError);
+          toast({
+            title: "Download Failed",
+            description: "Could not retrieve contract data. Please try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+      } else {
+        // Check if necessary properties exist
+        if (!contract.title || !contract.content) {
+          console.error('Contract missing required properties:', {
+            hasTitle: Boolean(contract.title),
+            hasContent: Boolean(contract.content),
+            hasCreatedAt: Boolean(contract.createdAt)
+          });
+          
+          toast({
+            title: "Download Failed",
+            description: "Contract is missing required information for PDF generation.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        try {
+          await generateContractPDF(contract);
+          
+          toast({
+            title: "PDF Downloaded",
+            description: "Your contract has been downloaded as a PDF file.",
+            variant: "success",
+          });
+        } catch (error) {
+          console.error('Error generating PDF:', error);
+          toast({
+            title: "Download Failed",
+            description: "There was a problem generating the PDF. Please try again.",
+            variant: "destructive",
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      toast({
+        title: "Download Failed",
+        description: "There was a problem generating the PDF. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+  
+  // Helper function to generate PDF from fetched data
+  const generateContractFromData = async (contractData: any) => {
+    try {
+      await generateContractPDF({
+        id: contractData.id,
+        title: contractData.title,
+        description: contractData.description,
+        content: contractData.content,
+        createdAt: new Date(contractData.createdAt),
+        status: contractData.status,
+        ownerId: contractData.ownerId,
+        metadata: contractData.metadata
+      });
+      
+      toast({
+        title: "PDF Downloaded",
+        description: "Your contract has been downloaded as a PDF file.",
+        variant: "success",
+      });
+    } catch (error) {
+      console.error('Error generating PDF from fetched data:', error);
+      
+      toast({
+        title: "Download Failed",
+        description: "There was a problem generating the PDF. Please try again.",
+        variant: "destructive",
+      });
+      
+      throw error;
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -57,9 +187,9 @@ export default function ContractActions({
           </>
         )}
         
-        <DropdownMenuItem className="cursor-pointer">
-          <Copy className="mr-2 h-4 w-4" />
-          <span>Duplicate</span>
+        <DropdownMenuItem onClick={handleDownloadPDF} className="cursor-pointer">
+          <FileDown className="mr-2 h-4 w-4" />
+          <span>Download as PDF</span>
         </DropdownMenuItem>
         
         <DropdownMenuSeparator />

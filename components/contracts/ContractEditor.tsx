@@ -213,14 +213,38 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                   </div>
                 ))}
                 
-                <Button
-                  variant="outline"
-                  onClick={handleAddSigner}
-                  className="mt-4"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Another Signer
-                </Button>
+                <div className="flex items-center gap-28 mt-4">
+                  <Button
+                    variant="outline"
+                    onClick={handleAddSigner}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Another Signer
+                  </Button>
+                  
+                  {contract.status === 'DRAFT' && (
+                    <Button 
+                      onClick={async () => {
+                        // First save any changes
+                        if (hasChanges) {
+                          await handleSave();
+                        }
+                        
+                        // Then update status to PENDING
+                        const updatedContract = await updateContract(contract.id, {
+                          status: 'PENDING'
+                        });
+                        
+                        onSave(updatedContract);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700"
+                      disabled={signers.filter(s => s.trim() !== '').length === 0}
+                    >
+                      <Send className="h-4 w-4 mr-2" />
+                      Send for Signatures
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </TabsContent>
@@ -243,27 +267,6 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
             <Save className="h-4 w-4 mr-2" />
             Save Changes
           </Button>
-          {contract.status === 'DRAFT' && (
-            <Button 
-              onClick={async () => {
-                // First save any changes
-                if (hasChanges) {
-                  await handleSave();
-                }
-                
-                // Then update status to PENDING
-                const updatedContract = await updateContract(contract.id, {
-                  status: 'PENDING'
-                });
-                
-                onSave(updatedContract);
-              }}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <Send className="h-4 w-4 mr-2" />
-              Send for Signatures
-            </Button>
-          )}
         </div>
       </CardFooter>
     </Card>
