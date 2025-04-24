@@ -454,7 +454,7 @@ export default function DashboardPage() {
                 {filteredContracts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                      No contracts found. Create your first contract by clicking the "New Contract" button.
+                      No contracts found. Create your first contract by clicking the &quot;New Contract&quot; button.
                     </TableCell>
                   </TableRow>
                 ) : (
