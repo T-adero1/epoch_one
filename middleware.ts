@@ -15,7 +15,7 @@ export function middleware(request: NextRequest) {
                        path.startsWith('/api/');
 
   // For client-side routes, we'll let the client-side auth guard handle it
-  if (path.startsWith('/dashboard')) {
+  if (path.startsWith('/dashboard') || path.startsWith('/sign')) {
     return NextResponse.next();
   }
 
