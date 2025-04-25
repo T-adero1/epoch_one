@@ -498,9 +498,20 @@ export default function DashboardPage() {
                             contract.status === 'EXPIRED' ? 'bg-gray-500' : 
                             'bg-red-500'
                           }`}></span>
-                          <span>
-                            {contract.status.charAt(0) + contract.status.slice(1).toLowerCase()}
-                          </span>
+                          {contract.status === 'ACTIVE' && 
+                           (contract.ownerId === user?.id || contract.owner?.email === user?.email) && 
+                           !contract.signatures?.some(sig => 
+                             (sig.userId === contract.ownerId || 
+                              sig.user?.id === user?.id || 
+                              sig.user?.email === user?.email) && 
+                             sig.status === 'SIGNED'
+                           ) ? (
+                            <span className="text-green-600 font-medium">Ready for Your Signature</span>
+                          ) : (
+                            <span>
+                              {contract.status.charAt(0) + contract.status.slice(1).toLowerCase()}
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-gray-600">

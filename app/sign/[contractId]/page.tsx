@@ -138,7 +138,7 @@ export default function ContractSigningPage() {
           contractSigners: signerEmails 
         })
         
-        const userCanSign = canUserSignContract(user.email, signerEmails)
+        const userCanSign = canUserSignContract(user.email, signerEmails, contractData)
         console.log('[ContractSigning] User can sign:', userCanSign)
         setCanSign(userCanSign)
         

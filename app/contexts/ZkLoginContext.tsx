@@ -15,6 +15,7 @@ interface User {
   email?: string;
   displayName?: string;
   profilePicture?: string;
+  id?: string;
 }
 
 interface ZkLoginState {
@@ -595,7 +596,11 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Save user to database
       try {
-        await saveUserToDatabase(userData);
+        const savedUser = await saveUserToDatabase(userData);
+        if (savedUser && savedUser.id) {
+          // Update userData with the database ID
+          userData.id = savedUser.id;
+        }
       } catch (saveError) {
         console.error('Could not save user to database, but continuing login:', saveError);
       }
@@ -808,6 +813,10 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
 
       const savedUser = await response.json();
       console.log('User saved to database successfully:', savedUser);
+      
+      // Update the user data with the ID from the database
+      userData.id = savedUser.id;
+      
       return savedUser;
     } catch (error) {
       console.error('Error during user saving:', error);

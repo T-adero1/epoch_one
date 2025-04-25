@@ -26,6 +26,7 @@ import { ContractStatus, SignatureStatus } from '@prisma/client'
 import ContractEditor from './ContractEditor'
 import { Avatar, AvatarFallback} from '@/components/ui/avatar'
 import { generateSigningLink, areAllSignaturesDone } from '@/app/utils/signatures'
+import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 
 // Define interface for the contract used in this component
 interface ContractSignature {
@@ -69,6 +70,7 @@ interface ContractDetailsProps {
 export default function ContractDetails({ contract, onBack, onUpdate }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
+  const { user } = useZkLogin();
   
   const handleSave = (updatedContract: Contract) => {
     setIsEditing(false)
@@ -102,9 +104,40 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
       CANCELLED: 'bg-red-100 text-red-800',
     };
 
+    console.log('Contract Details Debug:', {
+      contractId: contract.id,
+      status: contract.status,
+      ownerId: contract.ownerId,
+      userId: user?.id,
+      isOwner: contract.ownerId === user?.id,
+      hasSignatures: contract.signatures?.length > 0,
+      ownerHasSigned: contract.signatures?.some(sig => 
+        sig.userId === contract.ownerId && 
+        sig.status === 'SIGNED'
+      ),
+      condition: contract.status === 'ACTIVE' && 
+                 contract.ownerId === user?.id && 
+                 !contract.signatures?.some(sig => 
+                   sig.userId === contract.ownerId && 
+                   sig.status === 'SIGNED'
+                 )
+    });
+
     return (
       <Badge className={variants[status]}>
-        {status.charAt(0) + status.slice(1).toLowerCase()}
+        {/* Check if contract is ready for owner's signature */}
+        {contract.status === 'ACTIVE' && 
+         contract.ownerId === user?.id && 
+         !contract.signatures?.some(sig => 
+           sig.userId === contract.ownerId && 
+           sig.status === 'SIGNED'
+         ) ? (
+          <span className="text-green-600 font-medium">Ready for Your Signature</span>
+        ) : (
+          <span>
+            {status.charAt(0) + status.slice(1).toLowerCase()}
+          </span>
+        )}
       </Badge>
     );
   };

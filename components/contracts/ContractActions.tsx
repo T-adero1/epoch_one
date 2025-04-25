@@ -9,10 +9,12 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText } from 'lucide-react'
+import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText, FileSignature } from 'lucide-react'
 import { ContractStatus } from '@prisma/client'
 import { generateContractPDF } from '@/app/utils/pdf'
 import { useToast } from '@/components/ui/use-toast'
+import { generateSigningLink } from '@/app/utils/signatures'
+import { useRouter } from 'next/navigation'
 
 interface ContractActionsProps {
   contractId: string
@@ -45,6 +47,7 @@ export default function ContractActions({
   onSend 
 }: ContractActionsProps) {
   const { toast } = useToast();
+  const router = useRouter();
 
   const handleDownloadPDF = async () => {
     try {
@@ -158,6 +161,10 @@ export default function ContractActions({
     }
   };
 
+  const handleSignContract = () => {
+    router.push(`/sign/${contractId}`);
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -185,6 +192,13 @@ export default function ContractActions({
               <span>Send for Signature</span>
             </DropdownMenuItem>
           </>
+        )}
+        
+        {(status === ContractStatus.ACTIVE || status === ContractStatus.PENDING) && (
+          <DropdownMenuItem onClick={handleSignContract} className="cursor-pointer">
+            <FileSignature className="mr-2 h-4 w-4" />
+            <span>Sign Contract</span>
+          </DropdownMenuItem>
         )}
         
         <DropdownMenuItem onClick={handleDownloadPDF} className="cursor-pointer">

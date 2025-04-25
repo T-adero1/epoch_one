@@ -288,16 +288,47 @@ export async function DELETE(request: Request) {
       );
     }
 
+    // Check if the contract exists
+    const contractExists = await prisma.contract.findUnique({
+      where: { id },
+      select: { id: true }
+    });
+
+    if (!contractExists) {
+      log.warn('Contract not found for deletion', { contractId: id });
+      return NextResponse.json(
+        { error: 'Contract not found' },
+        { status: 404 }
+      );
+    }
+
+    // Use a transaction to delete signatures first, then the contract
     await withTransaction(async (tx) => {
+      // First delete all associated signatures
+      log.info('Deleting associated signatures for contract', { contractId: id });
+      const deleteSignatures = await tx.signature.deleteMany({
+        where: { contractId: id }
+      });
+      
+      log.info('Deleted signatures', { 
+        contractId: id, 
+        count: deleteSignatures.count 
+      });
+
+      // Then delete the contract
       await tx.contract.delete({
-        where: { id },
+        where: { id }
       });
     });
 
-    log.info('Successfully deleted contract', { contractId: id });
+    log.info('Successfully deleted contract and associated signatures', { contractId: id });
     return NextResponse.json({ success: true });
   } catch (error) {
-    log.error('Error deleting contract', error);
+    log.error('Error deleting contract', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      contractId: searchParams.get('id')
+    });
     return NextResponse.json(
       { error: 'Failed to delete contract' },
       { status: 500 }

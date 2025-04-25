@@ -54,11 +54,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find contract
+    // Find contract - make sure to include the owner details
     log.debug('Finding contract for signature', { contractId });
     const contract = await prisma.contract.findUnique({
       where: { id: contractId },
       include: {
+        owner: true, // Include owner details for authorization check
         signatures: {
           include: {
             user: true
@@ -79,7 +80,8 @@ export async function POST(request: Request) {
       contractId, 
       title: contract.title,
       status: contract.status,
-      ownerEmail: contract.ownerId,
+      ownerId: contract.ownerId,
+      ownerEmail: contract.owner?.email,
       existingSignatures: contract.signatures.length
     });
 
@@ -89,14 +91,28 @@ export async function POST(request: Request) {
     log.debug('Contract signers for authorization check', { 
       contractId, 
       signers,
-      userEmail: userEmail.toLowerCase()  
+      userEmail: userEmail.toLowerCase(),
+      contractStatus: contract.status,
+      isOwner: contract.owner?.email?.toLowerCase() === userEmail.toLowerCase()
     });
     
-    if (!signers.includes(userEmail.toLowerCase())) {
+    // Allow signing if:
+    // 1. User is a designated signer, OR
+    // 2. User is the contract owner AND all external signers have signed (status = ACTIVE)
+    const isInSignersList = signers.some(signer => 
+      signer.toLowerCase() === userEmail.toLowerCase()
+    );
+    
+    const isContractOwner = contract.owner?.email?.toLowerCase() === userEmail.toLowerCase();
+    const isContractActive = contract.status === 'ACTIVE';
+    
+    if (!isInSignersList && !(isContractOwner && isContractActive)) {
       log.error('User not authorized to sign contract', { 
         userEmail, 
         contractId,
-        authorizedSigners: signers
+        authorizedSigners: signers,
+        isOwner: isContractOwner,
+        contractStatus: contract.status
       });
       return NextResponse.json(
         { error: 'User not authorized to sign this contract' },
@@ -205,17 +221,38 @@ export async function POST(request: Request) {
       )
     );
 
+    const ownerHasSigned = isContractOwner;
+
     if (allSignersSigned) {
-      log.info('All signatures collected, updating contract status to COMPLETED', { 
-        contractId,
-        previousStatus: contract.status,
-        newStatus: 'COMPLETED'
-      });
-      
-      await prisma.contract.update({
-        where: { id: contractId },
-        data: { status: 'COMPLETED' },
-      });
+      if (ownerHasSigned) {
+        // Both signers and owner have signed - Mark as COMPLETED
+        log.info('All signatures collected including owner, updating contract status to COMPLETED', { 
+          contractId,
+          previousStatus: contract.status,
+          newStatus: 'COMPLETED'
+        });
+        
+        await prisma.contract.update({
+          where: { id: contractId },
+          data: {
+            status: 'COMPLETED',
+          },
+        });
+      } else if (contract.status !== 'ACTIVE') {
+        // All external signers have signed, but owner hasn't - Mark as ACTIVE
+        log.info('All external signers have signed, waiting for owner signature', { 
+          contractId,
+          previousStatus: contract.status,
+          newStatus: 'ACTIVE'
+        });
+        
+        await prisma.contract.update({
+          where: { id: contractId },
+          data: {
+            status: 'ACTIVE',
+          },
+        });
+      }
     } else if (contract.status === 'DRAFT') {
       log.info('First signature collected, updating contract status to PENDING', {
         contractId,

@@ -5,11 +5,36 @@ export const generateSigningLink = (contractId: string): string => {
 };
 
 // Function to check if a user can sign a contract
-export const canUserSignContract = (signerEmail: string, contractSigners: string[]): boolean => {
-  if (!signerEmail || !contractSigners || contractSigners.length === 0) return false;
-  return contractSigners.some(signer => 
-    signer.toLowerCase() === signerEmail.toLowerCase()
-  );
+export const canUserSignContract = (userEmail: string, contractSigners: string[], contract?: any): boolean => {
+  if (!userEmail) return false;
+  
+  // Always allow if the user is in the signers list
+  if (contractSigners && contractSigners.length > 0) {
+    const isInSignersList = contractSigners.some(signer => 
+      signer.toLowerCase() === userEmail.toLowerCase()
+    );
+    
+    if (isInSignersList) {
+      return true;
+    }
+  }
+  
+  // If user is not in signers list, check if they're the contract owner
+  // and if the contract is in ACTIVE status (meaning all signers have signed)
+  if (contract && contract.ownerId && contract.status === 'ACTIVE') {
+    // Check if user's email matches the contract owner's email
+    if (contract.owner && contract.owner.email && 
+        contract.owner.email.toLowerCase() === userEmail.toLowerCase()) {
+      return true;
+    }
+    
+    // Alternative check if we only have ownerId but not the owner object
+    if (contract.ownerId === userEmail) {
+      return true;
+    }
+  }
+  
+  return false;
 };
 
 // Function to check if all signatures are collected
@@ -41,6 +66,8 @@ export const areAllSignaturesDone = (
 export const getUserSignatureStatus = (
   userEmail: string,
   contract: {
+    ownerId?: string;
+    status?: string;
     metadata?: {
       signers?: string[];
     };
@@ -50,16 +77,35 @@ export const getUserSignatureStatus = (
       };
       status: 'SIGNED' | 'PENDING';
     }>;
+    owner?: {
+      email?: string;
+    };
   }
 ): 'SIGNED' | 'PENDING' | 'NOT_REQUIRED' => {
   const signers = contract.metadata?.signers || [];
-  if (!signers.some(s => s.toLowerCase() === userEmail.toLowerCase())) {
-    return 'NOT_REQUIRED';
+  
+  // Check if user is a designated signer
+  const isDesignatedSigner = signers.some(s => s.toLowerCase() === userEmail.toLowerCase());
+  
+  if (isDesignatedSigner) {
+    const signature = contract.signatures?.find(
+      sig => sig.user.email.toLowerCase() === userEmail.toLowerCase()
+    );
+    
+    return signature?.status === 'SIGNED' ? 'SIGNED' : 'PENDING';
   }
   
-  const signature = contract.signatures?.find(
-    sig => sig.user.email.toLowerCase() === userEmail.toLowerCase()
-  );
+  // Check if user is the contract owner and contract is in ACTIVE status
+  const isOwner = (contract.owner?.email?.toLowerCase() === userEmail.toLowerCase()) ||
+                 (contract.ownerId === userEmail);
+                 
+  if (isOwner && contract.status === 'ACTIVE') {
+    const signature = contract.signatures?.find(
+      sig => sig.user.email.toLowerCase() === userEmail.toLowerCase()
+    );
+    
+    return signature?.status === 'SIGNED' ? 'SIGNED' : 'PENDING';
+  }
   
-  return signature?.status === 'SIGNED' ? 'SIGNED' : 'PENDING';
+  return 'NOT_REQUIRED';
 };
