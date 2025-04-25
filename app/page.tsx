@@ -210,25 +210,27 @@ function HomePageContent() {
       const endTimer = perf.start('check_authentication_redirect');
       console.log('[PAGE:REDIRECT] User authenticated, checking for existing redirects');
       
-      // Check for the explicit redirect flag
-      const redirectInProgress = localStorage.getItem('zklogin_redirect_in_progress');
-      
-      if (redirectInProgress === 'true') {
-        console.log('[PAGE:REDIRECT] Redirect in progress from context, skipping dashboard redirect');
-        endTimer();
-        return; // Skip our redirect
-      }
-      
-      // Also check for a stored redirect path as a backup
+      // Check for the stored redirect path first
       const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
       
       if (storedRedirectPath) {
-        console.log('[PAGE:REDIRECT] Found existing redirect path, skipping dashboard redirect:', storedRedirectPath);
+        console.log('[PAGE:REDIRECT] Found redirect path, redirecting to:', storedRedirectPath);
+        
+        // Clear the redirect flags before navigating
+        localStorage.removeItem('zkLoginRedirectPath');
+        localStorage.removeItem('zklogin_redirect_in_progress');
+        
+        // Actually perform the redirect to the signing page
+        const pushTimer = perf.start('router_push_redirect');
+        router.push(storedRedirectPath);
+        pushTimer();
+        
+        console.log('[PAGE:REDIRECT] Successfully initiated redirect to stored path');
         endTimer();
-        return; // Skip our redirect
+        return;
       }
       
-      // No redirect in progress, proceed with dashboard redirect
+      // Default fallback - go to dashboard if no specific redirect
       console.log('[PAGE:REDIRECT] No existing redirect, redirecting to dashboard');
       const pushTimer = perf.start('router_push_dashboard');
       router.push('/dashboard');

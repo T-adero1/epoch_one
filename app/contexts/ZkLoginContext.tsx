@@ -845,9 +845,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Clean up intermediate state
       localStorage.removeItem('zklogin_intermediate_state');
-      
-      // Handle redirect (existing code)
-      // ...
+
 
       performanceTracker.end('completeLogin');
     } catch (error) {
