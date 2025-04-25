@@ -13,7 +13,7 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X,  Plus, Trash2, User, Send } from 'lucide-react'
+import { Save, X,  Plus, Trash2, User, Send, ChevronLeft } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 
 
@@ -142,28 +142,28 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-xl font-semibold">
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="text-xl font-semibold border-none p-0 h-auto focus-visible:ring-0"
-                placeholder="Contract Title"
-              />
-            </CardTitle>
-            <CardDescription>
-              <Input
-                value={description || ''}
-                onChange={(e) => setDescription(e.target.value)}
-                className="text-sm text-gray-500 border-none p-0 h-auto focus-visible:ring-0"
-                placeholder="Contract Description"
-              />
-            </CardDescription>
-          </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={onCancel}>
-              <X className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" />
             </Button>
+            <div>
+              <CardTitle className="text-xl font-semibold">
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="text-xl font-semibold border-none p-0 h-auto focus-visible:ring-0"
+                  placeholder="Contract Title"
+                />
+              </CardTitle>
+              <CardDescription>
+                <Input
+                  value={description || ''}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="text-sm text-gray-500 border-none p-0 h-auto focus-visible:ring-0"
+                  placeholder="Contract Description"
+                />
+              </CardDescription>
+            </div>
           </div>
         </div>
       </CardHeader>
@@ -175,12 +175,14 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
             
           </TabsList>
           <TabsContent value="edit" className="min-h-[500px]">
-            <Textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="min-h-[500px] resize-none p-4 font-mono text-sm"
-              placeholder="Write your contract content here..."
-            />
+            <div className="border rounded-md min-h-[500px] bg-white">
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className="min-h-[500px] resize-none p-6 font-mono text-sm w-full border-none focus-visible:ring-0 focus:outline-none"
+                placeholder="Write your contract content here..."
+              />
+            </div>
           </TabsContent>
           <TabsContent value="signers" className="min-h-[500px]">
             <div className="border rounded-md p-6 min-h-[500px] bg-white">
@@ -251,7 +253,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           
         </Tabs>
       </CardContent>
-      <CardFooter className="flex justify-between pt-4">
+      <CardFooter className="flex justify-between pt-4 border-t">
         <div className="text-sm text-gray-500">
           {hasChanges ? 'Unsaved changes' : 'No changes'}
         </div>
@@ -261,8 +263,8 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           </Button>
           <Button 
             onClick={handleSave} 
-            disabled={!hasChanges} 
-            className={!hasChanges ? 'opacity-50 cursor-not-allowed' : ''}
+            disabled={!hasChanges}
+            className={!hasChanges ? 'opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}
           >
             <Save className="h-4 w-4 mr-2" />
             Save Changes

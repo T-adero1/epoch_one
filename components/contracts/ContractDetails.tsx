@@ -104,28 +104,8 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
       CANCELLED: 'bg-red-100 text-red-800',
     };
 
-    console.log('Contract Details Debug:', {
-      contractId: contract.id,
-      status: contract.status,
-      ownerId: contract.ownerId,
-      userId: user?.id,
-      isOwner: contract.ownerId === user?.id,
-      hasSignatures: contract.signatures?.length > 0,
-      ownerHasSigned: contract.signatures?.some(sig => 
-        sig.userId === contract.ownerId && 
-        sig.status === 'SIGNED'
-      ),
-      condition: contract.status === 'ACTIVE' && 
-                 contract.ownerId === user?.id && 
-                 !contract.signatures?.some(sig => 
-                   sig.userId === contract.ownerId && 
-                   sig.status === 'SIGNED'
-                 )
-    });
-
     return (
       <Badge className={variants[status]}>
-        {/* Check if contract is ready for owner's signature */}
         {contract.status === 'ACTIVE' && 
          contract.ownerId === user?.id && 
          !contract.signatures?.some(sig => 
@@ -168,10 +148,10 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
           <TabsContent value="content" className="min-h-[500px]">
-            <div className="border rounded-md p-4 min-h-[500px] bg-white">
+            <div className="border rounded-md p-6 min-h-[500px] bg-white">
               {contract.content ? (
                 <div className="prose max-w-none">
-                  <pre className="whitespace-pre-wrap">{contract.content}</pre>
+                  <pre className="whitespace-pre-wrap font-mono text-sm">{contract.content}</pre>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
@@ -182,7 +162,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
             </div>
           </TabsContent>
           <TabsContent value="signers" className="min-h-[500px]">
-            <div className="border rounded-md p-4 min-h-[500px] bg-white">
+            <div className="border rounded-md p-6 min-h-[500px] bg-white">
               <h3 className="text-lg font-medium mb-4">Signers</h3>
               {contract.metadata?.signers?.length ? (
                 <div className="space-y-4">
@@ -261,7 +241,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
             </div>
           </TabsContent>
           <TabsContent value="history" className="min-h-[500px]">
-            <div className="border rounded-md p-4 min-h-[500px] bg-white">
+            <div className="border rounded-md p-6 min-h-[500px] bg-white">
               <h3 className="text-lg font-medium mb-4">History</h3>
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
@@ -293,15 +273,20 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
       </CardContent>
       
       {contract.status === ContractStatus.DRAFT && (
-        <CardFooter className="flex justify-end gap-2 pt-4 border-t">
-          <Button variant="outline" onClick={() => setIsEditing(true)}>
-            <Edit className="h-4 w-4 mr-2" />
-            Edit
-          </Button>
-          <Button className="bg-blue-600 hover:bg-blue-700">
-            <Send className="h-4 w-4 mr-2" />
-            Send for Signature
-          </Button>
+        <CardFooter className="flex justify-between pt-4 border-t">
+          <div className="text-sm text-gray-500">
+            {/* Placeholder for status text to match editor layout */}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setIsEditing(true)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              <Send className="h-4 w-4 mr-2" />
+              Send for Signature
+            </Button>
+          </div>
         </CardFooter>
       )}
     </Card>
