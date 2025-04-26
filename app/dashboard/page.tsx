@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -68,10 +68,31 @@ interface ContractWithRelations {
 }
 
 export default function DashboardPage() {
-  const { isAuthenticated, isLoading, logout, user } = useZkLogin();
+  const startTime = performance.now();
+  console.log(`[DASHBOARD:TIMING] Component function executing at ${Math.round(startTime)}ms`);
+  
+  const { isAuthenticated, isLoading, isAuthStateResolved, logout, user } = useZkLogin();
+  console.log('[DASHBOARD] Auth state:', { 
+    isAuthenticated, 
+    isLoading, 
+    isAuthStateResolved, 
+    hasUser: !!user,
+    timestamp: Date.now(),
+    sinceStart: `${Math.round(performance.now() - startTime)}ms`
+  });
+  
+  // Add a ref to track component mounting time and render count
+  const mountTimeRef = useRef(performance.now());
+  const renderCountRef = useRef(0);
+  renderCountRef.current++;
+  
+  console.log(`[DASHBOARD] Render #${renderCountRef.current}`, {
+    timeSincePageLoad: Math.round(performance.now())
+  });
   
   const [contracts, setContracts] = useState<ContractWithRelations[]>([]);
   const [isCreatingContract, setIsCreatingContract] = useState(false);
+  const [isLoadingContracts, setIsLoadingContracts] = useState(true);
   const [newContract, setNewContract] = useState({
     title: '',
     description: '',
@@ -101,19 +122,49 @@ export default function DashboardPage() {
   const loadContracts = useCallback(async () => {
     if (!user?.email) return;
     try {
+      console.log('[DASHBOARD] Starting contract data fetch');
+      setIsLoadingContracts(true);
       const data = await getContracts(user.email);
       setContracts(data as unknown as ContractWithRelations[]);
+      console.log('[DASHBOARD] Contract data loaded successfully');
     } catch (error) {
       console.error('Error loading contracts:', error);
+    } finally {
+      setIsLoadingContracts(false);
     }
   }, [user?.email]);
 
   // Load actual contracts
   useEffect(() => {
+    const mountedAt = performance.now();
+    console.log('[DASHBOARD] Component mounted', {
+      isAuthenticated, 
+      isLoading,
+      isAuthStateResolved,
+      timeSinceRender: Math.round(mountedAt - mountTimeRef.current),
+      timeSincePageLoad: Math.round(mountedAt)
+    });
+    
     if (isAuthenticated && user?.email) {
+      console.log('[DASHBOARD] Loading contracts', {
+        timestamp: Date.now()
+      });
       loadContracts();
+    } else if (isAuthStateResolved && !isAuthenticated) {
+      // If we're not authenticated and auth state is resolved, 
+      // no need to wait for contracts
+      setIsLoadingContracts(false);
     }
-  }, [isAuthenticated, user?.email, loadContracts]);
+    
+    return () => {
+      console.log('[DASHBOARD] Component unmounting', {
+        isAuthenticated,
+        isLoading,
+        isAuthStateResolved,
+        mountDuration: Math.round(performance.now() - mountTimeRef.current)
+      });
+    };
+  }, [isAuthenticated, user?.email, loadContracts, isLoading, isAuthStateResolved]);
   
   const handleCreateContract = async () => {
     if (!newContract.title || !newContract.description || !user?.email) return;
@@ -236,57 +287,158 @@ export default function DashboardPage() {
   });
 
   // Show loading state
-  if (isLoading) {
+  if (isLoading || !isAuthStateResolved || (isAuthenticated && isLoadingContracts)) {
+    console.log('[DASHBOARD] Rendering loading state', {
+      isLoading,
+      isAuthStateResolved,
+      isLoadingContracts,
+      isAuthenticated,
+      timeSinceStart: Math.round(performance.now() - startTime)
+    });
+    
     return (
-      <div className="container mx-auto py-6 px-4 md:px-6 flex-1">
-        <div className="flex min-h-screen">
-          {/* Main content area */}
-          <main className="flex-1">
-            {/* Skip loading text and just render the UI with opacity */}
-            <div className="opacity-50 pointer-events-none">
-              <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold">Dashboard</h1>
+      <div className="container mx-auto p-6">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
+          <div className="h-8 w-32 bg-slate-200 rounded"></div>
+        </div>
+
+        <div className="opacity-40">
+          <div className="grid gap-6 md:grid-cols-3 mb-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-gray-100">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-gray-900">Your Contracts</CardTitle>
+                <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
               </div>
-              
-              <div className="grid gap-6 md:grid-cols-3 mb-6">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">-</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">-</div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">-</div>
-                  </CardContent>
-                </Card>
+              <div className="h-10 w-36 bg-slate-200 rounded"></div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="relative flex-1">
+                  <div className="h-10 bg-slate-200 rounded w-full"></div>
+                </div>
+                <div className="h-10 w-[180px] bg-slate-200 rounded"></div>
               </div>
-            </div>
-          </main>
+              <div className="border rounded-md">
+                <div className="p-4">
+                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
+                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
+                  <div className="h-6 bg-slate-200 rounded w-3/4"></div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
   }
 
+  // Modified: Don't break the render flow during auth transitions
+  // Instead of returning null which causes unmounting, 
+  // continue to the loading state which will be handled by the condition above
   if (!isAuthenticated) {
-    return null; // This will be handled by the useEffect redirect
+    console.log('[DASHBOARD] User not authenticated, showing loading UI', {
+      timeSinceStart: Math.round(performance.now() - startTime)
+    });
+    // Setting isLoadingContracts to true keeps the loading UI visible
+    if (!isLoadingContracts) {
+      setIsLoadingContracts(true);
+    }
+    // Return the same loading state as above to prevent flickering
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
+          <div className="h-8 w-32 bg-slate-200 rounded"></div>
+        </div>
+
+        <div className="opacity-40">
+          <div className="grid gap-6 md:grid-cols-3 mb-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-gray-100">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-gray-900">Your Contracts</CardTitle>
+                <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
+              </div>
+              <div className="h-10 w-36 bg-slate-200 rounded"></div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="relative flex-1">
+                  <div className="h-10 bg-slate-200 rounded w-full"></div>
+                </div>
+                <div className="h-10 w-[180px] bg-slate-200 rounded"></div>
+              </div>
+              <div className="border rounded-md">
+                <div className="p-4">
+                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
+                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
+                  <div className="h-6 bg-slate-200 rounded w-3/4"></div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
-  
-  // Use our ContractDetails component when viewing a contract
+
+  // Log when viewing contract details
   if (isViewingContract && selectedContract) {
+    console.log('[DASHBOARD] Rendering contract details view');
     return (
       <div className="container mx-auto p-6">
         <ContractDetails 
@@ -297,9 +449,10 @@ export default function DashboardPage() {
       </div>
     );
   }
-  
-  // Use our ContractEditor component when editing a contract
+
+  // Log when editing contract
   if (isEditingContract && selectedContract) {
+    console.log('[DASHBOARD] Rendering contract editor view');
     return (
       <div className="container mx-auto p-6">
         <ContractEditor 
@@ -314,6 +467,8 @@ export default function DashboardPage() {
     );
   }
 
+  // Log main dashboard rendering
+  console.log('[DASHBOARD] Rendering main dashboard view');
   return (
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-8">
@@ -501,8 +656,7 @@ export default function DashboardPage() {
                           {contract.status === 'ACTIVE' && 
                            (contract.ownerId === user?.id || contract.owner?.email === user?.email) && 
                            !contract.signatures?.some(sig => 
-                             (sig.userId === contract.ownerId || 
-                              sig.user?.id === user?.id || 
+                             (sig.user?.id === user?.id || 
                               sig.user?.email === user?.email) && 
                              sig.status === 'SIGNED'
                            ) ? (

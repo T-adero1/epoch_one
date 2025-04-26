@@ -44,6 +44,7 @@ interface LoginState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isAuthStateResolved: boolean;
   userAddress: string | null;
   error: string | null;
   sessionExpiry: number | null;
@@ -59,13 +60,15 @@ type LoginAction =
   | { type: 'CLEAR_ERROR' }
   | { type: 'SESSION_EXPIRED' }
   | { type: 'UPDATE_USER'; payload: Partial<User> }
-  | { type: 'UPDATE_ZKLOGIN_STATE'; payload: Partial<ZkLoginState> };
+  | { type: 'UPDATE_ZKLOGIN_STATE'; payload: Partial<ZkLoginState> }
+  | { type: 'AUTH_STATE_RESOLVED' };
 
 // Initial state
 const initialState: LoginState = {
   user: null,
   isAuthenticated: false,
   isLoading: true,
+  isAuthStateResolved: false,
   userAddress: null,
   error: null,
   sessionExpiry: null,
@@ -74,36 +77,53 @@ const initialState: LoginState = {
 
 // Create reducer function
 function loginReducer(state: LoginState, action: LoginAction): LoginState {
+  console.log(`[AUTH:REDUCER] Processing action: ${action.type}`, {
+    prevState: {
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      isAuthStateResolved: state.isAuthStateResolved,
+      hasUser: !!state.user,
+      timestamp: Date.now()
+    }
+  });
+  
+  let newState;
+  
   switch (action.type) {
     case 'LOGIN_START':
-      return {
+      newState = {
         ...state,
         isLoading: true,
         error: null
       };
+      break;
     case 'LOGIN_SUCCESS':
-      return {
+      newState = {
         ...state,
         isLoading: false,
         isAuthenticated: true,
+        isAuthStateResolved: true,
         user: action.payload.user,
         userAddress: action.payload.user.address,
         zkLoginState: action.payload.zkLoginState,
         sessionExpiry: action.payload.expiry,
         error: null
       };
+      break;
     case 'LOGIN_FAILURE':
-      return {
+      newState = {
         ...state,
         isLoading: false,
         isAuthenticated: false,
+        isAuthStateResolved: true,
         error: action.payload,
         user: null,
         userAddress: null,
         zkLoginState: null
       };
+      break;
     case 'LOGOUT':
-      return {
+      newState = {
         ...state,
         isAuthenticated: false,
         user: null,
@@ -112,31 +132,54 @@ function loginReducer(state: LoginState, action: LoginAction): LoginState {
         sessionExpiry: null,
         isLoading: false,
       };
+      break;
     case 'CLEAR_ERROR':
-      return {
+      newState = {
         ...state,
         error: null
       };
+      break;
     case 'SESSION_EXPIRED':
-      return {
+      newState = {
         ...state,
         isAuthenticated: false,
         error: 'Your session has expired. Please login again.',
         sessionExpiry: null
       };
+      break;
     case 'UPDATE_USER':
-      return {
+      newState = {
         ...state,
         user: state.user ? { ...state.user, ...action.payload } : null
       };
+      break;
     case 'UPDATE_ZKLOGIN_STATE':
-      return {
+      newState = {
         ...state,
         zkLoginState: state.zkLoginState ? { ...state.zkLoginState, ...action.payload } : null
       };
+      break;
+    case 'AUTH_STATE_RESOLVED':
+      newState = {
+        ...state,
+        isAuthStateResolved: true
+      };
+      break;
     default:
       return state;
   }
+  
+  console.log(`[AUTH:REDUCER] Action ${action.type} completed`, {
+    newState: {
+      isAuthenticated: newState.isAuthenticated, 
+      isLoading: newState.isLoading,
+      isAuthStateResolved: newState.isAuthStateResolved,
+      hasUser: !!newState.user,
+      timestamp: Date.now()
+    }
+  });
+  
+  return newState;
 }
 
 // Define proof data type
@@ -353,6 +396,10 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         debugLog('Setting isLoading to false');
         dispatch({ type: 'LOGIN_FAILURE', payload: '' }); // Just to set isLoading to false
       }
+      
+      // Mark authentication state as fully resolved
+      debugLog('Authentication state fully resolved');
+      dispatch({ type: 'AUTH_STATE_RESOLVED' });
     }
   }, [state.isLoading]);
 
