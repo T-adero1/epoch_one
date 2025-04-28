@@ -17,6 +17,7 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   walletAddress String    @unique
+  googleId      String?   @unique
   name          String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

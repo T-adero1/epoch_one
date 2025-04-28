@@ -16,6 +16,7 @@ interface User {
   displayName?: string;
   profilePicture?: string;
   id?: string;
+  googleId?: string | null;
 }
 
 interface ZkLoginState {
@@ -850,6 +851,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         email: jwtPayload.email || '',
         displayName: jwtPayload.name || '',
         profilePicture: jwtPayload.picture || '',
+        googleId: jwtPayload.sub || null
       };
       
       // Start saving user to database early while waiting for proof
@@ -1006,6 +1008,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           email: userData.email,
           walletAddress: userData.address,
           name: userData.displayName,
+          googleId: userData.googleId
         }),
       });
 
