@@ -5,12 +5,13 @@ import { log } from '@/app/utils/logger';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, walletAddress, name } = body;
+    const { email, walletAddress, name, googleId } = body;
 
     log.info('Creating/updating user:', {
       email,
       walletAddress,
-      hasName: !!name
+      hasName: !!name,
+      hasGoogleId: !!googleId
     });
 
     // Upsert user (create if doesn't exist, update if exists)
@@ -19,17 +20,20 @@ export async function POST(request: Request) {
       update: {
         walletAddress,
         name,
+        googleId
       },
       create: {
         email,
         walletAddress,
         name,
+        googleId
       },
     });
 
     log.info('User created/updated successfully:', {
       id: user.id,
-      email: user.email
+      email: user.email,
+      hasGoogleId: !!user.googleId
     });
 
     return NextResponse.json(user);

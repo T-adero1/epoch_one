@@ -16,6 +16,7 @@ interface User {
   displayName?: string;
   profilePicture?: string;
   id?: string;
+  googleId?: string | null;
 }
 
 interface ZkLoginState {
@@ -44,6 +45,7 @@ interface LoginState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isAuthStateResolved: boolean;
   userAddress: string | null;
   error: string | null;
   sessionExpiry: number | null;
@@ -59,13 +61,15 @@ type LoginAction =
   | { type: 'CLEAR_ERROR' }
   | { type: 'SESSION_EXPIRED' }
   | { type: 'UPDATE_USER'; payload: Partial<User> }
-  | { type: 'UPDATE_ZKLOGIN_STATE'; payload: Partial<ZkLoginState> };
+  | { type: 'UPDATE_ZKLOGIN_STATE'; payload: Partial<ZkLoginState> }
+  | { type: 'AUTH_STATE_RESOLVED' };
 
 // Initial state
 const initialState: LoginState = {
   user: null,
   isAuthenticated: false,
   isLoading: true,
+  isAuthStateResolved: false,
   userAddress: null,
   error: null,
   sessionExpiry: null,
@@ -74,36 +78,53 @@ const initialState: LoginState = {
 
 // Create reducer function
 function loginReducer(state: LoginState, action: LoginAction): LoginState {
+  console.log(`[AUTH:REDUCER] Processing action: ${action.type}`, {
+    prevState: {
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      isAuthStateResolved: state.isAuthStateResolved,
+      hasUser: !!state.user,
+      timestamp: Date.now()
+    }
+  });
+  
+  let newState;
+  
   switch (action.type) {
     case 'LOGIN_START':
-      return {
+      newState = {
         ...state,
         isLoading: true,
         error: null
       };
+      break;
     case 'LOGIN_SUCCESS':
-      return {
+      newState = {
         ...state,
         isLoading: false,
         isAuthenticated: true,
+        isAuthStateResolved: true,
         user: action.payload.user,
         userAddress: action.payload.user.address,
         zkLoginState: action.payload.zkLoginState,
         sessionExpiry: action.payload.expiry,
         error: null
       };
+      break;
     case 'LOGIN_FAILURE':
-      return {
+      newState = {
         ...state,
         isLoading: false,
         isAuthenticated: false,
+        isAuthStateResolved: true,
         error: action.payload,
         user: null,
         userAddress: null,
         zkLoginState: null
       };
+      break;
     case 'LOGOUT':
-      return {
+      newState = {
         ...state,
         isAuthenticated: false,
         user: null,
@@ -112,31 +133,54 @@ function loginReducer(state: LoginState, action: LoginAction): LoginState {
         sessionExpiry: null,
         isLoading: false,
       };
+      break;
     case 'CLEAR_ERROR':
-      return {
+      newState = {
         ...state,
         error: null
       };
+      break;
     case 'SESSION_EXPIRED':
-      return {
+      newState = {
         ...state,
         isAuthenticated: false,
         error: 'Your session has expired. Please login again.',
         sessionExpiry: null
       };
+      break;
     case 'UPDATE_USER':
-      return {
+      newState = {
         ...state,
         user: state.user ? { ...state.user, ...action.payload } : null
       };
+      break;
     case 'UPDATE_ZKLOGIN_STATE':
-      return {
+      newState = {
         ...state,
         zkLoginState: state.zkLoginState ? { ...state.zkLoginState, ...action.payload } : null
       };
+      break;
+    case 'AUTH_STATE_RESOLVED':
+      newState = {
+        ...state,
+        isAuthStateResolved: true
+      };
+      break;
     default:
       return state;
   }
+  
+  console.log(`[AUTH:REDUCER] Action ${action.type} completed`, {
+    newState: {
+      isAuthenticated: newState.isAuthenticated, 
+      isLoading: newState.isLoading,
+      isAuthStateResolved: newState.isAuthStateResolved,
+      hasUser: !!newState.user,
+      timestamp: Date.now()
+    }
+  });
+  
+  return newState;
 }
 
 // Define proof data type
@@ -186,25 +230,137 @@ const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const NETWORK = 'testnet'; // Changed from 'testnet' to 'devnet'
 const PROVER_SERVICE_URL = 'https://prover-dev.mystenlabs.com/v1'; // Updated to use dev endpoint
 
+// Add performance tracking helper
+const performanceTracker = {
+  startTimes: {} as Record<string, number>,
+  
+  start(operation: string) {
+    this.startTimes[operation] = performance.now();
+    console.log(`[PERF] ⏱️ Starting: ${operation}`);
+  },
+  
+  end(operation: string) {
+    const startTime = this.startTimes[operation];
+    if (startTime) {
+      const duration = Math.round(performance.now() - startTime);
+      console.log(`[PERF] ⏱️ Completed: ${operation} (took ${duration}ms)`);
+      delete this.startTimes[operation];
+      return duration;
+    }
+    console.log(`[PERF] ⚠️ Warning: Tried to end timing for "${operation}" but no start time found`);
+    return 0;
+  }
+};
+
+// Add this function to manage parallel operations
+const runParallel = async <T extends any[]>(...promises: Promise<T[number]>[]) => {
+  return Promise.all(promises);
+};
+
+// Add this to pre-generate keypairs during idle time
+const usePreGeneratedKeys = () => {
+  const [preGeneratedKeyPair, setPreGeneratedKeyPair] = useState<Ed25519Keypair | null>(null);
+  
+  useEffect(() => {
+    // Function to generate a keypair
+    const generateKeyPair = () => {
+      console.log('[PERF] 🔄 Pre-generating keypair during idle time');
+      const keypair = Ed25519Keypair.generate();
+      setPreGeneratedKeyPair(keypair);
+      console.log('[PERF] ✅ Keypair pre-generated and ready for use');
+    };
+    
+    // Use requestIdleCallback if available, or setTimeout as fallback
+    if (typeof window !== 'undefined') {
+      if ('requestIdleCallback' in window) {
+        // @ts-ignore - TypeScript might not recognize requestIdleCallback
+        window.requestIdleCallback(generateKeyPair);
+      } else {
+        setTimeout(generateKeyPair, 1000); // Fallback
+      }
+    }
+    
+    // Regenerate on unmount to have a fresh one ready for next use
+    return () => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        // @ts-ignore
+        window.requestIdleCallback(generateKeyPair);
+      }
+    };
+  }, []);
+  
+  return preGeneratedKeyPair;
+};
+
 export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
+  // Create a ref to store mount start time
+  const mountStartTime = React.useRef(typeof performance !== 'undefined' ? performance.now() : 0);
+  
+  // Add page load tracking at component mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Calculate mount time
+      const mountDuration = performance.now() - mountStartTime.current;
+      
+      // Log mount time instead of timestamp
+      console.log(`[PERF] 🔄 ZkLoginProvider mount time: ${Math.round(mountDuration)}ms`);
+      
+      // Check if we have navigation timing API
+      if (performance.timing) {
+        const timing = performance.timing;
+        const navigationStart = timing.navigationStart;
+        const loadEventStart = timing.loadEventStart || Date.now();
+        
+        console.log(`[PERF] 📊 Page load metrics:`);
+        console.log(`[PERF] - Total load time: ${loadEventStart - navigationStart}ms`);
+        console.log(`[PERF] - DOM interactive: ${timing.domInteractive - navigationStart}ms`);
+        console.log(`[PERF] - DOM content loaded: ${timing.domContentLoadedEventStart - navigationStart}ms`);
+      } else if (performance.now) {
+        // Fallback for newer browsers without deprecated timing API
+        console.log(`[PERF] 📊 Component mounted at ${Math.round(performance.now())}ms after navigation start`);
+      }
+    }
+  }, []);
+
   const [state, dispatch] = useReducer(loginReducer, initialState);
   const router = useRouter();
   const [suiClient] = useState(new SuiClient({ url: getFullnodeUrl(NETWORK) }));
 
+  // Use pre-generated keypair
+  const preGeneratedKeyPair = usePreGeneratedKeys();
+
   // Load session from storage
   const loadSession = useCallback(async () => {
+    // Add debug logging function
+    const debugLog = (message: string, data?: any) => {
+      if (state.isLoading) {
+        console.log(`[LOADING:DEBUG] ${message}`, data || '');
+      }
+    };
+
     try {
+      performanceTracker.start('loadSession');
+      debugLog('Loading session from storage');
       // Try to load from localStorage
       if (typeof window !== 'undefined') {
+        performanceTracker.start('localStorage_read');
         const savedSessionStr = localStorage.getItem(SESSION_STORAGE_KEY);
+        performanceTracker.end('localStorage_read');
         
         if (savedSessionStr) {
+          debugLog('Found saved session', { length: savedSessionStr.length });
+          
+          performanceTracker.start('session_parse');
           const savedSession = JSON.parse(savedSessionStr);
+          performanceTracker.end('session_parse');
+          
           const now = Date.now();
           
           // Check if session is still valid
           if (savedSession.expiry && savedSession.expiry > now) {
             // Session is valid, restore state
+            debugLog('Session is valid, restoring state');
+            performanceTracker.start('dispatch_login_success');
             dispatch({
               type: 'LOGIN_SUCCESS',
               payload: {
@@ -213,41 +369,63 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
                 expiry: savedSession.expiry
               }
             });
+            performanceTracker.end('dispatch_login_success');
             
             // Schedule session expiry check
             const timeUntilExpiry = savedSession.expiry - now;
             setTimeout(() => dispatch({ type: 'SESSION_EXPIRED' }), timeUntilExpiry);
             
-            console.log('Session restored from localStorage');
+            debugLog('Session restored from localStorage');
           } else {
             // Session expired
+            debugLog('Session expired', { expiry: savedSession.expiry, now });
             localStorage.removeItem(SESSION_STORAGE_KEY);
             dispatch({ type: 'SESSION_EXPIRED' });
           }
         } else {
           // No session found
+          debugLog('No session found in localStorage');
           dispatch({ type: 'LOGOUT' });
         }
       }
+      performanceTracker.end('loadSession');
     } catch (err) {
       console.error('Error loading session:', err);
       dispatch({ type: 'LOGIN_FAILURE', payload: 'Failed to load existing session' });
     } finally {
       if (state.isLoading) {
+        debugLog('Setting isLoading to false');
         dispatch({ type: 'LOGIN_FAILURE', payload: '' }); // Just to set isLoading to false
       }
+      
+      // Mark authentication state as fully resolved
+      debugLog('Authentication state fully resolved');
+      dispatch({ type: 'AUTH_STATE_RESOLVED' });
     }
   }, [state.isLoading]);
 
   // Check for existing session on mount
   useEffect(() => {
+    // Add debug logging
+    if (state.isLoading) {
+      console.log('[LOADING:DEBUG] Initial authentication check initiated');
+    }
+    
     // Set a short delay for authentication check
+    performanceTracker.start('authentication_check');
+    console.log('[PERF] 🔄 Starting authentication check timer (500ms)');
+    
     const timer = setTimeout(() => {
-      loadSession();
-    }, 500);
+      if (state.isLoading) {
+        console.log('[LOADING:DEBUG] Authentication check timer fired, calling loadSession()');
+      }
+      loadSession().then(() => {
+        performanceTracker.end('authentication_check');
+      });
+    }, 50);
     
     return () => clearTimeout(timer);
-  }, [loadSession]);
+  }, [loadSession, state.isLoading]);
 
   // Function to check session validity
   const checkSessionValidity = useCallback(() => {
@@ -270,10 +448,14 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
   // Get the current epoch from Sui
   const getCurrentEpoch = useCallback(async (): Promise<number> => {
     try {
+      performanceTracker.start('getCurrentEpoch');
       const { epoch } = await suiClient.getLatestSuiSystemState();
-      return Number(epoch);
+      const epochNum = Number(epoch);
+      performanceTracker.end('getCurrentEpoch');
+      return epochNum;
     } catch (error) {
       console.error('Error getting current epoch:', error);
+      performanceTracker.end('getCurrentEpoch');
       throw error;
     }
   }, [suiClient]);
@@ -281,13 +463,17 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
   // Updated getSalt function for ZkLoginContext.tsx
   const getSalt = useCallback(async (jwt: string): Promise<string> => {
     try {
+      performanceTracker.start('getSalt');
       // Extract payload to get user identifier for caching
       const jwtParts = jwt.split('.');
       if (jwtParts.length !== 3) {
         throw new Error('Invalid JWT format');
       }
       
+      performanceTracker.start('jwt_payload_decode');
       const payload = JSON.parse(atob(jwtParts[1]));
+      performanceTracker.end('jwt_payload_decode');
+      
       const userIdentifier = payload.sub;
       
       if (!userIdentifier) {
@@ -296,16 +482,21 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Check if we already have a salt for this user in cache
       const cacheKey = `zklogin_salt_${userIdentifier}`;
+      
+      performanceTracker.start('salt_cache_check');
       const cachedSalt = localStorage.getItem(cacheKey);
+      performanceTracker.end('salt_cache_check');
       
       if (cachedSalt) {
         console.log('Using cached salt for user:', userIdentifier.substring(0, 8) + '...');
+        performanceTracker.end('getSalt');
         return cachedSalt;
       }
       
       console.log('No cached salt found, requesting from server for user:', userIdentifier.substring(0, 8) + '...');
       
       // Call our deterministic salt API endpoint
+      performanceTracker.start('salt_api_request');
       const response = await fetch('/api/salt', {
         method: 'POST',
         headers: {
@@ -323,10 +514,13 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           status: response.status,
           errorText,
         });
+        performanceTracker.end('salt_api_request');
         throw new Error(`Salt service failed: ${response.status} ${errorText}`);
       }
       
       const data = await response.json();
+      performanceTracker.end('salt_api_request');
+      
       const salt = data.salt;
       
       if (!salt) {
@@ -338,9 +532,11 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       // Cache the salt for future use
       localStorage.setItem(cacheKey, salt);
       
+      performanceTracker.end('getSalt');
       return salt;
     } catch (error) {
       console.error('Error getting salt:', error);
+      performanceTracker.end('getSalt');
       
       // As a last resort fallback (only if the server is unreachable),
       // generate a random salt and warn the user
@@ -353,7 +549,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     }
   }, []);
 
-  // Generate ZK Proof
+  // Get ZK Proof
   const getZkProof = useCallback(async (params: {
     jwt: string;
     salt: string;
@@ -362,9 +558,11 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     randomness: string;
   }): Promise<ZkProofData> => {
     try {
+      performanceTracker.start('getZkProof');
       const { jwt, salt, keyPair, maxEpoch, randomness } = params;
       
       // Extract the necessary claims from the JWT
+      performanceTracker.start('prepare_zkproof_request');
       const extendedEphemeralPublicKey = Array.from(
         new Uint8Array([0, ...keyPair.getPublicKey().toSuiBytes()])
       );
@@ -376,53 +574,145 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         randomness,
         keyClaimName: 'sub'
       });
+      performanceTracker.end('prepare_zkproof_request');
       
-      const response = await fetch(PROVER_SERVICE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jwt,
-          salt,
-          extendedEphemeralPublicKey,
-          maxEpoch,
-          jwtRandomness: randomness,
-          keyClaimName: 'sub',
-        }),
-      });
+      // Check if this JWT has already been submitted recently
+      const jwtHash = jwt.split('.')[2].substring(0, 8); // Use part of signature as identifier
+      const cacheKey = `zkproof_ratelimit_${jwtHash}`;
       
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Prover service error:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData
-        });
-        throw new Error(`Prover service returned ${response.status}: ${JSON.stringify(errorData)}`);
+      // Check for rate limiting
+      if (typeof localStorage !== 'undefined') {
+        const lastAttempt = localStorage.getItem(cacheKey);
+        if (lastAttempt) {
+          const lastAttemptTime = parseInt(lastAttempt, 10);
+          const now = Date.now();
+          const timeSinceLastAttempt = now - lastAttemptTime;
+          
+          // If attempt was made in the last 6 seconds, wait a bit
+          if (timeSinceLastAttempt < 6000) {
+            console.log(`[PERF] ⚠️ Rate limiting protection: waiting ${6 - Math.floor(timeSinceLastAttempt/1000)} seconds before retrying prover service`);
+            // Wait for the remaining time before making another request
+            await new Promise(resolve => setTimeout(resolve, 6000 - timeSinceLastAttempt));
+          }
+        }
+        
+        // Set the current time as the last attempt
+        localStorage.setItem(cacheKey, Date.now().toString());
       }
       
-      return await response.json();
+      // Make the actual network request to get the proof
+      performanceTracker.start('prover_service_request');
+      console.log('[PERF] 🔄 Making request to zkLogin prover service...');
+      
+      let retries = 0;
+      const maxRetries = 2;
+      
+      while (retries <= maxRetries) {
+        try {
+          const response = await fetch(PROVER_SERVICE_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              jwt,
+              salt,
+              extendedEphemeralPublicKey,
+              maxEpoch,
+              jwtRandomness: randomness,
+              keyClaimName: 'sub',
+            }),
+          });
+          
+          if (response.status === 429) {
+            // Too Many Requests - handle rate limiting
+            retries++;
+            const retryAfter = response.headers.get('Retry-After') || '5';
+            const waitTime = parseInt(retryAfter, 10) * 1000;
+            console.log(`[PERF] ⚠️ Prover service rate limited. Waiting ${waitTime/1000} seconds before retry ${retries}/${maxRetries}`);
+            
+            if (retries <= maxRetries) {
+              // Wait for the specified time before retrying
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue;
+            }
+          }
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Prover service error:', {
+              status: response.status,
+              statusText: response.statusText,
+              errorData
+            });
+            
+            performanceTracker.end('prover_service_request');
+            throw new Error(`Prover service returned ${response.status}: ${JSON.stringify(errorData)}`);
+          }
+          
+          performanceTracker.start('parse_zkproof_response');
+          const proofData = await response.json();
+          performanceTracker.end('parse_zkproof_response');
+          performanceTracker.end('prover_service_request');
+          
+          console.log('[PERF] ✅ ZK proof generation complete');
+          performanceTracker.end('getZkProof');
+          
+          // Clear the rate limit timestamp after successful request
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem(cacheKey);
+          }
+          
+          return proofData;
+        } catch (fetchError) {
+          if (retries >= maxRetries) throw fetchError;
+          retries++;
+          console.log(`[PERF] ⚠️ Prover service request failed. Retry ${retries}/${maxRetries} in 3 seconds.`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+      
+      throw new Error('Maximum retries exceeded for prover service');
     } catch (error) {
       console.error('Error getting ZK proof:', error);
+      performanceTracker.end('getZkProof');
       throw error;
     }
   }, []);
 
   // Start the zkLogin process
   const startLogin = useCallback(async (): Promise<string> => {
+    // Add debug logging function
+    const debugLog = (message: string, data?: any) => {
+      if (state.isLoading) {
+        console.log(`[LOADING:DEBUG] ${message}`, data || '');
+      }
+    };
+
     console.log('Starting zkLogin process...');
+    performanceTracker.start('startLogin');
     dispatch({ type: 'LOGIN_START' });
     
     try {
-      // Generate ephemeral key pair
-      const ephemeralKeyPair = Ed25519Keypair.generate();
+      // Use pre-generated key pair if available, otherwise generate a new one
+      let ephemeralKeyPair: Ed25519Keypair;
+      
+      if (preGeneratedKeyPair) {
+        console.log('[PERF] ✅ Using pre-generated keypair for login');
+        ephemeralKeyPair = preGeneratedKeyPair;
+      } else {
+        console.log('[PERF] 🔄 Generating new keypair');
+        ephemeralKeyPair = Ed25519Keypair.generate();
+      }
       
       // Store the key pair in base64 format
       const publicKey = ephemeralKeyPair.getPublicKey().toBase64();
       const privateKey = ephemeralKeyPair.getSecretKey();
       
+      debugLog('Getting current epoch');
       const currentEpoch = await getCurrentEpoch();
+      debugLog('Current epoch received', { epoch: currentEpoch });
+      
       const zkLoginState: ZkLoginState = {
         ephemeralKeyPair: {
           publicKey,
@@ -436,15 +726,22 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Save the intermediate state
       if (typeof window !== 'undefined') {
+        debugLog('Saving intermediate state to localStorage');
+        performanceTracker.start('save_intermediate_state');
         localStorage.setItem('zklogin_intermediate_state', JSON.stringify(zkLoginState));
+        performanceTracker.end('save_intermediate_state');
       }
       
       // Generate nonce
+      debugLog('Generating nonce');
+      performanceTracker.start('generate_nonce');
       const nonce = generateNonce(
         ephemeralKeyPair.getPublicKey(), 
         zkLoginState.maxEpoch || 0, 
         zkLoginState.randomness || ''
       );
+      performanceTracker.end('generate_nonce');
+      debugLog('Nonce generated successfully');
       
       // In startLogin function:
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!;
@@ -459,59 +756,114 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         currentOrigin: window.location.origin
       });
       
+      performanceTracker.end('startLogin');
       return nonce;
     } catch (error) {
       console.error('Login error:', error);
+      performanceTracker.end('startLogin');
       dispatch({ type: 'LOGIN_FAILURE', payload: 'Failed to start login process. Please try again.' });
       throw error;
     }
-  }, [getCurrentEpoch]);
+  }, [getCurrentEpoch, preGeneratedKeyPair]);
 
   // Complete the zkLogin process with JWT
   const completeLogin = useCallback(async (jwt: string): Promise<void> => {
     try {
       console.log('Completing zkLogin process with JWT...', jwt);
+      performanceTracker.start('completeLogin');
       
-      // Get the intermediate state
-      const intermediateStateStr = localStorage.getItem('zklogin_intermediate_state');
-      if (!intermediateStateStr) {
-        console.error('No intermediate state found in localStorage');
-        throw new Error('No intermediate state found. Please try logging in again.');
-      }
+      // Start parallel task - immediately decode JWT to extract subject
+      // This allows us to start working with the JWT while loading other state
+      const earlyJwtProcessing = async () => {
+        console.log('[PERF] 🔄 Starting early JWT processing');
+        const jwtParts = jwt.split('.');
+        if (jwtParts.length !== 3) throw new Error('Invalid JWT format');
+        return JSON.parse(atob(jwtParts[1]));
+      };
       
-      const intermediateState: ZkLoginState = JSON.parse(intermediateStateStr);
-      console.log('Retrieved intermediate state:', intermediateState);
+      // Start parallel task - load intermediate state
+      const loadIntermediateState = async () => {
+        console.log('[PERF] 🔄 Loading intermediate state');
+        const intermediateStateStr = localStorage.getItem('zklogin_intermediate_state');
+        if (!intermediateStateStr) {
+          throw new Error('No intermediate state found. Please try logging in again.');
+        }
+        return JSON.parse(intermediateStateStr) as ZkLoginState;
+      };
       
-      if (!intermediateState.ephemeralKeyPair?.privateKey || !intermediateState.maxEpoch || !intermediateState.randomness) {
-        console.error('Missing required state data');
+      // Run both operations in parallel
+      const [jwtPayload, intermediateState] = await runParallel(
+        earlyJwtProcessing(),
+        loadIntermediateState()
+      );
+      
+      // Validate state
+      if (!intermediateState.ephemeralKeyPair?.privateKey || 
+          !intermediateState.maxEpoch || 
+          !intermediateState.randomness) {
         throw new Error('Invalid intermediate state. Please try logging in again.');
       }
       
-      // Restore the ephemeral key pair using the stored private key
-      const ephemeralKeyPair = Ed25519Keypair.fromSecretKey(
-        intermediateState.ephemeralKeyPair.privateKey
-      );
-      console.log('Restored ephemeral key pair');
+      // Restore keypair - use pregenerated one if compatible, otherwise restore from storage
+      let ephemeralKeyPair: Ed25519Keypair;
       
-      // Get salt
-      console.log('Generating salt...');
-      const salt = await getSalt(jwt);
-      console.log('Generated salt:', salt);
+      if (preGeneratedKeyPair) {
+        console.log('[PERF] ✅ Using pre-generated keypair');
+        ephemeralKeyPair = preGeneratedKeyPair;
+      } else {
+        console.log('[PERF] 🔄 Restoring keypair from storage');
+        ephemeralKeyPair = Ed25519Keypair.fromSecretKey(
+          intermediateState.ephemeralKeyPair.privateKey
+        );
+      }
       
-      // Get ZK proof
-      console.log('Requesting ZK proof...');
-      const zkProofs = await getZkProof({
+      // Start getting salt and calculating user address in parallel
+      const getSaltTask = async () => {
+        console.log('[PERF] 🔄 Starting salt generation');
+        return await getSalt(jwt);
+      };
+      
+      // Start these operations in parallel
+      const [salt] = await runParallel(getSaltTask());
+      
+      // Calculate user address while ZK proof is being generated
+      const calculateAddressTask = async () => {
+        console.log('[PERF] 🔄 Calculating user address');
+        return jwtToAddress(jwt, salt);
+      };
+      
+      // Start ZK proof generation immediately
+      console.log('[PERF] 🔄 Starting ZK proof generation early');
+      const zkProofPromise = getZkProof({
         jwt,
         salt,
         keyPair: ephemeralKeyPair,
-        maxEpoch: intermediateState.maxEpoch || 0,
-        randomness: intermediateState.randomness || '',
+        maxEpoch: intermediateState.maxEpoch,
+        randomness: intermediateState.randomness,
       });
-      console.log('Received ZK proof');
       
-      // Calculate the user's address
-      const userAddress = jwtToAddress(jwt, salt);
-      console.log('Calculated user address:', userAddress);
+      // While ZK proof is being generated, do other work in parallel
+      const [userAddress] = await runParallel(calculateAddressTask());
+      
+      // Create user object early
+      const userData: User = {
+        address: userAddress,
+        email: jwtPayload.email || '',
+        displayName: jwtPayload.name || '',
+        profilePicture: jwtPayload.picture || '',
+        googleId: jwtPayload.sub || null
+      };
+      
+      // Start saving user to database early while waiting for proof
+      const saveUserPromise = saveUserToDatabase(userData);
+      
+      // Wait for ZK proof and user saving to complete
+      const [zkProofs, savedUser] = await runParallel(zkProofPromise, saveUserPromise);
+      
+      if (savedUser && savedUser.id) {
+        // Update userData with the database ID
+        userData.id = savedUser.id;
+      }
       
       // Update zkLoginState
       const updatedZkLoginState: ZkLoginState = {
@@ -522,90 +874,6 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Calculate session expiry
       const expiry = Date.now() + SESSION_DURATION;
-      
-      // Add detailed JWT parsing logs
-      console.log('[JWT][DEBUG] Raw JWT received:', {
-        jwtLength: jwt.length,
-        jwtStart: jwt.substring(0, 20) + '...',
-      });
-
-      // Log JWT parts
-      const jwtParts = jwt.split('.');
-      console.log('[JWT][DEBUG] JWT structure:', {
-        numberOfParts: jwtParts.length,
-        hasHeader: Boolean(jwtParts[0]),
-        hasPayload: Boolean(jwtParts[1]),
-        hasSignature: Boolean(jwtParts[2])
-      });
-
-      // Decode and log the raw payload before parsing
-      const rawPayload = atob(jwtParts[1]);
-      console.log('[JWT][DEBUG] Raw decoded payload:', rawPayload);
-
-      // Parse and log the full payload
-      const jwtPayload = JSON.parse(rawPayload);
-      console.log('[JWT][DEBUG] Parsed JWT payload:', {
-        allFields: Object.keys(jwtPayload),
-        email: jwtPayload.email,
-        emailField: {
-          exists: 'email' in jwtPayload,
-          type: typeof jwtPayload.email,
-          value: jwtPayload.email
-        },
-        sub: jwtPayload.sub,
-        // Log other potential email fields that might be present
-        alternativeFields: {
-          mail: jwtPayload.mail,
-          userEmail: jwtPayload.userEmail,
-          emailAddress: jwtPayload.emailAddress,
-        }
-      });
-
-      // Create user data with detailed logging
-      const userData: User = {
-        address: userAddress,
-        email: jwtPayload.email || '',
-        displayName: jwtPayload.name || '',
-        profilePicture: jwtPayload.picture || '',
-      };
-
-      console.log('[USER][DEBUG] Created user data:', {
-        userData,
-        sourceFields: {
-          address: {
-            value: userAddress,
-            source: 'jwtToAddress calculation'
-          },
-          email: {
-            value: jwtPayload.email,
-            fallback: '',
-            final: userData.email
-          },
-          displayName: {
-            value: jwtPayload.name,
-            fallback: '',
-            final: userData.displayName
-          },
-          profilePicture: {
-            value: jwtPayload.picture,
-            fallback: '',
-            final: userData.profilePicture
-          }
-        }
-      });
-      
-      // Save user to database
-      try {
-        const savedUser = await saveUserToDatabase(userData);
-        if (savedUser && savedUser.id) {
-          // Update userData with the database ID
-          userData.id = savedUser.id;
-        }
-      } catch (saveError) {
-        console.error('Could not save user to database, but continuing login:', saveError);
-      }
-      
-      console.log('Dispatching login success with user data:', userData);
       
       // Save session data
       dispatch({
@@ -626,80 +894,12 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       // Clean up intermediate state
       localStorage.removeItem('zklogin_intermediate_state');
-      
-      console.log('Login completed successfully, checking for redirect');
-      console.log('Current authentication state:', {
-        isAuthenticated: state.isAuthenticated,
-        userAddress: state.userAddress,
-        sessionExpiry: state.sessionExpiry
-      });
-      
-      // Check for a stored redirect path
-      let redirectPath = '/dashboard'; // Default to dashboard
-      try {
-        const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
-        console.log('Found stored redirect path:', storedRedirectPath);
-        
-        if (storedRedirectPath) {
-          // Use the stored path
-          redirectPath = storedRedirectPath;
-          
-          // Set a flag to prevent homepage from redirecting
-          localStorage.setItem('zklogin_redirect_in_progress', 'true');
-          
-          // Clear the redirect path after using it
-          localStorage.removeItem('zkLoginRedirectPath');
-        }
-        
-        // Check if there was a pending signature
-        const pendingContractId = localStorage.getItem('pendingSignatureContractId');
-        if (pendingContractId) {
-          console.log('Found pending contract ID:', pendingContractId);
-          // If we're not already redirecting to sign/[contractId], update redirect path
-          if (!redirectPath.includes(`/sign/${pendingContractId}`)) {
-            redirectPath = `/sign/${pendingContractId}`;
-            
-            // Set a flag to prevent homepage from redirecting
-            localStorage.setItem('zklogin_redirect_in_progress', 'true');
-          }
-          // Clear the stored contract ID
-          localStorage.removeItem('pendingSignatureContractId');
-        }
-        
-        console.log('Redirecting user to:', redirectPath);
-        await router.push(redirectPath);
-        console.log('Successfully initiated redirect to:', redirectPath);
-        
-        // After a short delay, remove the flag
-        setTimeout(() => {
-          localStorage.removeItem('zklogin_redirect_in_progress');
-        }, 3000);
-      } catch (error) {
-        console.error('Error during redirect:', error);
-        // Clean up the flag on error
-        localStorage.removeItem('zklogin_redirect_in_progress');
-      }
 
-      // In completeLogin function, after decoding JWT:
-      // Analyze JWT structure and contents
-      console.log('[JWT][FULL_DEBUG] Complete JWT analysis:', {
-        header: JSON.parse(atob(jwt.split('.')[0])),
-        payload: {
-          raw: atob(jwt.split('.')[1]),
-          parsed: JSON.parse(atob(jwt.split('.')[1])),
-          scopes: jwt.split('.')[1].includes('scope') ? JSON.parse(atob(jwt.split('.')[1])).scope : 'no scope found',
-          claims: {
-            sub: JSON.parse(atob(jwt.split('.')[1])).sub,
-            email: JSON.parse(atob(jwt.split('.')[1])).email,
-            email_verified: JSON.parse(atob(jwt.split('.')[1])).email_verified,
-            name: JSON.parse(atob(jwt.split('.')[1])).name,
-            picture: JSON.parse(atob(jwt.split('.')[1])).picture,
-          }
-        },
-        hasSignature: Boolean(jwt.split('.')[2])
-      });
+
+      performanceTracker.end('completeLogin');
     } catch (error) {
       console.error('Login completion error:', error);
+      performanceTracker.end('completeLogin');
       // Clean up any partial state
       localStorage.removeItem('zklogin_intermediate_state');
       dispatch({ 
@@ -707,7 +907,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         payload: error instanceof Error ? error.message : 'Failed to complete login. Please try again.' 
       });
     }
-  }, [getSalt, getZkProof, router]);
+  }, [getSalt, getZkProof, preGeneratedKeyPair]);
 
   // Execute a transaction with zkLogin
   const executeTransaction = useCallback(async (txb: Transaction): Promise<{ digest: string }> => {
@@ -785,10 +985,19 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     }
   }, [state.isAuthenticated, state.user]);
 
-  // Add this new function in the ZkLoginProvider component:
+  // Add a debugging wrapper for saveUserToDatabase function
   const saveUserToDatabase = async (userData: User) => {
+    // Add debug logging function
+    const debugLog = (message: string, data?: any) => {
+      if (state.isLoading) {
+        console.log(`[LOADING:DEBUG] ${message}`, data || '');
+      }
+    };
+
     try {
       console.log('Saving user to database:', userData);
+      debugLog('Making API request to save user');
+      performanceTracker.start('db_api_request');
       
       const response = await fetch('/api/users', {
         method: 'POST',
@@ -799,6 +1008,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           email: userData.email,
           walletAddress: userData.address,
           name: userData.displayName,
+          googleId: userData.googleId
         }),
       });
 
@@ -808,18 +1018,27 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           status: response.status,
           error: errorText
         });
+        debugLog('User save API request failed', { status: response.status });
+        performanceTracker.end('db_api_request');
         throw new Error(`Failed to save user to database: ${response.status} ${errorText}`);
       }
 
+      debugLog('API request successful, parsing response');
+      performanceTracker.start('parse_db_response');
       const savedUser = await response.json();
+      performanceTracker.end('parse_db_response');
+      performanceTracker.end('db_api_request');
       console.log('User saved to database successfully:', savedUser);
       
       // Update the user data with the ID from the database
       userData.id = savedUser.id;
+      debugLog('User ID assigned from database', { id: savedUser.id });
       
       return savedUser;
     } catch (error) {
       console.error('Error during user saving:', error);
+      debugLog('Exception during user save process', { error: String(error) });
+      performanceTracker.end('db_api_request');
       // We don't want to fail login if user saving fails
       // Just log the error and continue
       return null;
