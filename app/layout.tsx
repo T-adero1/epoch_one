@@ -4,6 +4,7 @@ import "./globals.css";
 import { ZkLoginProvider } from "@/app/contexts/ZkLoginContext";
 import { AppStateProvider } from "@/app/contexts/AppStateContext";
 import { Toaster } from "@/components/ui/toaster";
+import { PasswordProtection } from "@/components/PasswordProtection";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,9 @@ export default function RootLayout({
       >
         <AppStateProvider>
           <ZkLoginProvider>
-            {children}
+            <PasswordProtection>
+              {children}
+            </PasswordProtection>
           </ZkLoginProvider>
         </AppStateProvider>
         <Toaster />

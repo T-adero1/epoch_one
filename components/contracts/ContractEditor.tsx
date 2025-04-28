@@ -13,7 +13,7 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X,  Plus, Trash2, User, Send, ChevronLeft } from 'lucide-react'
+import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 
 
@@ -176,6 +176,20 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           </TabsList>
           <TabsContent value="edit" className="min-h-[500px]">
             <div className="border rounded-md min-h-[500px] bg-white">
+              <div className="p-4 border-b flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => {
+                    // TODO: Implement AI editing functionality
+                    console.log('AI edit clicked')
+                  }}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Edit with AI
+                </Button>
+              </div>
               <Textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
