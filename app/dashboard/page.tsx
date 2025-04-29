@@ -304,32 +304,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="opacity-40">
-          <div className="grid gap-6 md:grid-cols-3 mb-6">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-          </div>
+          
 
           <Card className="border-gray-100">
             <CardHeader className="flex flex-row items-center justify-between">
@@ -380,32 +355,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="opacity-40">
-          <div className="grid gap-6 md:grid-cols-3 mb-6">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Draft Contracts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Pending Signatures</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Completed Contracts</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 bg-slate-200 rounded w-16"></div>
-              </CardContent>
-            </Card>
-          </div>
+          
 
           <Card className="border-gray-100">
             <CardHeader className="flex flex-row items-center justify-between">

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import * as DialogPrimitive from "@radix-ui/react-dialog"
@@ -11,9 +11,7 @@ const PASSWORD = process.env.NEXT_PUBLIC_SITE_PASSWORD
 const PASSWORD_KEY = 'epochone_authenticated'
 
 // Clear any existing authentication on page load
-if (typeof window !== 'undefined') {
-  localStorage.removeItem(PASSWORD_KEY)
-}
+
 
 // Custom DialogContent without close button
 function CustomDialogContent({
