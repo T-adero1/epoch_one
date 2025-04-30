@@ -41,6 +41,48 @@ interface ContractDetail {
   }[];
 }
 
+// Near the top of the file, after the imports and interface definitions
+// Add this helper function for generating contract document
+
+function generateContractDocument(contractData: ContractDetail): string {
+  console.log('[ContractDocument] Starting document generation for contract:', contractData.id);
+  
+  // Simple PDF-like content in base64
+  // In a real app, this would create a proper PDF with signatures, etc.
+  const contractText = contractData.content || '';
+  const title = contractData.title || 'Untitled Contract';
+  const signers = contractData.metadata?.signers?.join(', ') || 'No signers';
+  
+  console.log('[ContractDocument] Document details:', {
+    title,
+    status: contractData.status,
+    contentLength: contractText.length,
+    signerCount: contractData.metadata?.signers?.length || 0,
+    signatureCount: contractData.signatures?.length || 0
+  });
+  
+  // Create a simple text representation
+  const documentContent = `
+    TITLE: ${title}
+    STATUS: ${contractData.status}
+    CREATED: ${new Date(contractData.createdAt).toISOString()}
+    SIGNERS: ${signers}
+    
+    CONTENT:
+    ${contractText}
+    
+    SIGNATURES:
+    ${contractData.signatures?.map(sig => 
+      `${sig.user.email} - ${sig.signedAt ? new Date(sig.signedAt).toISOString() : 'Pending'}`
+    ).join('\n') || 'No signatures'}
+  `;
+  
+  // Convert to base64
+  const base64Content = Buffer.from(documentContent).toString('base64');
+  console.log('[ContractDocument] Document generated successfully. Base64 length:', base64Content.length);
+  return base64Content;
+}
+
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
   const { isAuthenticated, isLoading, user, userAddress } = useZkLogin()
@@ -206,6 +248,8 @@ export default function ContractSigningPage() {
   }
   
   const handleSignContract = async () => {
+    console.log('[ContractSigning] Starting signature process for contract:', contractId);
+    
     if (!signatureData || !user?.email || !userAddress) {
       console.log('[ContractSigning] Cannot sign contract, missing required data:', {
         hasSignatureData: !!signatureData,
@@ -215,18 +259,23 @@ export default function ContractSigningPage() {
       return
     }
     
-    console.log('[ContractSigning] Starting contract signing process for:', {
-      contractId,
+    console.log('[ContractSigning] Signature data validation passed, proceeding with signature process');
+    console.log('[ContractSigning] User authenticated:', {
       userEmail: user.email,
-      hasWalletAddress: !!userAddress,
-      signatureDataLength: signatureData.length
-    })
+      walletAddress: userAddress.substring(0, 10) + '...',
+    });
     
     try {
       setSaving(true)
+      console.log('[ContractSigning] Setting saving state to true');
       
       const apiUrl = '/api/signatures'
-      console.log('[ContractSigning] Calling signatures API:', apiUrl)
+      console.log('[ContractSigning] Preparing API call to:', apiUrl)
+      
+      // Generate document data
+      console.log('[ContractSigning] Generating document content from contract data');
+      const documentBase64 = contract ? generateContractDocument(contract) : '';
+      console.log('[ContractSigning] Document generation complete, base64 length:', documentBase64.length);
       
       const requestData = {
         contractId,
@@ -234,11 +283,14 @@ export default function ContractSigningPage() {
         walletAddress: userAddress,
         signature: signatureData
       }
-      console.log('[ContractSigning] Signature request data:', {
-        ...requestData,
-        signature: signatureData ? `${signatureData.substring(0, 30)}...` : null
-      })
+      console.log('[ContractSigning] Prepared signature request payload:', {
+        contractId,
+        userEmail: user.email,
+        walletAddressLength: userAddress.length,
+        signatureLength: signatureData.length
+      });
       
+      console.log('[ContractSigning] Sending POST request to signatures API');
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -247,39 +299,131 @@ export default function ContractSigningPage() {
         body: JSON.stringify(requestData)
       })
       
-      console.log('[ContractSigning] Signature API response status:', response.status)
+      console.log('[ContractSigning] Signature API response received:', {
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText
+      });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        console.error('[ContractSigning] Signature API error:', {
+        console.error('[ContractSigning] Signature API error details:', {
           status: response.status,
+          statusText: response.statusText,
           error: errorData
         })
-        throw new Error('Failed to sign contract')
+        throw new Error(`Failed to sign contract: ${response.status} ${response.statusText}`)
       }
       
       const responseData = await response.json()
-      console.log('[ContractSigning] Signature created successfully:', responseData)
+      console.log('[ContractSigning] Signature API success response:', responseData)
       
       // Update local state
-      console.log('[ContractSigning] Updating signature status to SIGNED')
+      console.log('[ContractSigning] Updating local signature status to SIGNED')
       setSignatureStatus('SIGNED')
       
       // Refresh contract data to show updated state
-      console.log('[ContractSigning] Refreshing contract data')
+      console.log('[ContractSigning] Fetching updated contract data after signature')
       const updatedContract = await fetch(`/api/contracts/${contractId}`).then(res => res.json())
       console.log('[ContractSigning] Updated contract data received:', {
         id: updatedContract.id,
         status: updatedContract.status,
-        signatureCount: updatedContract.signatures?.length || 0
+        signatureCount: updatedContract.signatures?.length || 0,
+        allRequiredSignersHaveSigned: updatedContract.status === 'COMPLETED' || updatedContract.status === 'ACTIVE'
       })
       setContract(updatedContract)
       
-    } catch (err) {
+      // If contract is now COMPLETED and user is the owner, upload to Walrus
+      if (updatedContract.status === 'COMPLETED' && updatedContract.owner?.email === user.email) {
+        console.log('[ContractSigning] Contract COMPLETED and current user is owner, proceeding with Walrus upload');
+        console.log('[ContractSigning] Contract owner details:', {
+          ownerEmail: updatedContract.owner?.email,
+          currentUserEmail: user.email,
+          isMatch: updatedContract.owner?.email === user.email
+        });
+        
+        try {
+          console.log('[ContractSigning] Preparing Walrus upload request with document data');
+          console.log('[ContractSigning] Document base64 length for Walrus upload:', documentBase64.length);
+          
+          // Get the document content from the base64 we generated above
+          console.log('[ContractSigning] Sending POST request to upload_contract API');
+          const walrusUploadResponse = await fetch('/api/upload_contract', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              contractId: contractId,
+              contractContent: documentBase64,
+              isBase64: true,
+              context: 'testnet',
+              deletable: false
+            })
+          })
+          
+          console.log('[ContractSigning] Walrus upload API response received:', {
+            status: walrusUploadResponse.status,
+            ok: walrusUploadResponse.ok,
+            statusText: walrusUploadResponse.statusText
+          });
+          
+          if (!walrusUploadResponse.ok) {
+            console.error('[ContractSigning] Walrus upload failed with status:', walrusUploadResponse.status);
+            const errorText = await walrusUploadResponse.text().catch(e => 'Could not parse error response');
+            console.error('[ContractSigning] Walrus upload error details:', errorText);
+            // Don't throw error here - contract is still signed, just not uploaded to Walrus
+          } else {
+            const walrusData = await walrusUploadResponse.json()
+            console.log('[ContractSigning] ✅ Contract successfully uploaded to Walrus:', walrusData);
+            console.log('[ContractSigning] Walrus response keys:', Object.keys(walrusData));
+            
+            if (walrusData.walrusResponse) {
+              console.log('[ContractSigning] Walrus raw response analysis:');
+              console.log('[ContractSigning] - Keys in response:', Object.keys(walrusData.walrusResponse));
+              
+              // If there's a blob ID in the response, log it
+              const blobId = walrusData.walrusResponse.newlyCreated?.blobObject?.blobId || 
+                            walrusData.walrusResponse.alreadyCertified?.blobId;
+              
+              if (blobId) {
+                console.log('[ContractSigning] 🎉 Contract permanently stored on Walrus with blob ID:', blobId);
+              }
+            }
+            
+            // Update the contract record with Walrus blob ID if applicable
+            // This would require an additional API endpoint to update contract metadata
+            // For now, we just log the success
+          }
+        } catch (walrusErr: any) {
+          console.error('[ContractSigning] Exception during Walrus upload:', walrusErr);
+          console.error('[ContractSigning] Error details:', {
+            name: walrusErr.name,
+            message: walrusErr.message,
+            stack: walrusErr.stack
+          });
+          // Don't throw error - contract is still signed, just not uploaded to Walrus
+        }
+      } else {
+        console.log('[ContractSigning] Skipping Walrus upload:', {
+          contractStatus: updatedContract.status,
+          isCompleted: updatedContract.status === 'COMPLETED',
+          ownerEmail: updatedContract.owner?.email,
+          currentUserEmail: user.email,
+          isOwner: updatedContract.owner?.email === user.email
+        });
+      }
+      
+    } catch (err: any) {
       const errorMsg = 'Error signing contract. Please try again.'
-      console.error('[ContractSigning] Contract signing error:', err)
+      console.error('[ContractSigning] Exception in signing process:', {
+        error: err,
+        message: err.message,
+        stack: err.stack
+      });
       setError(errorMsg)
     } finally {
+      console.log('[ContractSigning] Signature process complete, resetting saving state');
       setSaving(false)
     }
   }
@@ -446,9 +590,9 @@ export default function ContractSigningPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>{contract.title}</CardTitle>
+              <CardTitle>{contract?.title || 'Contract'}</CardTitle>
               <CardDescription>
-                {contract.description}
+                {contract?.description || ''}
               </CardDescription>
             </div>
             {signatureStatus === 'SIGNED' && (
@@ -470,19 +614,19 @@ export default function ContractSigningPage() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="font-medium text-gray-500">Created By:</span>
-                    <p>{contract.owner?.name || contract.owner?.email}</p>
+                    <p>{contract?.owner?.name || contract?.owner?.email || 'Unknown'}</p>
                   </div>
                   <div>
                     <span className="font-medium text-gray-500">Created On:</span>
-                    <p>{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</p>
+                    <p>{contract ? format(new Date(contract.createdAt), 'MMM dd, yyyy') : 'Unknown'}</p>
                   </div>
                   <div>
                     <span className="font-medium text-gray-500">Status:</span>
-                    <p>{contract.status.charAt(0) + contract.status.slice(1).toLowerCase()}</p>
+                    <p>{contract ? contract.status.charAt(0) + contract.status.slice(1).toLowerCase() : 'Unknown'}</p>
                   </div>
                   <div>
                     <span className="font-medium text-gray-500">Signers:</span>
-                    <p>{contract.metadata?.signers?.length || 0} signers required</p>
+                    <p>{contract?.metadata?.signers?.length || 0} signers required</p>
                   </div>
                 </div>
               </div>
@@ -491,7 +635,7 @@ export default function ContractSigningPage() {
             <div className="border rounded-md p-6">
               <div className="prose max-w-none">
                 <h3 className="text-lg font-medium mb-4">Contract Content</h3>
-                {contract.content ? (
+                {contract?.content ? (
                   <pre className="whitespace-pre-wrap text-sm p-4 border rounded-md bg-gray-50">{contract.content}</pre>
                 ) : (
                   <p className="text-gray-500 italic">No content available</p>

@@ -26,6 +26,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Union, Optional, Any, BinaryIO
 import base64
+import hashlib
+import requests
+import time
 
 try:
     from walrus import WalrusClient, WalrusAPIError
@@ -251,6 +254,120 @@ class WalrusSDKManager:
         except Exception as e:
             print(f"Error deleting document: {e}")
             return False
+    
+    def upload_document_direct(self, content: bytes, content_type: str = "application/pdf", 
+                              epochs: int = 2, deletable: bool = False) -> str:
+        """
+        Upload document content directly to Walrus using HTTP API without creating temporary files.
+        
+        Args:
+            content: The binary content to upload
+            content_type: The MIME type of the content (default: application/pdf)
+            epochs: Number of epochs the blob should be stored for (default: 2)
+            deletable: Whether the blob should be deletable before expiry (default: False)
+            
+        Returns:
+            The blob ID of the uploaded document
+        """
+        print("\n=== STARTING DIRECT HTTP UPLOAD ===")
+        print(f"Content type: {content_type}")
+        print(f"Content size: {len(content)} bytes")
+        print(f"Epochs: {epochs}")
+        print(f"Deletable: {deletable}")
+        
+        # Calculate content hash for verification
+        hash_sha256 = hashlib.sha256(content).hexdigest()
+        print(f"Content SHA-256 hash: {hash_sha256}")
+        
+        # Prepare the direct upload URL
+        upload_url = f"{self.publisher_url}/blob"
+        print(f"Target URL: {upload_url}")
+        
+        # Prepare parameters
+        params = {
+            'epochs': epochs,
+            'deletable': 'true' if deletable else 'false'
+        }
+        print(f"Request parameters: {params}")
+        
+        # Set content type and other headers
+        headers = {
+            'Content-Type': content_type,
+        }
+        print(f"Request headers: {headers}")
+        
+        print(f"Starting HTTP POST request to {upload_url}")
+        try:
+            # Make the POST request directly with the binary content
+            print(f"Sending {len(content)} bytes via POST request...")
+            request_start_time = time.time()
+            
+            response = requests.post(
+                upload_url,
+                params=params,
+                headers=headers,
+                data=content
+            )
+            
+            request_duration = time.time() - request_start_time
+            print(f"POST request completed in {request_duration:.2f} seconds")
+            print(f"Response status code: {response.status_code}")
+            print(f"Response headers: {dict(response.headers)}")
+            
+            if response.status_code != 200:
+                print(f"ERROR: Upload failed with status code: {response.status_code}")
+                print(f"Response content: {response.text}")
+                raise Exception(f"Upload failed: {response.status_code} - {response.text}")
+            
+            # Parse the JSON response
+            print(f"Parsing JSON response...")
+            raw_response = response.json()
+            
+            if self.verbose:
+                print("Full API Response JSON:")
+                print(json.dumps(raw_response, indent=2))
+            
+            # Extract blob ID from the nested response structure
+            print("Extracting blob ID from response...")
+            blob_id = None
+            response_type = None
+            
+            if 'alreadyCertified' in raw_response:
+                response_type = "alreadyCertified"
+                blob_id = raw_response['alreadyCertified'].get('blobId')
+                print(f"Blob was already certified with ID: {blob_id}")
+            elif 'newlyCreated' in raw_response and 'blobObject' in raw_response['newlyCreated']:
+                response_type = "newlyCreated"
+                blob_object = raw_response['newlyCreated']['blobObject']
+                blob_id = blob_object.get('blobId')
+                print(f"New blob created with ID: {blob_id}")
+                print(f"Blob size: {blob_object.get('size')} bytes")
+                print(f"Creation time: {blob_object.get('creationTime')}")
+            
+            if not blob_id:
+                print(f"ERROR: Could not extract blob ID from response")
+                print(f"Response structure: {list(raw_response.keys())}")
+                sys.exit(1)
+            
+            print(f"SUCCESS! Document uploaded with blob ID: {blob_id}")
+            print(f"Response type: {response_type}")
+            if deletable:
+                print("Note: This blob is deletable and can be removed before expiry")
+            else:
+                print("Note: This blob is permanent and cannot be deleted before expiry")
+            
+            print("=== DIRECT HTTP UPLOAD COMPLETED ===\n")
+            # Return the blob ID
+            return blob_id
+        
+        except Exception as e:
+            print(f"ERROR DURING UPLOAD: {str(e)}")
+            print(f"Exception type: {type(e).__name__}")
+            print(f"Exception details: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            print("=== DIRECT HTTP UPLOAD FAILED ===\n")
+            raise
 
 
 def main():
