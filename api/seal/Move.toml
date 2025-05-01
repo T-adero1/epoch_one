@@ -1,0 +1,10 @@
+[package]
+name = "epoch_one_document_sharing"
+version = "0.1.0"
+published-at = "0xa39c1223eaf93fc5cc085e6c8113170959036319b0e24d706e821c1f82840ecf"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "mainnet" }
+
+[addresses]
+epoch_one_document_sharing = "0xa39c1223eaf93fc5cc085e6c8113170959036319b0e24d706e821c1f82840ecf"

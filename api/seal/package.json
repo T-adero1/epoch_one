@@ -1,0 +1,21 @@
+{
+  "name": "epoch-one-seal",
+  "version": "1.0.0",
+  "description": "SEAL encryption integration for Epoch One",
+  "main": "utils.js",
+  "scripts": {
+    "test": "node test_seal.js",
+    "build": "sui move build",
+    "publish": "sui client publish --gas-budget 100000000"
+  },
+  "dependencies": {
+    "@mysten/bcs": "^1.6.0",
+    "@mysten/sui.js": "^0.37.1",
+    "dotenv": "^16.0.3",
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
