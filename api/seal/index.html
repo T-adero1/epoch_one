@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seal Document Sharing Demo</title>
+    <!-- Dapp-kit and React dependencies -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/@tanstack/react-query/build/umd/index.production.js"></script>
+    <script crossorigin src="https://unpkg.com/@mysten/dapp-kit/dist/index.js"></script>
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@mysten/dapp-kit/dist/index.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .card {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #2563eb;
+        }
+        button {
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #1d4ed8;
+        }
+        button:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input[type="text"], 
+        input[type="file"],
+        textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .console {
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .console p {
+            margin: 0;
+            padding: 2px 0;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            background-color: #f1f5f9;
+            border-radius: 4px 4px 0 0;
+            margin-right: 5px;
+        }
+        .tab.active {
+            background-color: #2563eb;
+            color: white;
+        }
+        .hidden {
+            display: none;
+        }
+        .warning {
+            color: #d97706;
+            font-weight: 500;
+        }
+        .success {
+            color: #059669;
+            font-weight: 500;
+        }
+        .error {
+            color: #dc2626;
+            font-weight: 500;
+        }
+        .console .error {
+            color: #dc2626;
+        }
+        .console .success {
+            color: #059669;
+        }
+        .console .info {
+            color: #2563eb;
+        }
+        .step-counter {
+            display: inline-block;
+            background-color: #2563eb;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            text-align: center;
+            line-height: 24px;
+            margin-right: 10px;
+        }
+        .workflow-step {
+            opacity: 0.5;
+        }
+        .workflow-step.active {
+            opacity: 1;
+        }
+        /* Dapp-kit specific styles */
+        .wallet-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .connect-button {
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Seal Document Sharing Demo</h1>
+            <p>This demo shows how to encrypt, upload, download, and decrypt documents using Seal SDK and Walrus storage.</p>
+            
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('setup')">Setup</div>
+                <div class="tab" onclick="switchTab('admin')">Admin</div>
+                <div class="tab" onclick="switchTab('user')">User</div>
+                <div class="tab" onclick="switchTab('api')">API Testing</div>
+            </div>
+            
+            <!-- Setup Tab -->
+            <div id="setup" class="tab-content">
+                <h2>Environment Setup</h2>
+                <div class="form-group">
+                    <label for="package-id">Package ID:</label>
+                    <input type="text" id="package-id" placeholder="0xdef574b61e5833589723945cefb9e786d1b8d64209ae3d8eb66d3931d644fed1">
+                </div>
+                <div class="form-group">
+                    <label for="network">Network:</label>
+                    <select id="network">
+                        <option value="testnet" selected>Testnet</option>
+                        <option value="mainnet">Mainnet</option>
+                    </select>
+                </div>
+                <button onclick="saveSetup()">Save Configuration</button>
+                
+                <h2>Wallet Connection</h2>
+                <div class="form-group">
+                    <!-- Use only dapp-kit for wallet connection -->
+                    <div id="wallet-connection-container"></div>
+                </div>
+                
+                <h2>Wallet Setup</h2>
+                <div class="form-group">
+                    <label for="admin-key">Admin Private Key (for document group creation):</label>
+                    <input type="text" id="admin-key" placeholder="Private key without 0x prefix">
+                </div>
+                <div class="form-group">
+                    <label for="user-key">User Private Key (for decryption):</label>
+                    <input type="text" id="user-key" placeholder="Private key without 0x prefix">
+                </div>
+                <button onclick="testKeys()">Test Keys</button>
+                <div id="key-test-result"></div>
+            </div>
+            
+            <!-- Admin Tab -->
+            <div id="admin" class="tab-content hidden">
+                <h2>Document Group Management</h2>
+                <div class="form-group">
+                    <label for="group-name">Document Group Name:</label>
+                    <input type="text" id="group-name" placeholder="My Documents">
+                </div>
+                <div class="form-group">
+                    <label for="db-id">Database ID:</label>
+                    <input type="text" id="db-id" placeholder="doc-group-123">
+                </div>
+                <button onclick="createDocumentGroup()">Create Document Group</button>
+                
+                <div id="document-group-result" class="hidden">
+                    <h3>Document Group Created</h3>
+                    <div class="form-group">
+                        <label for="document-group-id">Document Group ID:</label>
+                        <input type="text" id="document-group-id" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin-cap-id">Admin Cap ID:</label>
+                        <input type="text" id="admin-cap-id" readonly>
+                    </div>
+                </div>
+                
+                <div id="add-user-section" class="hidden">
+                    <h3>Add User to Document Group</h3>
+                    <div class="form-group">
+                        <label for="user-address">User Address:</label>
+                        <input type="text" id="user-address" placeholder="0x...">
+                    </div>
+                    <button onclick="addUserToGroup()">Add User</button>
+                </div>
+            </div>
+            
+            <!-- User Tab -->
+            <div id="user" class="tab-content hidden">
+                <h2>Document Management</h2>
+                
+                <div class="workflow">
+                    <div class="workflow-step active" id="step1">
+                        <h3><span class="step-counter">1</span>Encrypt & Upload Document</h3>
+                        <div class="form-group">
+                            <label for="document-file">Select Document:</label>
+                            <input type="file" id="document-file">
+                        </div>
+                        <div class="form-group">
+                            <label for="db-document-id">Database Document ID:</label>
+                            <input type="text" id="db-document-id" placeholder="doc-123">
+                        </div>
+                        <button onclick="encryptAndUpload()">Encrypt & Upload</button>
+                        
+                        <div id="encrypt-result" class="hidden">
+                            <p class="success">Document encrypted and uploaded successfully!</p>
+                            <div class="form-group">
+                                <label for="blob-id">Walrus Blob ID:</label>
+                                <input type="text" id="blob-id" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="document-id-hex">Document ID:</label>
+                                <input type="text" id="document-id-hex" readonly>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="workflow-step" id="step2">
+                        <h3><span class="step-counter">2</span>Download & Decrypt Document</h3>
+                        <div class="form-group">
+                            <label for="blob-id-decrypt">Walrus Blob ID:</label>
+                            <input type="text" id="blob-id-decrypt" placeholder="Enter Blob ID to download">
+                        </div>
+                        <div class="form-group">
+                            <label for="document-id-decrypt">Document ID Hex:</label>
+                            <input type="text" id="document-id-decrypt" placeholder="Enter Document ID Hex">
+                        </div>
+                        <button onclick="downloadAndDecrypt()">Download & Decrypt</button>
+                        
+                        <div id="decrypt-result" class="hidden">
+                            <p class="success">Document decrypted successfully!</p>
+                            <div id="decrypted-content"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- API Testing Tab -->
+            <div id="api" class="tab-content hidden">
+                <h2>API Testing Tools</h2>
+                <div class="form-group">
+                    <label for="api-command">Select Command:</label>
+                    <select id="api-command">
+                        <option value="encrypt-upload">Encrypt & Upload Only</option>
+                        <option value="download">Download Only</option>
+                        <option value="decrypt">Decrypt Only</option>
+                        <option value="complete">Complete Workflow</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="api-parameters">Parameters (JSON):</label>
+                    <textarea id="api-parameters" rows="5"></textarea>
+                </div>
+                <button onclick="runApiCommand()">Run Command</button>
+                
+                <div class="console" id="api-console">
+                    <p class="info">API console ready. Select a command to run.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dapp-kit Wallet Connection React component -->
+    <script type="text/babel">
+        // React component for wallet connection using dapp-kit
+        const { SuiClientProvider, WalletProvider, ConnectButton, useCurrentAccount } = window.DappKit;
+        const { QueryClient, QueryClientProvider } = window.ReactQuery;
+
+        // Network configuration
+        const networkConfig = {
+            testnet: { url: 'https://fullnode.testnet.sui.io:443' },
+            mainnet: { url: 'https://sui-mainnet-rpc.nodereal.io' }
+        };
+
+        // Create a query client instance
+        const queryClient = new QueryClient();
+
+        // Wallet Status component
+        function WalletStatus() {
+            const currentAccount = useCurrentAccount();
+            
+            // Update global state when account changes
+            React.useEffect(() => {
+                if (currentAccount && window.state) {
+                    window.state.walletAddress = currentAccount.address;
+                    updateWalletStatus();
+                }
+            }, [currentAccount]);
+            
+            return (
+                <div>
+                    {currentAccount ? (
+                        <div className="wallet-connected">
+                            <p className="success">Connected: {currentAccount.address}</p>
+                        </div>
+                    ) : (
+                        <div className="wallet-disconnected">
+                            <p>No wallet connected</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // App component
+        function WalletApp() {
+            return (
+                <div className="wallet-container">
+                    <div className="connect-button">
+                        <ConnectButton />
+                    </div>
+                    <WalletStatus />
+                </div>
+            );
+        }
+
+        // Initialize React component
+        function renderWalletConnection() {
+            const network = document.getElementById('network').value || 'testnet';
+            
+            ReactDOM.createRoot(document.getElementById('wallet-connection-container')).render(
+                <QueryClientProvider client={queryClient}>
+                    <SuiClientProvider networks={networkConfig} defaultNetwork={network}>
+                        <WalletProvider autoConnect>
+                            <WalletApp />
+                        </WalletProvider>
+                    </SuiClientProvider>
+                </QueryClientProvider>
+            );
+        }
+
+        // Initialize the wallet connection when the page loads
+        window.addEventListener('load', renderWalletConnection);
+    </script>
+
+    <!-- Main application script -->
+    <script>
+        // Application state
+        const state = {
+            walletAddress: '',
+            documentGroupId: '',
+            adminCapId: '',
+            adminKey: '',
+            userKey: '',
+            packageId: localStorage.getItem('packageId') || '0xdef574b61e5833589723945cefb9e786d1b8d64209ae3d8eb66d3931d644fed1',
+            network: localStorage.getItem('network') || 'testnet',
+            blobId: '',
+            documentIdHex: ''
+        };
+
+        // Initialize wallet status
+        window.addEventListener('load', function() {
+            console.log("Application initialized");
+            
+            // Restore state from localStorage
+            if (localStorage.getItem('documentGroupId')) {
+                state.documentGroupId = localStorage.getItem('documentGroupId');
+                document.getElementById('document-group-id').value = state.documentGroupId;
+            }
+            
+            if (localStorage.getItem('adminCapId')) {
+                state.adminCapId = localStorage.getItem('adminCapId');
+                document.getElementById('admin-cap-id').value = state.adminCapId;
+            }
+            
+            if (state.documentGroupId) {
+                document.getElementById('document-group-result').classList.remove('hidden');
+                document.getElementById('add-user-section').classList.remove('hidden');
+            }
+            
+            if (localStorage.getItem('adminKey')) {
+                state.adminKey = localStorage.getItem('adminKey');
+                document.getElementById('admin-key').value = state.adminKey;
+            }
+            
+            if (localStorage.getItem('userKey')) {
+                state.userKey = localStorage.getItem('userKey');
+                document.getElementById('user-key').value = state.userKey;
+            }
+            
+            document.getElementById('package-id').value = state.packageId;
+            document.getElementById('network').value = state.network;
+
+            // Initialize wallet status
+            updateWalletStatus();
+        });
+
+        // Tab switching
+        function switchTab(tabId) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabId).classList.remove('hidden');
+            
+            // Update active tab style
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Find and activate the clicked tab
+            const tabs = document.querySelectorAll('.tab');
+            for (let tab of tabs) {
+                if (tab.textContent.toLowerCase() === tabId) {
+                    tab.classList.add('active');
+                    break;
+                }
+            }
+        }
+
+        // Save configuration
+        function saveSetup() {
+            state.packageId = document.getElementById('package-id').value;
+            state.network = document.getElementById('network').value;
+            
+            localStorage.setItem('packageId', state.packageId);
+            localStorage.setItem('network', state.network);
+            
+            // Reinitialize the wallet connection with the new network
+            renderWalletConnection();
+            
+            alert('Configuration saved successfully!');
+        }
+
+        // Update wallet status UI
+        function updateWalletStatus() {
+            console.log("Wallet status updated, address:", state.walletAddress);
+            const walletStatusEl = document.getElementById('wallet-connection-container');
+            if (state.walletAddress) {
+                walletStatusEl.innerHTML = `<p class="success">Connected: ${state.walletAddress}</p>`;
+            } else {
+                walletStatusEl.innerHTML = '<p>No wallet connected</p>';
+            }
+        }
+
+        // Test keys
+        function testKeys() {
+            state.adminKey = document.getElementById('admin-key').value;
+            state.userKey = document.getElementById('user-key').value;
+            
+            localStorage.setItem('adminKey', state.adminKey);
+            localStorage.setItem('userKey', state.userKey);
+            
+            const resultEl = document.getElementById('key-test-result');
+            
+            // Make API call to test keys
+            fetch('/api/test-keys', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    adminKey: state.adminKey,
+                    userKey: state.userKey
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    resultEl.innerHTML = `<p class="success">Keys validated! Admin address: ${data.adminAddress}, User address: ${data.userAddress}</p>`;
+                } else {
+                    resultEl.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                }
+            })
+            .catch(error => {
+                resultEl.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            });
+        }
+
+        // Create document group
+        function createDocumentGroup() {
+            const groupName = document.getElementById('group-name').value;
+            const dbId = document.getElementById('db-id').value;
+            
+            if (!groupName || !dbId) {
+                alert('Please enter both group name and database ID');
+                return;
+            }
+            
+            if (!state.walletAddress) {
+                alert('Please connect your wallet first');
+                return;
+            }
+            
+            // Execute createDocumentGroup script
+            fetch('/api/create-document-group', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    address: state.walletAddress,
+                    groupName,
+                    dbId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (data.requiresSignature) {
+                        console.log("Transaction requires wallet signature");
+                        // The dapp-kit wallet will handle the signature
+                        alert('Please approve the transaction in your wallet');
+                    } else {
+                        processGroupCreationResult(data);
+                    }
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+        }
+
+        // Process document group creation result
+        function processGroupCreationResult(data) {
+            state.documentGroupId = data.documentGroupId;
+            state.adminCapId = data.adminCapId;
+            
+            localStorage.setItem('documentGroupId', state.documentGroupId);
+            localStorage.setItem('adminCapId', state.adminCapId);
+            
+            document.getElementById('document-group-id').value = state.documentGroupId;
+            document.getElementById('admin-cap-id').value = state.adminCapId;
+            document.getElementById('document-group-result').classList.remove('hidden');
+            document.getElementById('add-user-section').classList.remove('hidden');
+            
+            alert('Document group created successfully!');
+        }
+
+        // Add user to document group
+        function addUserToGroup() {
+            const userAddress = document.getElementById('user-address').value;
+            
+            if (!userAddress) {
+                alert('Please enter a user address');
+                return;
+            }
+            
+            if (!state.walletAddress) {
+                alert('Please connect your wallet first');
+                return;
+            }
+            
+            // Execute addUserToGroup script
+            fetch('/api/add-user', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    address: state.walletAddress,
+                    documentGroupId: state.documentGroupId,
+                    adminCapId: state.adminCapId,
+                    userAddress
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('User added successfully!');
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+        }
+
+        // Encrypt and upload document
+        function encryptAndUpload() {
+            const fileInput = document.getElementById('document-file');
+            const dbDocumentId = document.getElementById('db-document-id').value;
+            
+            if (!fileInput.files.length) {
+                alert('Please select a file to encrypt');
+                return;
+            }
+            
+            if (!dbDocumentId) {
+                alert('Please enter a database document ID');
+                return;
+            }
+            
+            if (!state.walletAddress) {
+                alert('Please connect your wallet first');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('dbDocumentId', dbDocumentId);
+            formData.append('documentGroupId', state.documentGroupId || 'mock');
+            formData.append('packageId', state.packageId);
+            formData.append('address', state.walletAddress);
+            
+            // Execute encryptAndUpload script
+            fetch('/api/encrypt-upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    state.blobId = data.blobId;
+                    state.documentIdHex = data.documentIdHex;
+                    
+                    document.getElementById('blob-id').value = state.blobId;
+                    document.getElementById('document-id-hex').value = state.documentIdHex;
+                    document.getElementById('encrypt-result').classList.remove('hidden');
+                    
+                    // Also populate download fields
+                    document.getElementById('blob-id-decrypt').value = state.blobId;
+                    document.getElementById('document-id-decrypt').value = state.documentIdHex;
+                    
+                    // Activate step 2
+                    document.getElementById('step1').classList.remove('active');
+                    document.getElementById('step2').classList.add('active');
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+        }
+
+        // Download and decrypt document
+        function downloadAndDecrypt() {
+            const blobId = document.getElementById('blob-id-decrypt').value;
+            const documentIdHex = document.getElementById('document-id-decrypt').value;
+            
+            if (!blobId || !documentIdHex) {
+                alert('Please enter both Blob ID and Document ID');
+                return;
+            }
+            
+            if (!state.walletAddress) {
+                alert('Please connect your wallet first');
+                return;
+            }
+            
+            // First step: Download the encrypted file and prepare for decryption
+            fetch('/api/download-decrypt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    blobId,
+                    documentIdHex,
+                    address: state.walletAddress,
+                    documentGroupId: state.documentGroupId,
+                    packageId: state.packageId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (data.needsSignature) {
+                        console.log("Decryption requires wallet signature");
+                        // The dapp-kit wallet will handle the signature
+                        alert('Please approve the transaction in your wallet');
+                    } else {
+                    document.getElementById('decrypt-result').classList.remove('hidden');
+                    
+                    // Handle file display (depends on file type)
+                        displayDecryptedFile(data.fileContent, data.fileType);
+                    }
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                alert(`Error: ${error.message}`);
+            });
+        }
+        
+        // Display decrypted file based on file type
+        function displayDecryptedFile(fileContent, fileType) {
+            const decryptedContent = document.getElementById('decrypted-content');
+            
+            if (fileType.startsWith('image/')) {
+                decryptedContent.innerHTML = `<img src="data:${fileType};base64,${fileContent}" alt="Decrypted image">`;
+            } else if (fileType === 'application/pdf') {
+                decryptedContent.innerHTML = `<embed src="data:application/pdf;base64,${fileContent}" type="application/pdf" width="100%" height="500px" />`;
+            } else {
+                decryptedContent.innerHTML = `<a href="data:${fileType};base64,${fileContent}" download="decrypted_file">Download Decrypted File</a>`;
+            }
+        }
+
+        // Run API command
+        function runApiCommand() {
+            const command = document.getElementById('api-command').value;
+            let parameters = {};
+            
+            try {
+                const paramText = document.getElementById('api-parameters').value;
+                if (paramText) {
+                    parameters = JSON.parse(paramText);
+                }
+            } catch (e) {
+                log('error', 'Invalid JSON parameters');
+                return;
+            }
+            
+            // Clear console
+            const console = document.getElementById('api-console');
+            console.innerHTML = '';
+            
+            log('info', `Executing command: ${command}`);
+            
+            // Execute corresponding script directly instead of via API
+            let script;
+            switch (command) {
+                case 'encrypt-upload':
+                    script = 'node encrypt_upload.js';
+                    break;
+                case 'download':
+                    script = 'node download.js';
+                    break;
+                case 'decrypt':
+                    script = 'node decrypt_document.js';
+                    break;
+                case 'complete':
+                    script = 'node encrypt_upload_download_decrypt.js';
+                    break;
+                default:
+                    log('error', 'Unknown command');
+                    return;
+            }
+            
+            // Simulate running the script with parameters
+            log('info', `$ ${script} with params: ${JSON.stringify(parameters)}`);
+            log('info', 'This is a simulation. In a real implementation, we would execute the script.');
+            
+            // Simulate output
+            setTimeout(() => {
+                log('success', 'Command completed successfully');
+            }, 1000);
+        }
+
+        // Log to API console
+        function log(type, message) {
+            const console = document.getElementById('api-console');
+            const logEntry = document.createElement('p');
+            logEntry.classList.add(type);
+            logEntry.textContent = message;
+            console.appendChild(logEntry);
+            console.scrollTop = console.scrollHeight;
+        }
+    </script>
+</body>
+</html> 

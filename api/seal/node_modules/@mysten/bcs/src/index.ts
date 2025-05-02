@@ -11,12 +11,10 @@
  * @property {BcsReader}
  */
 
-import { fromB58, fromBase58, toB58, toBase58 } from './b58.js';
-import { fromB64, fromBase64, toB64, toBase64 } from './b64.js';
+import { toBase58, fromBase58, toBase64, fromBase64, toHex, fromHex } from '@mysten/utils';
 import type { BcsTypeOptions } from './bcs-type.js';
 import { BcsType, isSerializedBcs, SerializedBcs } from './bcs-type.js';
 import { bcs } from './bcs.js';
-import { fromHEX, fromHex, toHEX, toHex } from './hex.js';
 import { BcsReader } from './reader.js';
 import type {
 	EnumInputShape,
@@ -36,16 +34,10 @@ export {
 	type BcsTypeOptions,
 	SerializedBcs,
 	isSerializedBcs,
-	toB58,
-	fromB58,
 	toBase58,
 	fromBase58,
-	toB64,
-	fromB64,
 	toBase64,
 	fromBase64,
-	fromHEX,
-	toHEX,
 	toHex,
 	fromHex,
 	encodeStr,
@@ -60,3 +52,21 @@ export {
 	type EnumInputShape,
 	type EnumOutputShapeWithKeys,
 };
+
+/** @deprecated use toBase58 instead */
+export const toB58 = toBase58;
+
+/** @deprecated use fromBase58 instead */
+export const fromB58 = fromBase58;
+
+/** @deprecated use toBase64 instead */
+export const toB64 = toBase64;
+
+/** @deprecated use fromBase64 instead */
+export const fromB64 = fromBase64;
+
+/** @deprecated use toHex instead */
+export const toHEX = toHex;
+
+/** @deprecated use fromHex instead */
+export const fromHEX = fromHex;

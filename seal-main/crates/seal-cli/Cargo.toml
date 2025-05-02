@@ -1,0 +1,15 @@
+[package]
+name = "seal-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+fastcrypto.workspace = true
+rand.workspace = true
+serde.workspace = true
+bcs.workspace = true
+
+crypto = { path = "../crypto" }

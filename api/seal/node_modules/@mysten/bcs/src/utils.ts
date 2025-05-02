@@ -1,9 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fromBase58, toBase58 } from './b58.js';
-import { fromBase64, toBase64 } from './b64.js';
-import { fromHex, toHex } from './hex.js';
+import { fromBase58, fromBase64, fromHex, toBase58, toBase64, toHex } from '@mysten/utils';
 import type { Encoding } from './types.js';
 
 /**

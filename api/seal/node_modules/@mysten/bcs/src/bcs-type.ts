@@ -1,9 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fromBase58, toBase58 } from './b58.js';
-import { fromBase64, toBase64 } from './b64.js';
-import { fromHex, toHex } from './hex.js';
+import { fromBase58, fromBase64, toBase58, toBase64, fromHex, toHex } from '@mysten/utils';
 import { BcsReader } from './reader.js';
 import { ulebEncode } from './uleb.js';
 import type { BcsWriterOptions } from './writer.js';

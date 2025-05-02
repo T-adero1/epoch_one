@@ -1,6 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Simplify } from '@mysten/utils';
 import type { BcsType } from './bcs-type.js';
 
 /**
@@ -13,7 +14,6 @@ export type InferBcsType<T extends BcsType<any>> = T extends BcsType<infer U, an
 export type InferBcsInput<T extends BcsType<any, any>> =
 	T extends BcsType<any, infer U> ? U : never;
 
-type Merge<T> = T extends object ? { [K in keyof T]: T[K] } : never;
 export type EnumOutputShape<
 	T extends Record<string, unknown>,
 	Keys extends string = Extract<keyof T, string>,
@@ -30,7 +30,7 @@ export type EnumOutputShape<
 
 export type EnumOutputShapeWithKeys<T extends Record<string, unknown>, Keys extends string> = {
 	[K in keyof T]: Exclude<Keys, K> extends infer Empty extends string
-		? Merge<
+		? Simplify<
 				{ [K2 in K]: T[K] } & { [K in Empty]?: never } & {
 					$kind: K;
 				}

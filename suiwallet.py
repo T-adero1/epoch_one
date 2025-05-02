@@ -5,7 +5,7 @@ import hmac
 import base64
 from typing import Dict, Optional, Union
 
-import nacl.signing
+
 from mnemonic import Mnemonic
 
 class SuiWallet:

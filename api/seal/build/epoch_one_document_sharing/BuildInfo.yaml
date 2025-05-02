@@ -5,7 +5,7 @@ compiled_package_info:
     epoch_one_document_sharing: "0000000000000000000000000000000000000000000000000000000000000000"
     std: "0000000000000000000000000000000000000000000000000000000000000001"
     sui: "0000000000000000000000000000000000000000000000000000000000000002"
-  source_digest: 2F5402641D99B65E1715CD8212CDDC00AEAB163A071E742FE03F92D96F237C9C
+  source_digest: 7E9E2A89AC20C605DA2749B92124196D9CB1B167BF0257D81D86F50748CF949F
   build_flags:
     dev_mode: false
     test_mode: false
@@ -13,7 +13,7 @@ compiled_package_info:
     save_disassembly: false
     install_dir: ~
     force_recompilation: false
-    lock_file: "./Move.lock"
+    lock_file: ".\\Move.lock"
     fetch_deps_only: false
     skip_fetch_latest_git_deps: false
     default_flavor: sui
