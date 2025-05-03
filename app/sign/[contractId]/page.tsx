@@ -347,6 +347,13 @@ export default function ContractSigningPage() {
           console.log('[ContractSigning] Document base64 length for Walrus upload:', documentBase64.length);
           
           // Get the document content from the base64 we generated above
+          console.log('[DEBUG] Attempting to upload to URL:', apiUrl);
+          console.log('[DEBUG] Request data:', {
+            contractId,
+            documentContent: documentBase64 ? documentBase64.length + ' bytes' : 'none',
+            isBase64: true,
+          });
+          
           console.log('[ContractSigning] Sending POST request to upload_contract API');
           const walrusUploadResponse = await fetch('/api/upload_contract', {
             method: 'POST',

@@ -6,11 +6,13 @@ import sys
 import base64
 import tempfile
 import io
+import requests
 from urllib.parse import parse_qs
 
 # Add the root directory to path so we can import the WalrusSDKManager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.walrus_sdk_manager import WalrusSDKManager
+from api.encrypt_and_upload import process_encrypt_and_upload
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -54,6 +56,58 @@ class handler(BaseHTTPRequestHandler):
         
         self.wfile.write(json.dumps(response).encode())
 
+def fetch_wallet_addresses(contract_id=None, signer_emails=None):
+    """Fetch wallet addresses for the signers of a contract"""
+    print(f"Fetching wallet addresses for contract {contract_id}")
+    
+    try:
+        if contract_id:
+            # Fetch contract details to get signer emails
+            app_url = os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')
+            contract_url = f"{app_url}/api/contracts/{contract_id}"
+            print(f"Fetching contract details from {contract_url}")
+            
+            contract_response = requests.get(contract_url)
+            if not contract_response.ok:
+                print(f"Error fetching contract: {contract_response.status_code}")
+                return []
+            
+            contract_data = contract_response.json()
+            signer_emails = contract_data.get('metadata', {}).get('signers', [])
+            print(f"Found signer emails: {signer_emails}")
+        
+        if not signer_emails or len(signer_emails) == 0:
+            print("No signer emails found")
+            return []
+            
+        # Fetch wallet addresses for each signer
+        wallet_addresses = []
+        app_url = os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')
+        
+        for email in signer_emails:
+            user_url = f"{app_url}/api/users?email={email}"
+            print(f"Fetching user details for {email} from {user_url}")
+            
+            user_response = requests.get(user_url)
+            if not user_response.ok:
+                print(f"Error fetching user {email}: {user_response.status_code}")
+                continue
+            
+            user_data = user_response.json()
+            wallet_address = user_data.get('walletAddress')
+            
+            if wallet_address:
+                print(f"Found wallet address for {email}: {wallet_address}")
+                wallet_addresses.append(wallet_address)
+            else:
+                print(f"No wallet address found for {email}")
+        
+        print(f"Returning {len(wallet_addresses)} wallet addresses")
+        return wallet_addresses
+    except Exception as e:
+        print(f"Error fetching wallet addresses: {str(e)}")
+        return []
+
 def process_upload(data):
     """Process the upload request data and return response"""
     print("Processing upload request", data.get('contractId'))
@@ -80,6 +134,59 @@ def process_upload(data):
     # Hash the document
     hash_sha256 = hashlib.sha256(contract_content).hexdigest()
     print(f"Document hash (SHA-256): {hash_sha256}")
+    
+    # Check if the request is for SEAL encryption
+    use_seal = data.get('useSeal', True)
+    signer_addresses = data.get('signerAddresses', [])
+    
+    # If SEAL is enabled but no signer addresses are provided, fetch them from the database
+    if use_seal and not signer_addresses:
+        print("No signer addresses provided, fetching from database")
+        # If metadata.signers is provided in the data, use it to fetch wallet addresses
+        signer_emails = data.get('metadata', {}).get('signers', [])
+        if signer_emails:
+            print(f"Using provided signer emails: {signer_emails}")
+            signer_addresses = fetch_wallet_addresses(signer_emails=signer_emails)
+        else:
+            # Otherwise, try to fetch from existing contract
+            print(f"Fetching signers for contract: {contract_id}")
+            signer_addresses = fetch_wallet_addresses(contract_id=contract_id)
+    
+    if use_seal and signer_addresses:
+        print(f"Using SEAL encryption for document with {len(signer_addresses)} signer addresses")
+        
+        # Prepare data for SEAL encryption
+        seal_data = {
+            'contractId': contract_id,
+            'documentContent': base64.b64encode(contract_content).decode('utf-8') if isinstance(contract_content, bytes) else contract_content,
+            'isBase64': True if isinstance(contract_content, bytes) else False,
+            'signerAddresses': signer_addresses
+        }
+        
+        # Process SEAL encryption and upload
+        try:
+            seal_response = process_encrypt_and_upload(seal_data)
+            
+            if seal_response.get('encrypted', False):
+                print("SEAL encryption and upload successful")
+                
+                # Add the hash and contract ID to the response
+                seal_response['contractId'] = contract_id
+                seal_response['hash'] = hash_sha256
+                
+                return seal_response
+            else:
+                print("SEAL encryption failed, falling back to standard upload")
+                # Continue with standard upload
+        except Exception as e:
+            print(f"SEAL encryption error: {str(e)}")
+            print("Falling back to standard upload")
+            # Continue with standard upload
+    else:
+        if use_seal:
+            print("SEAL encryption enabled but no signer addresses available, using standard upload")
+        else:
+            print("SEAL encryption not requested, using standard upload")
     
     # Create a temporary file only if the SDK requires a file path
     # Initialize Walrus SDK Manager
