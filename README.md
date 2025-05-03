@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sui Wallet Generator
 
-## Getting Started
+A Python implementation of a Sui blockchain wallet generator with mnemonic support.
 
-First, run the development server:
+## Features
+
+- Generate new Sui wallets with random keys
+- Recover wallets from mnemonic phrases (BIP39 seed phrases)
+- Create wallets from existing private keys
+- Sign messages and verify signatures
+- Generate Sui-compatible addresses
+
+## Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Usage
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Generate a new wallet
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```python
+from suiwallet import generate_wallet
 
-## Learn More
+wallet = generate_wallet()
+wallet_info = wallet.to_dict()
 
-To learn more about Next.js, take a look at the following resources:
+print(f"Address: {wallet_info['address']}")
+print(f"Public Key: {wallet_info['publicKey']}")
+print(f"Private Key: {wallet_info['privateKey']}")
+print(f"Mnemonic: {wallet_info['mnemonic']}")
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Recover a wallet from mnemonic
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```python
+from suiwallet import wallet_from_mnemonic
 
-## Deploy on Vercel
+mnemonic = "your twelve word mnemonic phrase goes here"
+wallet = wallet_from_mnemonic(mnemonic)
+print(f"Recovered Address: {wallet.address}")
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Create a wallet from private key
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```python
+from suiwallet import wallet_from_private_key
+
+# Can accept hex string with or without 0x prefix
+private_key = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+wallet = wallet_from_private_key(private_key)
+print(f"Wallet Address: {wallet.address}")
+```
+
+### Sign and verify messages
+
+```python
+message = b"Hello Sui!"
+signature = wallet.sign_message(message)
+print(f"Signature: 0x{signature.hex()}")
+
+is_valid = wallet.verify_signature(message, signature)
+print(f"Signature is valid: {is_valid}")
+```
+
+## Notes
+
+This implementation uses:
+- PyNaCl for Ed25519 cryptography operations
+- The mnemonic package for BIP39 seed phrase generation
+- Standard Python libraries for the rest of the functionality
+
+For production use, additional security measures and proper key derivation should be implemented.

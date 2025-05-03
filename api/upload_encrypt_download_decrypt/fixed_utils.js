@@ -39,11 +39,11 @@ function privateKeyToKeypair(privateKey) {
   return keypair;
 }
 
-// Create a random document ID by combining a document group ID (allowlist ID) with a random nonce
-function createDocumentId(allowlistId) {
+// Create a document ID by combining a document group ID (allowlist ID) with a random or deterministic nonce
+function createDocumentId(allowlistId, contractId, options = {}) {
   console.log('\n🔍 STEP 3: Generating document ID from allowlist ID...');
   console.log(`- Allowlist ID: ${allowlistId}`);
-  console.log('- Document ID = allowlist ID prefix + random nonce');
+  console.log('- Document ID = allowlist ID prefix + salt');
   console.log('- This ID is critical for security - MUST be created BEFORE encryption');
   
   try {
@@ -51,10 +51,19 @@ function createDocumentId(allowlistId) {
     const allowlistBytes = fromHEX(allowlistId);
     console.log(`- Allowlist bytes length: ${allowlistBytes.length}`);
     
-    // Create a random nonce (5 bytes)
-    const nonce = crypto.randomBytes(5);
-    console.log(`- Generated random nonce: ${Buffer.from(nonce).toString('hex')}`);
-    console.log(`- Nonce length: ${nonce.length} bytes`);
+    let nonce;
+    
+    // Check if we should generate a deterministic salt
+    if (options.publicKeys && options.publicKeys.length > 0) {
+      nonce = generateDeterministicSalt(contractId, options.publicKeys);
+      console.log('- Using deterministic salt generation with public keys');
+    } else {
+      // Create a random nonce (5 bytes)
+      nonce = crypto.randomBytes(5);
+      console.log(`- Generated random nonce: ${Buffer.from(nonce).toString('hex')}`);
+    }
+    
+    console.log(`- Nonce/salt length: ${nonce.length} bytes`);
     
     // Combine into a single ID (allowlistId + nonce)
     const fullIdBytes = new Uint8Array([...allowlistBytes, ...nonce]);
@@ -62,15 +71,20 @@ function createDocumentId(allowlistId) {
     
     // Convert to hex representation for use with SEAL
     const documentIdHex = toHex(fullIdBytes);
+    const salt = toHex(nonce);
+    
     console.log(`✅ Document ID generated successfully`);
     console.log(`- Document ID (hex): ${documentIdHex}`);
+    console.log(`- Salt (hex): ${salt}`);
     console.log('- IMPORTANT: This document ID must be used for encryption');
+    console.log('- IMPORTANT: The salt must be saved for recovery');
     
     return {
       documentIdHex,
       fullIdBytes,
       allowlistBytes,
-      nonce
+      nonce,
+      salt  // Return salt in hex format for easy storage
     };
   } catch (error) {
     console.error('❌ Failed to create document ID:', error);
@@ -184,6 +198,37 @@ async function waitForTransactionFinality(client, transactionDigest, maxAttempts
   return false;
 }
 
+/**
+ * Generate a deterministic salt using public keys
+ * This ensures the same document ID is generated for the same set of parties
+ * 
+ * @param {string} contractId - Contract ID to include in the salt calculation
+ * @param {Array<string>} publicKeys - Array of public keys in hex format
+ * @returns {Uint8Array} - 5-byte salt
+ */
+function generateDeterministicSalt(contractId, publicKeys) {
+  console.log('\n🔐 Generating deterministic salt from public keys...');
+  console.log(`- Contract ID: ${contractId}`);
+  console.log(`- Number of public keys: ${publicKeys.length}`);
+  
+  // Sort public keys to ensure order independence
+  const sortedKeys = [...publicKeys].sort();
+  console.log('- Sorted public keys to ensure consistent results regardless of order');
+  
+  // Combine contract ID and public keys into a single string
+  const combinedInput = contractId + sortedKeys.join('');
+  
+  // Create a hash
+  const saltHash = crypto.createHash('sha256').update(combinedInput);
+  // Extract first 5 bytes for the salt
+  const salt = Buffer.from(saltHash.digest()).slice(0, 5);
+  
+  console.log(`- Generated deterministic salt: ${salt.toString('hex')}`);
+  console.log('- This salt will be the same for the same public keys and contract ID');
+  
+  return salt;
+}
+
 module.exports = {
   initSuiClient,
   privateKeyToKeypair,
@@ -192,5 +237,6 @@ module.exports = {
   getRandomWalrusEndpoint,
   saveToFile,
   readFromFile,
-  waitForTransactionFinality
+  waitForTransactionFinality,
+  generateDeterministicSalt
 };

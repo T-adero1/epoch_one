@@ -22,7 +22,8 @@ NETWORK = os.environ.get('NETWORK', 'testnet')
 MODULE_NAME = os.environ.get('MODULE_NAME', 'allowlist')
 
 # Path to the Node.js SEAL integration scripts
-SEAL_SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'upload_encrypt_download_decrypt')
+SEAL_SCRIPT_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api', 'upload_encrypt_download_decrypt'))
+print(f"[SEAL] Scripts directory path: {SEAL_SCRIPT_PATH}")
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -113,370 +114,138 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
         temp_file.write(content_bytes)
     
     try:
-        # Step 1: Create an allowlist for this contract
-        allowlist_id, cap_id = create_allowlist(contract_id)
-        if not allowlist_id or not cap_id:
-            raise ValueError("Failed to create allowlist")
-        
-        # Step 2: Add signers to the allowlist
-        add_users_to_allowlist(allowlist_id, cap_id, signer_addresses)
-        
-        # Step 3: Generate document ID using allowlist ID
-        document_id_hex = create_document_id(allowlist_id, contract_id)
-        
-        # Step 4: Encrypt the document
-        encrypted_file_path = encrypt_document(temp_file_path, document_id_hex)
-        
-        # Step 5: Upload to Walrus
-        walrus_manager = WalrusSDKManager(context=NETWORK, verbose=True)
-        blob_id = walrus_manager.upload_document(
-            encrypted_file_path,
-            epochs=2,
-            deletable=False
-        )
-        
-        # Step 6: Register blob in allowlist
-        publish_blob_to_allowlist(allowlist_id, cap_id, blob_id)
-        
-        # Prepare response with metadata
-        response_data = {
-            'contractId': contract_id,
-            'encrypted': True,
-            'blobId': blob_id,
-            'allowlistId': allowlist_id,
-            'capId': cap_id,
-            'documentId': document_id_hex,
-            'signerAddresses': signer_addresses,
-            'encryption': {
-                'method': 'seal',
-                'packageId': SEAL_PACKAGE_ID,
-                'allowlistId': allowlist_id,
-                'documentId': document_id_hex,
-                'signerAddresses': signer_addresses
-            }
+        # Create a configuration file for the SEAL operations
+        config = {
+            "operation": "encrypt",
+            "documentPath": temp_file_path,
+            "contractId": contract_id,
+            "signerAddresses": signer_addresses,
+            "adminPrivateKey": ADMIN_PRIVATE_KEY or "admin_key_placeholder",
+            "sealPackageId": SEAL_PACKAGE_ID or "seal_test_package_id",
+            "allowlistPackageId": ALLOWLIST_PACKAGE_ID,
+            "network": NETWORK
         }
         
-        print(f"[SEAL] Document successfully encrypted and uploaded")
-        print(f"[SEAL] Blob ID: {blob_id}")
+        # Write config to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as config_file:
+            config_path = config_file.name
+            config_file.write(json.dumps(config).encode('utf-8'))
         
-        return response_data
+        print(f"[SEAL] Created config file: {config_path}")
+        print(f"[SEAL] Running seal_operations.js with config")
+        
+        # Run the seal_operations.js script
+        cmd = f"cd {SEAL_SCRIPT_PATH} && node seal_operations.js {config_path}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        # Check if the operation was successful
+        if result.returncode != 0:
+            print(f"[SEAL] Error in SEAL operation: {result.stderr}")
+            raise ValueError(f"SEAL operation failed: {result.stderr}")
+        
+        # Parse the operation result from stdout
+        try:
+            # Look for a JSON object in the output
+            output_lines = result.stdout.strip().split('\n')
+            result_json = None
+            
+            for line in output_lines:
+                if line.startswith('{') and line.endswith('}'):
+                    try:
+                        result_json = json.loads(line)
+                        if isinstance(result_json, dict) and 'success' in result_json:
+                            break
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not result_json:
+                raise ValueError("Could not parse operation result from output")
+            
+            if not result_json.get('success', False):
+                error_message = result_json.get('error', 'Unknown error')
+                raise ValueError(f"SEAL operation failed: {error_message}")
+            
+            # Format the response
+            response_data = {
+                'contractId': contract_id,
+                'encrypted': True,
+                'blobId': result_json.get('blobId'),
+                'allowlistId': result_json.get('allowlistId'),
+                'capId': result_json.get('capId'),
+                'documentId': result_json.get('documentIdHex'),
+                'signerAddresses': signer_addresses,
+                'encryption': {
+                    'method': 'seal',
+                    'packageId': SEAL_PACKAGE_ID,
+                    'allowlistId': result_json.get('allowlistId'),
+                    'documentId': result_json.get('documentIdHex'),
+                    'signerAddresses': signer_addresses
+                }
+            }
+            
+            print(f"[SEAL] Document successfully encrypted and uploaded")
+            print(f"[SEAL] Blob ID: {result_json.get('blobId')}")
+            
+            return response_data
+            
+        except Exception as parse_error:
+            print(f"[SEAL] Error parsing operation result: {str(parse_error)}")
+            print(f"[SEAL] Operation stdout: {result.stdout}")
+            print(f"[SEAL] Operation stderr: {result.stderr}")
+            
+            raise ValueError(f"Failed to parse SEAL operation result: {str(parse_error)}")
         
     except Exception as e:
         print(f"[SEAL] ERROR during encryption/upload: {str(e)}")
-        return {
-            'encrypted': False,
-            'message': f'Encryption/upload error: {str(e)}',
-            'error': str(e)
-        }
+        
+        # Try standard upload as fallback
+        print("[SEAL] Falling back to standard upload")
+        return fallback_standard_upload(temp_file_path, contract_id, data)
+        
     finally:
         # Clean up temporary files
         if os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
+        if 'config_path' in locals() and os.path.exists(config_path):
+            os.unlink(config_path)
 
-def create_allowlist(contract_id: str) -> tuple:
-    """Create an allowlist for the contract"""
-    print(f"[SEAL] Creating allowlist for contract: {contract_id}")
-    
-    if not ADMIN_PRIVATE_KEY:
-        raise ValueError("ADMIN_PRIVATE_KEY environment variable not set")
-    
-    # Execute the Node.js script to create an allowlist
-    group_name = f"Contract-{contract_id[:8]}-{uuid.uuid4().hex[:8]}"
-    
-    # Create a temporary script to invoke the blockchain operations
-    temp_script = f"""
-    const blockchain = require('./fixed_blockchain');
-    const utils = require('./fixed_utils');
-    
-    async function createAllowlistForContract() {{
-        // Initialize Sui client
-        const suiClient = await utils.initSuiClient();
-        
-        // Create admin keypair
-        const adminKeypair = utils.privateKeyToKeypair('{ADMIN_PRIVATE_KEY}');
-        
-        // Create allowlist
-        const {{ allowlistId, capId }} = await blockchain.createAllowlist(
-            suiClient, 
-            adminKeypair, 
-            "{group_name}"
-        );
-        
-        console.log(JSON.stringify({{ allowlistId, capId }}));
-    }}
-    
-    createAllowlistForContract().catch(error => {{
-        console.error(error);
-        process.exit(1);
-    }});
-    """
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.js') as script_file:
-        script_path = script_file.name
-        script_file.write(temp_script.encode('utf-8'))
+def fallback_standard_upload(file_path: str, contract_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Fallback to standard upload if SEAL encryption fails"""
+    print(f"[SEAL] Performing standard (non-encrypted) upload for contract: {contract_id}")
     
     try:
-        # Execute the temporary script
-        command = f"cd {SEAL_SCRIPT_PATH} && node {script_path}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        # Calculate hash
+        with open(file_path, 'rb') as f:
+            content = f.read()
+            hash_sha256 = hashlib.sha256(content).digest().hex()
         
-        if result.returncode != 0:
-            print(f"[SEAL] Error creating allowlist: {result.stderr}")
-            raise ValueError(f"Failed to create allowlist: {result.stderr}")
+        # Initialize Walrus SDK Manager
+        context = data.get('context', 'testnet')
+        walrus_manager = WalrusSDKManager(context=context, verbose=True)
         
-        # Extract the allowlist and cap IDs from the output
-        output_lines = result.stdout.strip().split('\n')
-        for line in output_lines:
-            if line.startswith('{') and line.endswith('}'):
-                try:
-                    data = json.loads(line)
-                    allowlist_id = data.get('allowlistId')
-                    cap_id = data.get('capId')
-                    if allowlist_id and cap_id:
-                        print(f"[SEAL] Allowlist created: {allowlist_id}")
-                        print(f"[SEAL] Cap ID: {cap_id}")
-                        return allowlist_id, cap_id
-                except json.JSONDecodeError:
-                    continue
+        # Upload to Walrus
+        epochs = data.get('epochs', 2)
+        deletable = data.get('deletable', False)
         
-        raise ValueError("Could not extract allowlist and cap IDs from script output")
-    finally:
-        # Clean up temporary script
-        if os.path.exists(script_path):
-            os.unlink(script_path)
-
-def add_users_to_allowlist(allowlist_id: str, cap_id: str, user_addresses: List[str]):
-    """Add users to the allowlist"""
-    print(f"[SEAL] Adding {len(user_addresses)} users to allowlist")
-    
-    if not ADMIN_PRIVATE_KEY:
-        raise ValueError("ADMIN_PRIVATE_KEY environment variable not set")
-    
-    # Execute the Node.js script to add users to the allowlist
-    user_addresses_json = json.dumps(user_addresses)
-    
-    # Create a temporary script to invoke the blockchain operations
-    temp_script = f"""
-    const blockchain = require('./fixed_blockchain');
-    const utils = require('./fixed_utils');
-    
-    async function addUsersToAllowlist() {{
-        // Initialize Sui client
-        const suiClient = await utils.initSuiClient();
+        blob_id = walrus_manager.upload_document(
+            file_path,
+            epochs=epochs,
+            deletable=deletable
+        )
         
-        // Create admin keypair
-        const adminKeypair = utils.privateKeyToKeypair('{ADMIN_PRIVATE_KEY}');
+        print(f"[SEAL] Standard upload successful, blob ID: {blob_id}")
         
-        // Add users to allowlist
-        const userAddresses = {user_addresses_json};
-        await blockchain.addMultipleUsersToAllowlist(
-            suiClient,
-            adminKeypair,
-            "{allowlist_id}",
-            "{cap_id}",
-            userAddresses
-        );
+        # Prepare response with metadata
+        response_data = {
+            'contractId': contract_id,
+            'encrypted': False,
+            'blobId': blob_id,
+            'hash': hash_sha256,
+            'message': 'Standard upload (no encryption)'
+        }
         
-        console.log(JSON.stringify({{ success: true, usersAdded: userAddresses.length }}));
-    }}
-    
-    addUsersToAllowlist().catch(error => {{
-        console.error(error);
-        process.exit(1);
-    }});
-    """
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.js') as script_file:
-        script_path = script_file.name
-        script_file.write(temp_script.encode('utf-8'))
-    
-    try:
-        # Execute the temporary script
-        command = f"cd {SEAL_SCRIPT_PATH} && node {script_path}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        return response_data
         
-        if result.returncode != 0:
-            print(f"[SEAL] Error adding users to allowlist: {result.stderr}")
-            raise ValueError(f"Failed to add users to allowlist: {result.stderr}")
-        
-        print(f"[SEAL] Users added to allowlist successfully")
-    finally:
-        # Clean up temporary script
-        if os.path.exists(script_path):
-            os.unlink(script_path)
-
-def create_document_id(allowlist_id: str, contract_id: str) -> str:
-    """Create a document ID using the allowlist ID and contract ID"""
-    print(f"[SEAL] Creating document ID for allowlist: {allowlist_id}")
-    
-    # Execute the Node.js script to create a document ID
-    temp_script = f"""
-    const utils = require('./fixed_utils');
-    
-    function createDocumentId() {{
-        const {{ documentIdHex }} = utils.createDocumentId("{allowlist_id}", "{contract_id}");
-        console.log(JSON.stringify({{ documentIdHex }}));
-    }}
-    
-    createDocumentId();
-    """
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.js') as script_file:
-        script_path = script_file.name
-        script_file.write(temp_script.encode('utf-8'))
-    
-    try:
-        # Execute the temporary script
-        command = f"cd {SEAL_SCRIPT_PATH} && node {script_path}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            print(f"[SEAL] Error creating document ID: {result.stderr}")
-            raise ValueError(f"Failed to create document ID: {result.stderr}")
-        
-        # Extract the document ID from the output
-        output_lines = result.stdout.strip().split('\n')
-        for line in output_lines:
-            if line.startswith('{') and line.endswith('}'):
-                try:
-                    data = json.loads(line)
-                    document_id_hex = data.get('documentIdHex')
-                    if document_id_hex:
-                        print(f"[SEAL] Document ID created: {document_id_hex}")
-                        return document_id_hex
-                except json.JSONDecodeError:
-                    continue
-        
-        raise ValueError("Could not extract document ID from script output")
-    finally:
-        # Clean up temporary script
-        if os.path.exists(script_path):
-            os.unlink(script_path)
-
-def encrypt_document(file_path: str, document_id_hex: str) -> str:
-    """Encrypt a document using SEAL Protocol"""
-    print(f"[SEAL] Encrypting document with ID: {document_id_hex}")
-    
-    # Create a temporary output path for the encrypted file
-    output_dir = os.path.join(tempfile.gettempdir(), 'seal_encrypted')
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f"encrypted-{uuid.uuid4().hex}.bin")
-    
-    # Execute the Node.js script to encrypt the document
-    temp_script = f"""
-    const fs = require('fs');
-    const utils = require('./fixed_utils');
-    const seal = require('./fixed_seal');
-    
-    async function encryptDocument() {{
-        try {{
-            // Initialize Sui client
-            const suiClient = await utils.initSuiClient();
-            
-            // Initialize SEAL client
-            const {{ client: sealClient }} = await seal.initSealClient(suiClient);
-            
-            // Read the file
-            const fileData = fs.readFileSync("{file_path}");
-            
-            // Encrypt document using the document ID
-            console.log('Encrypting document using SEAL Protocol...');
-            const {{ encryptedBytes }} = await seal.encryptDocument(
-                sealClient,
-                "{document_id_hex}",
-                new Uint8Array(fileData)
-            );
-            
-            // Save encrypted data
-            fs.writeFileSync("{output_path}", Buffer.from(encryptedBytes));
-            
-            console.log(JSON.stringify({{ 
-                success: true, 
-                encryptedPath: "{output_path}",
-                encryptedSize: encryptedBytes.length,
-                originalSize: fileData.length
-            }}));
-        }} catch (error) {{
-            console.error(error);
-            process.exit(1);
-        }}
-    }}
-    
-    encryptDocument();
-    """
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.js') as script_file:
-        script_path = script_file.name
-        script_file.write(temp_script.encode('utf-8'))
-    
-    try:
-        # Execute the temporary script
-        command = f"cd {SEAL_SCRIPT_PATH} && node {script_path}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            print(f"[SEAL] Error encrypting document: {result.stderr}")
-            raise ValueError(f"Failed to encrypt document: {result.stderr}")
-        
-        print(f"[SEAL] Document encrypted successfully to: {output_path}")
-        return output_path
-    finally:
-        # Clean up temporary script
-        if os.path.exists(script_path):
-            os.unlink(script_path)
-
-def publish_blob_to_allowlist(allowlist_id: str, cap_id: str, blob_id: str):
-    """Publish the blob to the allowlist"""
-    print(f"[SEAL] Publishing blob {blob_id} to allowlist {allowlist_id}")
-    
-    if not ADMIN_PRIVATE_KEY:
-        raise ValueError("ADMIN_PRIVATE_KEY environment variable not set")
-    
-    # Execute the Node.js script to publish the blob
-    temp_script = f"""
-    const blockchain = require('./fixed_blockchain');
-    const utils = require('./fixed_utils');
-    
-    async function publishBlobToAllowlist() {{
-        // Initialize Sui client
-        const suiClient = await utils.initSuiClient();
-        
-        // Create admin keypair
-        const adminKeypair = utils.privateKeyToKeypair('{ADMIN_PRIVATE_KEY}');
-        
-        // Publish blob to allowlist
-        await blockchain.publishBlobToAllowlist(
-            suiClient,
-            adminKeypair,
-            "{allowlist_id}",
-            "{cap_id}",
-            "{blob_id}"
-        );
-        
-        console.log(JSON.stringify({{ success: true, blobId: "{blob_id}" }}));
-    }}
-    
-    publishBlobToAllowlist().catch(error => {{
-        console.error(error);
-        process.exit(1);
-    }});
-    """
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.js') as script_file:
-        script_path = script_file.name
-        script_file.write(temp_script.encode('utf-8'))
-    
-    try:
-        # Execute the temporary script
-        command = f"cd {SEAL_SCRIPT_PATH} && node {script_path}"
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            print(f"[SEAL] Error publishing blob: {result.stderr}")
-            raise ValueError(f"Failed to publish blob: {result.stderr}")
-        
-        print(f"[SEAL] Blob published to allowlist successfully")
-    finally:
-        # Clean up temporary script
-        if os.path.exists(script_path):
-            os.unlink(script_path) 
+    except Exception as e:
+        print(f"[SEAL] Error during standard upload: {str(e)}")
+        raise ValueError(f"Standard upload failed: {str(e)}") 

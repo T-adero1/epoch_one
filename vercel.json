@@ -5,7 +5,7 @@
     { "src": "api/*.py", "use": "@vercel/python" }
   ],
   "routes": [
-    { "src": "/api/upload_contract", "dest": "api/upload_contract.py" },
+    { "src": "/api/upload_contract", "dest": "/api/upload_contract" },
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/$1" }
   ]

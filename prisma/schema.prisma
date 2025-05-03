@@ -14,55 +14,55 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  walletAddress String    @unique
-  googleId      String?   @unique
+  id            String        @id @default(cuid())
+  email         String        @unique
+  walletAddress String        @unique
+  googleId      String?       @unique
   name          String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  contracts     Contract[] @relation("ContractOwner")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  contracts     Contract[]    @relation("ContractOwner")
   signatures    Signature[]
   settings      UserSettings?
 }
 
 model UserSettings {
-  id            String    @id @default(cuid())
-  userId        String    @unique
-  user          User      @relation(fields: [userId], references: [id])
-  theme         String    @default("light")
-  notifications Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  theme         String   @default("light")
+  notifications Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Contract {
-  id          String      @id @default(cuid())
+  id          String         @id @default(cuid())
   title       String
   description String?
-  content     String      // Contract content (draft text, trimmed after Walrus upload)
+  content     String // Contract content (draft text, trimmed after Walrus upload)
   status      ContractStatus @default(DRAFT)
   ownerId     String
-  owner       User        @relation("ContractOwner", fields: [ownerId], references: [id])
+  owner       User           @relation("ContractOwner", fields: [ownerId], references: [id])
   signatures  Signature[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   expiresAt   DateTime?
-  metadata    Json?       // Additional contract metadata
+  metadata    Json? // Additional contract metadata
 }
 
 model Signature {
-  id          String    @id @default(cuid())
-  contractId  String
-  contract    Contract  @relation(fields: [contractId], references: [id])
-  userId      String
-  user        User      @relation(fields: [userId], references: [id])
-  signedAt    DateTime?
-  status      SignatureStatus @default(PENDING)
+  id            String          @id @default(cuid())
+  contractId    String
+  contract      Contract        @relation(fields: [contractId], references: [id])
+  userId        String
+  user          User            @relation(fields: [userId], references: [id])
+  signedAt      DateTime?
+  status        SignatureStatus @default(PENDING)
   walletAddress String
-  signature   String?   // Actual signature data or hash
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  signature     String? // Actual signature data or hash
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 }
 
 enum ContractStatus {
