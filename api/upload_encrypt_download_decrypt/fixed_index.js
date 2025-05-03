@@ -35,7 +35,7 @@ const walrus = require('./fixed_walrus');
 const seal = require('./fixed_seal');
 
 // Hard-coded PDF file path
-const PDF_FILE_PATH = 'C:\\Users\\tobya\\OneDrive\\Desktop\\R21M_Nigeria\\epoch_one\\test.pdf';
+const PDF_FILE_PATH = '/Users/r21m/Documents/GitHub/epoch_one/test.pdf';
 
 // Create test directory if it doesn't exist
 utils.ensureDirectoryExists(config.TEMP_DIR);

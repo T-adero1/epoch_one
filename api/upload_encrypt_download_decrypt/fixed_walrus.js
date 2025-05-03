@@ -21,34 +21,82 @@ async function uploadToWalrus(data, epochs = config.WALRUS_EPOCHS_TO_STORE) {
   console.log(`- Network: ${config.NETWORK}`);
   
   try {
+    // Verify Python script exists
+    if (!fs.existsSync(PYTHON_SCRIPT_PATH)) {
+      throw new Error(`Python script not found at: ${PYTHON_SCRIPT_PATH}`);
+    }
+    
     // Create a temporary file for the encrypted data
     const tempFilePath = path.join(config.TEMP_DIR, `upload-temp-${Date.now()}.bin`);
     console.log(`- Saving data to temporary file: ${tempFilePath}`);
     ensureDirectoryExists(config.TEMP_DIR);
     fs.writeFileSync(tempFilePath, Buffer.from(data));
     
-    // Build Python command
-    const pythonCmd = `python "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} upload "${tempFilePath}" --epochs ${epochs}`;
+    // Verify the temp file was written correctly
+    if (!fs.existsSync(tempFilePath)) {
+      throw new Error(`Failed to create temporary file at: ${tempFilePath}`);
+    }
+    
+    const tempFileSize = fs.statSync(tempFilePath).size;
+    console.log(`- Temporary file size: ${tempFileSize} bytes`);
+    if (tempFileSize === 0) {
+      throw new Error('Temporary file is empty');
+    }
+    
+    // Build Python command with direct path to python3 and full path to script
+    const pythonCmd = `python3 "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} upload "${tempFilePath}" --epochs ${epochs}`;
     console.log(`- Executing Python command: ${pythonCmd}`);
     
-    // Execute the Python script
+    // Execute the Python script with capturing both stdout and stderr
     const startTime = Date.now();
-    const { stdout, stderr } = await execAsync(pythonCmd);
+    let stdoutData = '';
+    let stderrData = '';
+    
+    try {
+      const { stdout, stderr } = await execAsync(pythonCmd);
+      stdoutData = stdout;
+      stderrData = stderr;
+    } catch (execError) {
+      console.error('- Python script execution error:', execError.message);
+      stdoutData = execError.stdout || '';
+      stderrData = execError.stderr || '';
+      
+      // Log more detailed debugging info
+      console.error('- Error details:', JSON.stringify(execError, null, 2));
+      console.log('- STDOUT output:', stdoutData);
+      console.log('- STDERR output:', stderrData);
+      
+      // Try to determine if walrus-python is installed
+      try {
+        const { stdout: pipOutput } = await execAsync('pip3 list | grep walrus');
+        console.log('- Installed walrus packages:', pipOutput);
+      } catch (pipError) {
+        console.log('- Could not check installed packages:', pipError.message);
+      }
+      
+      // If the error is due to walrus-python not being installed, suggest installation
+      if (stderrData.includes('ImportError') || stderrData.includes('ModuleNotFoundError')) {
+        console.error('\n⚠️ It appears the walrus-python SDK might not be installed.');
+        console.error('Please install it by running: pip3 install walrus-python');
+      }
+      
+      throw new Error(`Python script execution failed: ${execError.message}`);
+    }
+    
     const endTime = Date.now();
     const uploadTime = (endTime - startTime) / 1000;
     
-    // Check for errors
-    if (stderr && !stderr.includes('Blob ID:')) {
-      console.error(`- Python script error: ${stderr}`);
-      throw new Error(`Python script error: ${stderr}`);
+    // Log output for debugging
+    console.log('- STDOUT output:', stdoutData);
+    if (stderrData) {
+      console.log('- STDERR output:', stderrData);
     }
     
     console.log(`- Upload time: ${uploadTime.toFixed(2)} seconds`);
     console.log(`- Upload speed: ${((data.length / 1024 / 1024) / (uploadTime)).toFixed(2)} MB/s`);
-    console.log(`- Python script output: ${stdout}`);
     
     // Extract blob ID from output - FIXED: Better regex to capture the full ID
-    const blobIdLine = stdout.split('\n').find(line => line.includes('Blob ID:'));
+    const blobIdLine = stdoutData.split('\n').find(line => line.includes('Blob ID:'));
     if (!blobIdLine) {
       throw new Error('Could not find Blob ID in Python script output');
     }
@@ -96,7 +144,7 @@ async function downloadFromWalrus(blobId, outputPath = null) {
     }
     
     // Build Python command
-    const pythonCmd = `python "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} download ${blobId} "${outputPath}"`;
+    const pythonCmd = `python3 "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} download ${blobId} "${outputPath}"`;
     console.log(`- Executing Python command: ${pythonCmd}`);
     
     // Execute the Python script
@@ -151,7 +199,7 @@ async function checkBlobExists(blobId) {
   
   try {
     // Build Python command
-    const pythonCmd = `python "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} metadata ${blobId}`;
+    const pythonCmd = `python3 "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} metadata ${blobId}`;
     console.log(`- Executing Python command: ${pythonCmd}`);
     
     // Execute the Python script
