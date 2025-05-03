@@ -2,10 +2,7 @@ import { NextResponse } from 'next/server';
 import { log } from '@/app/utils/logger';
 import { prisma } from '@/app/utils/db';
 import { getSealPackageId } from '@/app/utils/sealEncryption';
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { Transaction } from '@mysten/sui/transactions';
-import { SealClient, SessionKey } from '@mysten/seal-js';
-import { fromHEX } from '@mysten/sui/utils';
+
 
 // Constants
 const NETWORK = 'testnet';

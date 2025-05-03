@@ -1,7 +1,7 @@
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromB64, fromHEX, toHEX } from '@mysten/sui/utils';
-import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal-js';
+import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal';
 
 // Add a simple logging utility
 const log = {
