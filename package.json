@@ -12,6 +12,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
     "@mysten/sui": "^1.28.0",
+    "@mysten/seal": "^0.4.1",
     "@prisma/client": "^6.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.11",
     "@radix-ui/react-avatar": "^1.1.7",
