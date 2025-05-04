@@ -1,0 +1,21 @@
+{
+    "name": "seal-backend",
+    "version": "1.0.0",
+    "description": "Standalone backend for SEAL encrypt-upload-download-decrypt",
+    "main": "index.js",
+    "scripts": {
+      "test": "node test.js",
+      "build": "sui move build",
+      "publish": "sui client publish --gas-budget 100000000"
+    },
+    "dependencies": {
+      "@mysten/bcs": "^1.6.0",
+      "@mysten/seal": "^0.4.2",
+      "@mysten/sui": "^1.29.1",
+      "bech32": "^2.0.0",
+      "body-parser": "^1.20.2",
+      "dotenv": "^16.0.3",
+      "express": "^4.18.2",
+      "node-fetch": "^2.7.0"
+    }
+  }

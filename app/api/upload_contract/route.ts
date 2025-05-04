@@ -9,6 +9,38 @@ import os from 'os';
 // Convert exec to promise-based
 const execAsync = promisify(exec);
 
+// Function to try different Python commands until one works
+async function runPythonScript(scriptPath: string, dataPath: string): Promise<{stdout: string, stderr: string}> {
+  // Different Python commands to try in order of preference
+  const pythonCommands = ['python3', 'python', 'py'];
+  
+  let lastError: any = null;
+  
+  // Try each command in sequence
+  for (const cmd of pythonCommands) {
+    try {
+      console.log(`[API Route] Trying Python command: ${cmd}`);
+      const fullCmd = `${cmd} "${scriptPath}" "${dataPath}"`;
+      const result = await execAsync(fullCmd);
+      console.log(`[API Route] Command succeeded: ${cmd}`);
+      return result;
+    } catch (error: any) {
+      console.log(`[API Route] Command failed: ${cmd} - ${error.message}`);
+      lastError = error;
+      
+      // If the error is not "command not found", don't try other commands
+      if (!error.message.includes('command not found') && 
+          !error.message.includes('not recognized') &&
+          !error.message.includes('No such file or directory')) {
+        throw error;
+      }
+    }
+  }
+  
+  // If we get here, all commands failed
+  throw lastError || new Error('All Python commands failed');
+}
+
 // Function to extract JSON from stdout that's delimited by markers
 function extractJsonFromOutput(output: string, startMarker: string, endMarker: string): any {
   try {
@@ -58,10 +90,7 @@ export async function POST(request: NextRequest) {
       
       try {
         // Using the Python interpreter to run the script with our request data
-        const pythonCmd = `python "${pythonScriptPath}" "${requestFile}"`;
-        console.log('[API Route] Executing command:', pythonCmd);
-        
-        const { stdout, stderr } = await execAsync(pythonCmd);
+        const { stdout, stderr } = await runPythonScript(pythonScriptPath, requestFile);
         console.log('[API Route] Python script output:');
         console.log(stdout);
         

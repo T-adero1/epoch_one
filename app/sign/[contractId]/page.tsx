@@ -347,6 +347,47 @@ export default function ContractSigningPage() {
           console.log('[ContractSigning] Document base64 length for Walrus upload:', documentBase64.length);
           
           // Get the document content from the base64 we generated above
+          console.log('[DEBUG] Attempting to upload to URL:', apiUrl);
+          console.log('[DEBUG] Request data:', {
+            contractId,
+            documentContent: documentBase64 ? documentBase64.length + ' bytes' : 'none',
+            isBase64: true,
+          });
+          
+          // Get the list of signers for this contract
+          const signerEmails = updatedContract?.metadata?.signers || [];
+          
+          // Extract the creator and signer relationship
+          const isCreator = updatedContract.owner?.email === user.email;
+          const signerEmail = signerEmails.find((email: string) => email !== user.email) || '';
+          
+          console.log('[ContractSigning] Contract relationship data:', {
+            creatorEmail: updatedContract.owner?.email,
+            currentUserEmail: user.email,
+            isCreator: isCreator,
+            signerEmail: signerEmail
+          });
+          
+          // Fetch signer wallet address from user API
+          let signerWalletAddress = null;
+          if (signerEmail) {
+            try {
+              console.log('[ContractSigning] Fetching wallet address for signer:', signerEmail);
+              const userResponse = await fetch(`/api/users?email=${encodeURIComponent(signerEmail)}`);
+              
+              if (userResponse.ok) {
+                const userData = await userResponse.json();
+                signerWalletAddress = userData.walletAddress || null;
+                console.log('[ContractSigning] Signer wallet address found:', 
+                  signerWalletAddress ? `${signerWalletAddress.substring(0, 10)}...` : 'none');
+              } else {
+                console.error('[ContractSigning] Failed to fetch signer user data:', userResponse.status);
+              }
+            } catch (err) {
+              console.error('[ContractSigning] Error fetching signer wallet address:', err);
+            }
+          }
+          
           console.log('[ContractSigning] Sending POST request to upload_contract API');
           const walrusUploadResponse = await fetch('/api/upload_contract', {
             method: 'POST',
@@ -358,7 +399,17 @@ export default function ContractSigningPage() {
               contractContent: documentBase64,
               isBase64: true,
               context: 'testnet',
-              deletable: false
+              deletable: false,
+              // If current user is creator, their address is creatorWalletAddress
+              // Otherwise it's signerWalletAddress
+              creatorWalletAddress: isCreator ? userAddress : null,
+              signerWalletAddress: signerWalletAddress || null,
+              signerAddresses: [userAddress, signerWalletAddress].filter(Boolean),
+              metadata: {
+                signers: signerEmails,
+                creator: updatedContract.owner?.email || user.email
+              },
+              useSeal: true // Explicitly enable SEAL encryption
             })
           })
           
