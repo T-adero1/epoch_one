@@ -9,6 +9,61 @@ import os from 'os';
 // Convert exec to promise-based
 const execAsync = promisify(exec);
 
+// Function to try different Python commands until one works
+async function runPythonScript(scriptPath: string, dataPath: string): Promise<{stdout: string, stderr: string}> {
+  // Different Python commands to try in order of preference
+  const pythonCommands = ['python3', 'python', 'py'];
+  
+  let lastError: any = null;
+  
+  console.log(`[API Route] Attempting to run Python script: ${scriptPath}`);
+  console.log(`[API Route] With data file: ${dataPath}`);
+  console.log(`[API Route] Data file exists:`, fs.existsSync(dataPath));
+  
+  // Log Python version if possible
+  try {
+    const versionResult = await execAsync('python --version');
+    console.log(`[API Route] Python version check: ${versionResult.stdout.trim()}`);
+  } catch (err: any) {
+    console.log(`[API Route] Could not determine Python version: ${err.message}`);
+  }
+  
+  // Try each command in sequence
+  for (const cmd of pythonCommands) {
+    try {
+      console.log(`[API Route] Trying Python command: ${cmd}`);
+      const fullCmd = `${cmd} "${scriptPath}" "${dataPath}"`;
+      console.log(`[API Route] Full command: ${fullCmd}`);
+      
+      const result = await execAsync(fullCmd);
+      console.log(`[API Route] Command succeeded: ${cmd}`);
+      return result;
+    } catch (error: any) {
+      console.log(`[API Route] Command failed: ${cmd} - ${error.message}`);
+      
+      if (error.stdout) {
+        console.log(`[API Route] Command stdout: ${error.stdout}`);
+      }
+      
+      if (error.stderr) {
+        console.log(`[API Route] Command stderr: ${error.stderr}`);
+      }
+      
+      lastError = error;
+      
+      // If the error is not "command not found", don't try other commands
+      if (!error.message.includes('command not found') && 
+          !error.message.includes('not recognized') &&
+          !error.message.includes('No such file or directory')) {
+        throw error;
+      }
+    }
+  }
+  
+  // If we get here, all commands failed
+  throw lastError || new Error('All Python commands failed');
+}
+
 // Function to extract JSON from stdout that's delimited by markers
 function extractJsonFromOutput(output: string, startMarker: string, endMarker: string): any {
   try {
@@ -29,6 +84,9 @@ function extractJsonFromOutput(output: string, startMarker: string, endMarker: s
 
 export async function POST(request: NextRequest) {
   console.log('[API Route] POST /api/upload_contract - Request received');
+  console.log('[API Route] Request URL:', request.url);
+  console.log('[API Route] Request method:', request.method);
+  console.log('[API Route] Request headers:', Object.fromEntries([...request.headers.entries()]));
   
   try {
     // Parse the request body
@@ -39,6 +97,31 @@ export async function POST(request: NextRequest) {
       contentLength: data.contractContent?.length || 0,
       isBase64: data.isBase64
     });
+    
+    // Log node environment
+    console.log('[API Route] Node environment:', process.env.NODE_ENV);
+    console.log('[API Route] Current working directory (cwd):', process.cwd());
+    
+    // Check what files exist in the current directory
+    try {
+      const rootFiles = fs.readdirSync(process.cwd());
+      console.log('[API Route] Root directory files:', rootFiles);
+      
+      if (rootFiles.includes('api')) {
+        const apiFiles = fs.readdirSync(path.join(process.cwd(), 'api'));
+        console.log('[API Route] API directory files:', apiFiles);
+      }
+    } catch (fsError) {
+      console.error('[API Route] Error reading directory:', fsError);
+    }
+    
+    // Check for Python existence on the system
+    try {
+      const pythonVersionCheck = await execAsync('python --version');
+      console.log('[API Route] Python version:', pythonVersionCheck.stdout.trim());
+    } catch (pythonError: any) {
+      console.error('[API Route] Python version check failed:', pythonError.message);
+    }
     
     // In production (Vercel), we would just proxy to the serverless Python function
     // But in development, we need to call it directly
@@ -55,13 +138,67 @@ export async function POST(request: NextRequest) {
       // Get the path to the Python script
       const pythonScriptPath = path.join(process.cwd(), 'api', 'upload_contract.py');
       console.log('[API Route] Python script path:', pythonScriptPath);
+      console.log('[API Route] Checking if Python script exists:', fs.existsSync(pythonScriptPath));
+
+      // Also try alternative paths
+      const alternativePaths = [
+        path.join(process.cwd(), 'api', 'upload_contract.py'),
+        path.join(process.cwd(), '../api', 'upload_contract.py'),
+        path.join(process.cwd(), '../../api', 'upload_contract.py'),
+        path.join(process.cwd(), 'api/upload_contract.py')
+      ];
+
+      for (const altPath of alternativePaths) {
+        const exists = fs.existsSync(altPath);
+        console.log(`[API Route] Alternative path check ${altPath}: ${exists ? 'EXISTS' : 'MISSING'}`);
+      }
+
+      // Log the current working directory for debugging
+      console.log('[API Route] Current working directory:', process.cwd());
+      console.log('[API Route] Directory contents:', fs.readdirSync(process.cwd()));
+      
+      // Try to find the correct script path
+      let actualScriptPath = pythonScriptPath;
+      if (!fs.existsSync(actualScriptPath)) {
+        // Try to locate the script in the alternative paths
+        for (const altPath of alternativePaths) {
+          if (fs.existsSync(altPath)) {
+            console.log(`[API Route] Found Python script at alternative path: ${altPath}`);
+            actualScriptPath = altPath;
+            break;
+          }
+        }
+
+        // If still not found, try a more exhaustive search
+        if (!fs.existsSync(actualScriptPath)) {
+          console.log('[API Route] Script not found in common locations, attempting broader search...');
+          
+          // Check if /api is a directory in the current working directory
+          const apiDir = path.join(process.cwd(), 'api');
+          if (fs.existsSync(apiDir) && fs.statSync(apiDir).isDirectory()) {
+            console.log('[API Route] Found /api directory, checking its contents');
+            const apiFiles = fs.readdirSync(apiDir);
+            console.log('[API Route] API directory contents:', apiFiles);
+            
+            if (apiFiles.includes('upload_contract.py')) {
+              actualScriptPath = path.join(apiDir, 'upload_contract.py');
+              console.log(`[API Route] Found script in API directory: ${actualScriptPath}`);
+            }
+          }
+        }
+      }
+
+      // Final check and warning
+      if (!fs.existsSync(actualScriptPath)) {
+        console.error(`[API Route] ⚠️ CRITICAL: Python script not found at ${actualScriptPath}`);
+        throw new Error(`Python script not found at ${actualScriptPath}`);
+      } else {
+        console.log(`[API Route] ✅ Using Python script at: ${actualScriptPath}`);
+      }
       
       try {
         // Using the Python interpreter to run the script with our request data
-        const pythonCmd = `python "${pythonScriptPath}" "${requestFile}"`;
-        console.log('[API Route] Executing command:', pythonCmd);
-        
-        const { stdout, stderr } = await execAsync(pythonCmd);
+        const { stdout, stderr } = await runPythonScript(actualScriptPath, requestFile);
         console.log('[API Route] Python script output:');
         console.log(stdout);
         

@@ -40,3 +40,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# pnpm
+pnpm-lock.yaml
+
+# api
+api/seal_how_to/build
+api/upload_encrypt_download_decrypt/node_modules

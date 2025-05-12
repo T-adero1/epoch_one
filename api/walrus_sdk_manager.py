@@ -52,7 +52,7 @@ class WalrusSDKManager:
         
         # Set appropriate endpoints based on context
         if context == "testnet":
-            self.publisher_url = "https://publisher.walrus-testnet.walrus.space"
+            self.publisher_url = "https://walrus-testnet-publisher.trusted-point.com"
             self.aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
         elif context == "mainnet":
             self.publisher_url = "https://publisher.walrus-mainnet.walrus.space"

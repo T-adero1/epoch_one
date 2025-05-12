@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,55 +8,64 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  walletAddress String    @unique
-  googleId      String?   @unique
+  id            String        @id @default(cuid())
+  email         String        @unique
+  walletAddress String        @unique
   name          String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  contracts     Contract[] @relation("ContractOwner")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  googleId      String?       @unique
+  contracts     Contract[]    @relation("ContractOwner")
   signatures    Signature[]
   settings      UserSettings?
 }
 
 model UserSettings {
-  id            String    @id @default(cuid())
-  userId        String    @unique
-  user          User      @relation(fields: [userId], references: [id])
-  theme         String    @default("light")
-  notifications Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  theme         String   @default("light")
+  notifications Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id])
 }
 
 model Contract {
-  id          String      @id @default(cuid())
-  title       String
-  description String?
-  content     String      // Contract content (draft text, trimmed after Walrus upload)
-  status      ContractStatus @default(DRAFT)
-  ownerId     String
-  owner       User        @relation("ContractOwner", fields: [ownerId], references: [id])
-  signatures  Signature[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  expiresAt   DateTime?
-  metadata    Json?       // Additional contract metadata
+  id              String         @id @default(cuid())
+  title           String
+  description     String?
+  content         String?
+  status          ContractStatus @default(DRAFT)
+  ownerId         String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  expiresAt       DateTime?
+  metadata        Json?
+  allowlistId     String?
+  authorizedUsers String[]
+  documentId      String?
+  encryptionInfo  Json?
+  networkInfo     String?
+  walrusBlobId    String?
+  startDate       DateTime?
+  endDate         DateTime?
+  owner           User           @relation("ContractOwner", fields: [ownerId], references: [id])
+  signatures      Signature[]
 }
 
 model Signature {
-  id          String    @id @default(cuid())
-  contractId  String
-  contract    Contract  @relation(fields: [contractId], references: [id])
-  userId      String
-  user        User      @relation(fields: [userId], references: [id])
-  signedAt    DateTime?
-  status      SignatureStatus @default(PENDING)
+  id            String          @id @default(cuid())
+  contractId    String
+  userId        String
+  signedAt      DateTime?
+  status        SignatureStatus @default(PENDING)
   walletAddress String
-  signature   String?   // Actual signature data or hash
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  signature     String?
+  email         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  contract      Contract        @relation(fields: [contractId], references: [id])
+  user          User            @relation(fields: [userId], references: [id])
 }
 
 enum ContractStatus {

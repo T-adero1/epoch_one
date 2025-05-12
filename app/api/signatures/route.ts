@@ -190,6 +190,7 @@ export async function POST(request: Request) {
         signature,
         status: 'SIGNED',
         signedAt: new Date(),
+        email: userEmail,
       },
       include: {
         user: true,

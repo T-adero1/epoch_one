@@ -6,7 +6,7 @@ import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { FaGoogle, FaShieldAlt, FaClock, FaExclamationTriangle } from 'react-icons/fa';
 import { HiOutlineSparkles } from 'react-icons/hi';
 import Link from 'next/link';
-import { extractJwtFromUrl } from '@/utils/zkLogin';
+
 
 // Performance tracking helper
 const perf = {
@@ -30,6 +30,50 @@ const perf = {
     };
   }
 };
+
+// Simplify extract JWT function with better logging
+export function extractJwtFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    // First check hash fragment (for implicit flow)
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      const idToken = hashParams.get('id_token');
+      if (idToken) {
+        console.log('[LOGIN] Found JWT in hash fragment, length:', idToken.length);
+        return idToken;
+      }
+    }
+
+    // Then check query parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    const idToken = urlParams.get('id_token');
+    if (idToken) {
+      console.log('[LOGIN] Found JWT in query params, length:', idToken.length);
+      return idToken;
+    }
+
+    const codeParam = urlParams.get('code');
+    if (codeParam) {
+      console.log('[LOGIN] Found code in query params:', codeParam);
+      return codeParam;
+    }
+
+    const jwtParam = urlParams.get('jwt');
+    if (jwtParam) {
+      console.log('[LOGIN] Found JWT in custom param, length:', jwtParam.length);
+      return jwtParam;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[LOGIN] Error extracting JWT:', error);
+    return null;
+  }
+} 
 
 // Create a client component that uses useSearchParams
 function HomePageContent() {
@@ -150,15 +194,12 @@ function HomePageContent() {
   // Check for JWT token in URL (from OAuth callback)
   useEffect(() => {
     const checkForJwt = async () => {
-      const endTimer = perf.start('check_jwt_in_url');
-      
-      // Create a processing flag in sessionStorage to prevent duplicate processing
+      // Prevent duplicate processing
       const processingKey = 'processing_jwt_login';
       if (typeof sessionStorage !== 'undefined') {
         const isProcessing = sessionStorage.getItem(processingKey);
         if (isProcessing === 'true') {
-          console.log('[PAGE:AUTH] Login already in progress, skipping duplicate processing');
-          endTimer();
+          console.log('[LOGIN] Login already in progress, skipping duplicate processing');
           return;
         }
       }
@@ -171,34 +212,34 @@ function HomePageContent() {
         // Clear hash from URL to prevent reprocessing on refresh
         if (window.history && window.history.replaceState) {
           window.history.replaceState(null, document.title, window.location.pathname + window.location.search);
-          console.log('[PAGE:AUTH] Cleared JWT token from URL hash to prevent resubmission');
         }
         
-        console.log('[PAGE:AUTH] JWT token found in URL, length:', jwt.length);
+        console.log('[LOGIN] Processing JWT from URL, initializing login completion');
         try {
-          console.log('[PAGE:AUTH] Setting loginAnimation to true');
           setLoginAnimation(true);
           
-          const completeLoginTimer = perf.start('complete_login');
+          // Try to decode part of JWT for logging
+          try {
+            const jwtPayload = JSON.parse(atob(jwt.split('.')[1]));
+            console.log('[LOGIN] JWT subject:', jwtPayload.sub);
+            console.log('[LOGIN] JWT provider:', jwtPayload.iss);
+          } catch (e) {
+            console.log('[LOGIN] Could not decode JWT for logging');
+          }
+          
           await completeLogin(jwt);
-          completeLoginTimer();
+          console.log('[LOGIN] Login completed successfully');
         } catch (error) {
-          console.error('[PAGE:AUTH] Error completing login:', error);
+          console.error('[LOGIN] Error completing login:', error);
           setStatusMessage({
             type: 'error',
             message: 'Failed to complete authentication. Please try again.'
           });
         } finally {
-          console.log('[PAGE:AUTH] Setting loginAnimation to false');
           setLoginAnimation(false);
-          
-          // Clear processing flag when done
           sessionStorage.removeItem(processingKey);
         }
-      } else {
-        console.log('[PAGE:AUTH] No JWT token found in URL');
       }
-      endTimer();
     };
     
     checkForJwt();
@@ -207,71 +248,41 @@ function HomePageContent() {
   // If already authenticated, redirect to dashboard
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
-      const endTimer = perf.start('check_authentication_redirect');
-      console.log('[PAGE:REDIRECT] User authenticated, checking for existing redirects');
-      
       // Check for the stored redirect path first
       const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
       
       if (storedRedirectPath) {
-        console.log('[PAGE:REDIRECT] Found redirect path, redirecting to:', storedRedirectPath);
-        
-        // Clear the redirect flags before navigating
+        console.log('[LOGIN] Redirecting to stored path:', storedRedirectPath);
         localStorage.removeItem('zkLoginRedirectPath');
         localStorage.removeItem('zklogin_redirect_in_progress');
-        
-        // Actually perform the redirect to the signing page
-        const pushTimer = perf.start('router_push_redirect');
         router.push(storedRedirectPath);
-        pushTimer();
-        
-        console.log('[PAGE:REDIRECT] Successfully initiated redirect to stored path');
-        endTimer();
         return;
       }
       
-      // Default fallback - go to dashboard if no specific redirect
-      console.log('[PAGE:REDIRECT] No existing redirect, redirecting to dashboard');
-      const pushTimer = perf.start('router_push_dashboard');
+      // Default fallback - go to dashboard
+      console.log('[LOGIN] Redirecting to dashboard');
       router.push('/dashboard');
-      pushTimer();
-      console.log('[PAGE:REDIRECT] Successfully initiated dashboard redirect');
-      endTimer();
     }
   }, [isAuthenticated, isLoading, router]);
 
-  // Handle Google login click - memoize to prevent recreation on every render
+  // Handle Google login click with improved logging
   const handleGoogleLoginClick = useCallback(async () => {
-    console.log('[PAGE:OAUTH] Initiating Google login flow');
-    const endTimer = perf.start('google_login_click');
+    console.log('[LOGIN] Starting Google OAuth login flow');
     setLoginAnimation(true);
     
     try {
       // Get the nonce from Sui zkLogin
-      console.log('[PAGE:OAUTH] Calling startLogin to get nonce');
-      const startLoginTimer = perf.start('start_login');
+      console.log('[LOGIN] Generating zkLogin nonce');
       const nonce = await startLogin();
-      startLoginTimer();
-      console.log('[PAGE:OAUTH] Generated nonce:', nonce);
+      console.log('[LOGIN] zkLogin nonce generated:', nonce);
       
       // Google OAuth parameters
       const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!;
       const redirectUri = `${window.location.origin}`;
-      // Update scope to include email and profile
       const scope = 'openid email profile';
       const responseType = 'id_token';
       
-      // Log OAuth configuration
-      console.log('[PAGE:OAUTH] Preparing OAuth request:', {
-        clientId: googleClientId?.substring(0, 8) + '...',
-        redirectUri,
-        scope,
-        responseType,
-        hasNonce: Boolean(nonce)
-      });
-      
-      // Construct Google OAuth URL with nonce
-      console.log('[PAGE:OAUTH] Creating OAuth URL');
+      // Construct Google OAuth URL
       const googleOAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
       googleOAuthUrl.searchParams.append('client_id', googleClientId);
       googleOAuthUrl.searchParams.append('redirect_uri', redirectUri);
@@ -279,28 +290,22 @@ function HomePageContent() {
       googleOAuthUrl.searchParams.append('response_type', responseType);
       googleOAuthUrl.searchParams.append('nonce', nonce);
       
-      // Log the final URL (with sensitive data masked)
-      console.log('[PAGE:OAUTH] Generated OAuth URL base:', googleOAuthUrl.origin + googleOAuthUrl.pathname);
-      
-      // Redirect to Google OAuth login
-      console.log('[PAGE:OAUTH] Redirecting to Google OAuth...');
-      endTimer();
+      console.log('[LOGIN] Redirecting to Google OAuth login');
       window.location.href = googleOAuthUrl.toString();
     } catch (error) {
-      console.error('[PAGE:OAUTH] Login process failed:', error);
+      console.error('[LOGIN] Failed to initiate login:', error);
       setStatusMessage({
         type: 'error',
         message: 'Failed to start authentication. Please try again.'
       });
       setLoginAnimation(false);
-      endTimer();
     }
-  }, [setLoginAnimation, startLogin, setStatusMessage]); // dependencies
+  }, [setLoginAnimation, startLogin, setStatusMessage]);
 
   // Display error if any
   useEffect(() => {
     if (error) {
-      console.log('[PAGE:ERROR] Error from context:', error);
+      console.error('[LOGIN] Authentication error:', error);
       setStatusMessage({
         type: 'error',
         message: error
@@ -317,8 +322,11 @@ function HomePageContent() {
     }
   }, [loginAnimation, isLoading, renderPhase]);
 
-  // Memoize button text to prevent unnecessary re-renders
-  const buttonText = useMemo(() => isLoading ? 'Connecting...' : 'Continue with Google', [isLoading]);
+  // Memoize button text for better performance
+  const buttonText = useMemo(() => 
+    isLoading ? 'Connecting...' : 'Continue with Google', 
+    [isLoading]
+  );
   
   // Memoize the Google login button to prevent re-renders
   const loginButton = useMemo(() => {

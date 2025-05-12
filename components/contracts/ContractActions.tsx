@@ -13,8 +13,9 @@ import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText, FileSignature }
 import { ContractStatus } from '@prisma/client'
 import { generateContractPDF } from '@/app/utils/pdf'
 import { useToast } from '@/components/ui/use-toast'
-import { generateSigningLink } from '@/app/utils/signatures'
+
 import { useRouter } from 'next/navigation'
+import DecryptButton from '@/components/contracts/DecryptButton'
 
 interface ContractActionsProps {
   contractId: string
@@ -48,6 +49,34 @@ export default function ContractActions({
 }: ContractActionsProps) {
   const { toast } = useToast();
   const router = useRouter();
+
+  // Add comprehensive logging for contract data
+  console.log("[ContractActions] Contract data:", {
+    id: contractId,
+    status,
+    hasMetadata: !!contract?.metadata,
+    fullMetadata: contract?.metadata, // Log the full metadata structure
+    walrusData: contract?.metadata?.walrus,
+    blobId: contract?.metadata?.walrus?.storage?.blobId,
+    documentId: contract?.metadata?.walrus?.encryption?.documentId,
+    allowlistId: contract?.metadata?.walrus?.encryption?.allowlistId,
+    capId: contract?.metadata?.walrus?.encryption?.capId,
+    authorizedWallets: contract?.metadata?.walrus?.authorizedWallets
+  });
+
+  // Extract encryption-related properties
+  const blobId = contract?.metadata?.walrus?.storage?.blobId;
+  const documentIdHex = contract?.metadata?.walrus?.encryption?.documentId;
+  const allowlistId = contract?.metadata?.walrus?.encryption?.allowlistId;
+  
+  // Check if DecryptButton should be shown
+  const showDecryptButton = status === 'COMPLETED' && blobId && documentIdHex && allowlistId;
+  console.log("[ContractActions] Should show decrypt button:", showDecryptButton, {
+    status,
+    blobId,
+    documentIdHex,
+    allowlistId
+  });
 
   const handleDownloadPDF = async () => {
     try {
@@ -212,6 +241,27 @@ export default function ContractActions({
           <Trash2 className="mr-2 h-4 w-4" />
           <span>Delete</span>
         </DropdownMenuItem>
+        
+        {showDecryptButton ? (
+          <DropdownMenuItem>
+            <DecryptButton
+              contractId={contractId}
+              blobId={blobId}
+              documentIdHex={documentIdHex}
+              allowlistId={allowlistId}
+              status={status}
+            />
+          </DropdownMenuItem>
+        ) : status === 'COMPLETED' ? (
+          <DropdownMenuItem className="text-amber-500">
+            {/* Show diagnostic info when status is COMPLETED but we're missing fields */}
+            <span>
+              Missing decrypt info: {!blobId ? 'blobId ' : ''}
+              {!documentIdHex ? 'documentId ' : ''}
+              {!allowlistId ? 'allowlistId ' : ''}
+            </span>
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )

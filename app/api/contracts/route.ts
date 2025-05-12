@@ -191,7 +191,11 @@ export async function POST(request: Request) {
           },
           include: {
             owner: true,
-            signatures: true,
+            signatures: {
+              include: {
+                user: true,
+              },
+            },
           },
         });
         
