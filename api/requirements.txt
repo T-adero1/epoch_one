@@ -1,4 +1,4 @@
 requests==2.28.2
 python-dotenv==1.0.0
 walrus-python 
-psycopg2
+psycopg2-binary
