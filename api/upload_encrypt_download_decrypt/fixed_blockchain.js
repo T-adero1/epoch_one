@@ -8,7 +8,7 @@ const utils = require('./fixed_utils');
 
 // Create a new allowlist
 async function createAllowlist(client, adminKeypair, name) {
-  console.log('\n📋 STEP 1: Creating allowlist...');
+  console.log('\n STEP 1: Creating allowlist...');
   console.log(`- Name: ${name}`);
   console.log(`- Admin: ${adminKeypair.getPublicKey().toSuiAddress()}`);
   console.log('- This allowlist will be used as security domain for documents');
@@ -67,7 +67,7 @@ async function createAllowlist(client, adminKeypair, name) {
     const allowlistId = allowlistObj.objectId;
     const capId = capObj.objectId;
     
-    console.log(`✅ Allowlist created successfully`);
+    console.log(` Allowlist created successfully`);
     console.log(`- Allowlist ID: ${allowlistId} - CRITICAL: needed for document ID generation`);
     console.log(`- Cap ID: ${capId} - Required for admin operations`);
     console.log(`- Transaction digest: ${result.digest}`);
@@ -81,7 +81,7 @@ async function createAllowlist(client, adminKeypair, name) {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to create allowlist: ${error.message}`);
+    console.error(`Failed to create allowlist: ${error.message}`);
     console.error(error.stack);
     throw error;
   }
@@ -116,7 +116,8 @@ async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, user
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
-        tx.pure.vector('address', [userAddress])
+        tx.pure.vector('address', [userAddress]),
+        tx.object('0x6')
       ]
     });
     // Build the transaction
@@ -143,14 +144,14 @@ async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, user
       throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
     }
     
-    console.log(`✅ User added to allowlist successfully`);
+    console.log(` User added to allowlist successfully`);
     console.log(`- Transaction digest: ${result.digest}`);
     
     return {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to add user to allowlist: ${error.message}`);
+    console.error(` Failed to add user to allowlist: ${error.message}`);
     console.error(error.stack);
     throw error;
   }
@@ -158,7 +159,7 @@ async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, user
 
 // Add multiple users to an allowlist in one transaction
 async function addMultipleUsersToAllowlist(client, adminKeypair, allowlistId, capId, userAddresses) {
-  console.log('\n👥 STEP 2: Adding multiple users to allowlist in one transaction...');
+  console.log('\n STEP 2: Adding multiple users to allowlist in one transaction...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Cap ID: ${capId}`);
   console.log(`- User Addresses: ${userAddresses.join(', ')}`);
@@ -178,7 +179,8 @@ async function addMultipleUsersToAllowlist(client, adminKeypair, allowlistId, ca
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
-        tx.pure.vector('address', userAddresses.map(addr => addr))
+        tx.pure.vector('address', userAddresses.map(addr => addr)),
+        tx.object('0x6')
       ]
     });
     
@@ -205,14 +207,14 @@ async function addMultipleUsersToAllowlist(client, adminKeypair, allowlistId, ca
       throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
     }
     
-    console.log(`✅ ${userAddresses.length} users added to allowlist successfully`);
+    console.log(` ${userAddresses.length} users added to allowlist successfully`);
     console.log(`- Transaction digest: ${result.digest}`);
     
     return {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to add multiple users to allowlist: ${error.message}`);
+    console.error(`Failed to add multiple users to allowlist: ${error.message}`);
     console.error(error.stack);
     throw error;
   }
@@ -220,7 +222,7 @@ async function addMultipleUsersToAllowlist(client, adminKeypair, allowlistId, ca
 
 // Register blob and set permissions in one transaction
 async function registerBlobAndSetPermissions(client, adminKeypair, allowlistId, capId, blobId, userAddresses) {
-  console.log('\n📋 STEP 7: Registering blob and setting permissions in one transaction...');
+  console.log('\n STEP 7: Registering blob and setting permissions in one transaction...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Cap ID: ${capId}`);
   console.log(`- Blob ID: ${blobId}`);
@@ -242,7 +244,8 @@ async function registerBlobAndSetPermissions(client, adminKeypair, allowlistId, 
         tx.object(allowlistId),
         tx.object(capId),
         tx.pure.vector('address', userAddresses.map(addr => addr)),
-        tx.pure.string(blobId)
+        tx.pure.string(blobId),
+        tx.object('0x6')
       ]
     });
     
@@ -269,14 +272,14 @@ async function registerBlobAndSetPermissions(client, adminKeypair, allowlistId, 
       throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
     }
     
-    console.log(`✅ Blob registered and permissions set for ${userAddresses.length} users in one transaction`);
+    console.log(` Blob registered and permissions set for ${userAddresses.length} users in one transaction`);
     console.log(`- Transaction digest: ${result.digest}`);
     
     return {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to register blob and set permissions: ${error.message}`);
+    console.error(`Failed to register blob and set permissions: ${error.message}`);
     console.error(error.stack);
     throw error;
   }
@@ -284,7 +287,7 @@ async function registerBlobAndSetPermissions(client, adminKeypair, allowlistId, 
 
 // Publish a blob to an allowlist
 async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, blobId) {
-  console.log('\n📋 STEP 7A: Publishing blob to allowlist...');
+  console.log('\n STEP 7A: Publishing blob to allowlist...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Cap ID: ${capId}`);
   console.log(`- Blob ID: ${blobId}`);
@@ -304,7 +307,8 @@ async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, 
         tx.object(allowlistId),
         tx.object(capId),
         tx.pure.vector('address', []), // Empty vector since users already added
-        tx.pure.string(blobId)
+        tx.pure.string(blobId),
+        tx.object('0x6')
       ]
     });
     
@@ -331,14 +335,14 @@ async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, 
       throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
     }
     
-    console.log(`✅ Blob published to allowlist successfully`);
+    console.log(` Blob published to allowlist successfully`);
     console.log(`- Transaction digest: ${result.digest}`);
     
     return {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to publish blob to allowlist: ${error.message}`);
+    console.error(` Failed to publish blob to allowlist: ${error.message}`);
     console.error(error.stack);
     throw error;
   }
@@ -346,7 +350,7 @@ async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, 
 
 // Update document access for specific users
 async function updateDocumentAccess(client, adminKeypair, allowlistId, capId, blobId, userAddresses) {
-  console.log('\n🔄 Updating document access permissions...');
+  console.log('\n Updating document access permissions...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Cap ID: ${capId}`);
   console.log(`- Blob ID: ${blobId}`);
@@ -365,7 +369,8 @@ async function updateDocumentAccess(client, adminKeypair, allowlistId, capId, bl
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
-        tx.pure.vector('address', userAddresses.map(addr => addr))
+        tx.pure.vector('address', userAddresses.map(addr => addr)),
+        tx.object('0x6')
       ]
     });
     
@@ -392,14 +397,14 @@ async function updateDocumentAccess(client, adminKeypair, allowlistId, capId, bl
       throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
     }
     
-    console.log(`✅ Document access updated successfully for ${userAddresses.length} users`);
+    console.log(` Document access updated successfully for ${userAddresses.length} users`);
     console.log(`- Transaction digest: ${result.digest}`);
     
     return {
       tx: result
     };
   } catch (error) {
-    console.error(`❌ Failed to update document access: ${error.message}`);
+    console.error(` Failed to update document access: ${error.message}`);
     console.error(error.stack);
     throw error;
   }

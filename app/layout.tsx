@@ -1,44 +1,24 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-import { ZkLoginProvider } from "@/app/contexts/ZkLoginContext";
-import { AppStateProvider } from "@/app/contexts/AppStateContext";
-import { Toaster } from "@/components/ui/toaster";
-import { PasswordProtection } from "@/components/PasswordProtection";
+'use client';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+import './globals.css';
+import { Inter } from 'next/font/google';
+import { Toaster } from '@/components/ui/toaster';
+import Providers from './providers';
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: "EpochOne - Web3 Document Management",
-  description: "Secure your business documents with Web3 cryptography and digital verification",
-};
+const inter = Inter({ subsets: ['latin'] });
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <AppStateProvider>
-          <ZkLoginProvider>
-            <PasswordProtection>
-              {children}
-            </PasswordProtection>
-          </ZkLoginProvider>
-        </AppStateProvider>
-        <Toaster />
+    <html lang="en">
+      <body className={inter.className}>
+        <Providers>
+          {children}
+          <Toaster />
+        </Providers>
       </body>
     </html>
   );

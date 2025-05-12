@@ -10,17 +10,17 @@ require('dotenv').config();
  * @returns {Ed25519Keypair} - The corresponding Ed25519Keypair
  */
 function suiPrivkeyToKeypair(suiPrivateKey) {
-  console.log('\n🔑 Converting private key to keypair...');
+  console.log('\n Converting private key to keypair...');
 
   try {
     // Check if the key is in bech32 format (starts with suiprivkey1)
     if (suiPrivateKey.startsWith('suiprivkey1')) {
-      console.log('📝 Detected bech32 format private key');
+      console.log(' Detected bech32 format private key');
       console.log('- Converting bech32 private key to Sui keypair...');
       //console.log(suiPrivateKey);
       // Decode the bech32 string
       const decoded = bech32.decode(suiPrivateKey);
-      console.log('✅ Bech32 decoded successfully');
+      console.log(' Bech32 decoded successfully');
       console.log('- Prefix:', decoded.prefix);
       
       // Convert the words to bytes
@@ -39,19 +39,19 @@ function suiPrivkeyToKeypair(suiPrivateKey) {
       
       // Create a keypair using the 32-byte secret key (without the flag)
       const keypair = Ed25519Keypair.fromSecretKey(secretKey);
-      console.log('✅ Successfully created Ed25519Keypair');
+      console.log(' Successfully created Ed25519Keypair');
       return keypair;
     } 
     // Assume it's a hex string if not bech32
     else {
-      console.log('📝 Detected hex format private key');
+      console.log(' Detected hex format private key');
       console.log('- Converting hex private key to Sui keypair...');
       const keypair = Ed25519Keypair.fromSecretKey(fromHEX(suiPrivateKey));
-      console.log('✅ Successfully created Ed25519Keypair');
+      console.log(' Successfully created Ed25519Keypair');
       return keypair;
     }
   } catch (error) {
-    console.error('❌ Error converting private key:', error);
+    console.error(' Error converting private key:', error);
     throw new Error(`Failed to convert private key: ${error.message}`);
   }
 }
@@ -71,38 +71,38 @@ if (require.main === module) {
   
   if (adminKey) {
     try {
-      console.log('\n📋 ADMIN KEY TEST');
+      console.log('\n ADMIN KEY TEST');
       console.log('-'.repeat(20));
       const adminKeypair = suiPrivkeyToKeypair(adminKey);
       const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
       
-      console.log('✅ Successfully created admin keypair');
-      console.log('👤 Derived Sui address:', adminAddress);
+      console.log(' Successfully created admin keypair');
+      console.log(' Derived Sui address:', adminAddress);
     } catch (error) {
-      console.error('❌ Failed to create admin keypair:', error.message);
+      console.error(' Failed to create admin keypair:', error.message);
     }
   } else {
-    console.warn('⚠️  No ADMIN_PRIVATE_KEY found in environment variables');
+    console.warn('  No ADMIN_PRIVATE_KEY found in environment variables');
   }
   
   if (userKey) {
     try {
-      console.log('\n📋 USER KEY TEST');
+      console.log('\n USER KEY TEST');
       console.log('-'.repeat(20));
       const userKeypair = suiPrivkeyToKeypair(userKey);
       const userAddress = userKeypair.getPublicKey().toSuiAddress();
       
-      console.log('✅ Successfully created user keypair');
-      console.log('👤 Derived Sui address:', userAddress);
+      console.log(' Successfully created user keypair');
+      console.log(' Derived Sui address:', userAddress);
     } catch (error) {
-      console.error('❌ Failed to create user keypair:', error.message);
+      console.error(' Failed to create user keypair:', error.message);
     }
   } else {
-    console.warn('⚠️  No USER_PRIVATE_KEY found in environment variables');
+    console.warn('  No USER_PRIVATE_KEY found in environment variables');
   }
   
   if (!adminKey && !userKey) {
-    console.error('\n❌ No private keys found in environment variables');
+    console.error('\n No private keys found in environment variables');
     console.error('Please set ADMIN_PRIVATE_KEY and USER_PRIVATE_KEY in your .env file');
   }
 }

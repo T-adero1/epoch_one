@@ -8,6 +8,7 @@ import tempfile
 import io
 import requests
 from urllib.parse import parse_qs
+import datetime
 
 # Add the root directory to path so we can import the WalrusSDKManager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -165,22 +166,232 @@ def process_upload(data):
         
         # Process SEAL encryption and upload
         try:
+            print("Attempting SEAL encryption and upload...")
             seal_response = process_encrypt_and_upload(seal_data)
             
-            if seal_response.get('encrypted', False):
+            if seal_response.get('encrypted', True):
                 print("SEAL encryption and upload successful")
+                print(f"SEAL response data: {json.dumps(seal_response, indent=2)}")
                 
                 # Add the hash and contract ID to the response
                 seal_response['contractId'] = contract_id
                 seal_response['hash'] = hash_sha256
+                print(f"Added contract ID {contract_id} and hash {hash_sha256} to response")
                 
+                # Prepare walrus data
+                walrus_data = {
+                    'blobId': seal_response.get('blobId'),
+                    'allowlistId': seal_response.get('allowlistId'), 
+                    'documentId': seal_response.get('documentId'),
+                    'capId': seal_response.get('capId'),
+                    'encryptionMethod': 'seal',
+                    'authorizedWallets': signer_addresses if signer_addresses else [],
+                    'uploadedAt': datetime.datetime.now().isoformat()
+                }
+                print(f"Prepared Walrus data: {json.dumps(walrus_data, indent=2)}")
+                
+                # Add walrus data to the response
+                seal_response['walrusData'] = walrus_data
+                print("Added Walrus data to SEAL response")
+                
+                # Update the database using the API endpoint
+                try:
+                    # Get the app URL from environment or use localhost
+                    app_url = os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')
+                    api_url = f"{app_url}/api/contracts/{contract_id}"
+                    
+                    print(f"Updating contract metadata via API: {api_url}")
+                    
+                    # First, get the existing contract metadata
+                    try:
+                        get_response = requests.get(api_url)
+                        if get_response.status_code == 200:
+                            existing_contract = get_response.json()
+                            existing_metadata = existing_contract.get('metadata', {}) or {}
+                            print(f"Got existing metadata: {json.dumps(existing_metadata, indent=2)}")
+                            
+                            # First, only send metadata update
+                            metadata_only_update = {
+                                'metadata': {
+                                    'walrus': {
+                                        'storage': {
+                                            'blobId': walrus_data['blobId'],
+                                            'uploadedAt': walrus_data['uploadedAt'],
+                                            'uploadType': 'seal' if walrus_data.get('encryptionMethod') == 'seal' else 'standard'
+                                        },
+                                        'encryption': {
+                                            'method': walrus_data.get('encryptionMethod', 'standard'),
+                                            'allowlistId': walrus_data.get('allowlistId'),
+                                            'documentId': walrus_data.get('documentId'),
+                                            'capId': walrus_data.get('capId')
+                                        },
+                                        'authorizedWallets': walrus_data.get('authorizedWallets', []),
+                                        'lastUpdated': datetime.datetime.now().isoformat()
+                                    }
+                                }
+                            }
+                            
+                            print(f"Sending metadata-only update: {json.dumps(metadata_only_update, indent=2)}")
+                            metadata_response = requests.patch(
+                                api_url,
+                                json=metadata_only_update,
+                                headers={'Content-Type': 'application/json'}
+                            )
+                            
+                            # Check if metadata update was successful
+                            if metadata_response.status_code == 200:
+                                print(f"Successfully updated metadata. Now trying to update specific columns...")
+                                
+                                # Now try individual field updates
+                                field_updates = []
+                                
+                                # Try to update walrusBlobId separately
+                                if walrus_data['blobId']:
+                                    try:
+                                        blob_update = {'walrusBlobId': walrus_data['blobId']}
+                                        blob_response = requests.patch(api_url, json=blob_update)
+                                        field_updates.append(f"walrusBlobId: {blob_response.status_code}")
+                                    except Exception as e:
+                                        print(f"Error updating walrusBlobId field: {str(e)}")
+                                
+                                # Try to update allowlistId separately
+                                if walrus_data.get('allowlistId'):
+                                    try:
+                                        allowlist_update = {'allowlistId': walrus_data.get('allowlistId')}
+                                        allowlist_response = requests.patch(api_url, json=allowlist_update)
+                                        field_updates.append(f"allowlistId: {allowlist_response.status_code}")
+                                    except Exception as e:
+                                        print(f"Error updating allowlistId field: {str(e)}")
+                                
+                                # Try to update documentId separately
+                                if walrus_data.get('documentId'):
+                                    try:
+                                        doc_update = {'documentId': walrus_data.get('documentId')}
+                                        doc_response = requests.patch(api_url, json=doc_update)
+                                        field_updates.append(f"documentId: {doc_response.status_code}")
+                                    except Exception as e:
+                                        print(f"Error updating documentId field: {str(e)}")
+                                
+                                # Try to update authorizedUsers separately
+                                if walrus_data.get('authorizedWallets'):
+                                    try:
+                                        auth_update = {'authorizedUsers': walrus_data.get('authorizedWallets', [])}
+                                        auth_response = requests.patch(api_url, json=auth_update)
+                                        field_updates.append(f"authorizedUsers: {auth_response.status_code}")
+                                    except Exception as e:
+                                        print(f"Error updating authorizedUsers field: {str(e)}")
+                                
+                                print(f"Individual field update results: {', '.join(field_updates)}")
+                                seal_response['databaseUpdated'] = True
+                            else:
+                                print(f"Failed to update contract metadata via API: {metadata_response.status_code}")
+                                print(f"Error: {metadata_response.text}")
+                                seal_response['databaseUpdated'] = False
+                        else:
+                            print(f"Failed to get existing contract: {get_response.status_code}")
+                            # Proceed with just the walrus metadata
+                            update_data = {
+                                'metadata': {
+                                    'walrus': {
+                                        'storage': {
+                                            'blobId': walrus_data['blobId'],
+                                            'uploadedAt': walrus_data['uploadedAt'],
+                                            'uploadType': 'seal' if walrus_data.get('encryptionMethod') == 'seal' else 'standard'
+                                        },
+                                        'encryption': {
+                                            'method': walrus_data.get('encryptionMethod', 'standard'),
+                                            'allowlistId': walrus_data.get('allowlistId'),
+                                            'documentId': walrus_data.get('documentId'),
+                                            'capId': walrus_data.get('capId')
+                                        },
+                                        'authorizedWallets': walrus_data.get('authorizedWallets', []),
+                                        'lastUpdated': datetime.datetime.now().isoformat()
+                                    }
+                                },
+                                # Include specific database columns
+                                'walrusBlobId': walrus_data['blobId'],
+                                'allowlistId': walrus_data.get('allowlistId'),
+                                'documentId': walrus_data.get('documentId'),
+                                'authorizedUsers': walrus_data.get('authorizedWallets', [])
+                            }
+                            
+                            # Send the PATCH request to update the contract with the fallback data
+                            try:
+                                update_response = requests.patch(
+                                    api_url,
+                                    json=update_data,
+                                    headers={'Content-Type': 'application/json'}
+                                )
+                                
+                                if update_response.status_code == 200:
+                                    print(f"Contract metadata updated successfully via fallback for contract {contract_id}")
+                                    seal_response['databaseUpdated'] = True
+                                else:
+                                    print(f"Failed to update contract via fallback: {update_response.status_code}")
+                                    seal_response['databaseUpdated'] = False
+                            except Exception as update_error:
+                                print(f"Error in fallback update: {str(update_error)}")
+                                seal_response['databaseUpdated'] = False
+                    except Exception as get_error:
+                        print(f"Error getting existing contract: {str(get_error)}")
+                        # Proceed with just the walrus metadata
+                        update_data = {
+                            'metadata': {
+                                'walrus': {
+                                    'storage': {
+                                        'blobId': walrus_data['blobId'],
+                                        'uploadedAt': walrus_data['uploadedAt'],
+                                        'uploadType': 'seal' if walrus_data.get('encryptionMethod') == 'seal' else 'standard'
+                                    },
+                                    'encryption': {
+                                        'method': walrus_data.get('encryptionMethod', 'standard'),
+                                        'allowlistId': walrus_data.get('allowlistId'),
+                                        'documentId': walrus_data.get('documentId'),
+                                        'capId': walrus_data.get('capId')
+                                    },
+                                    'authorizedWallets': walrus_data.get('authorizedWallets', []),
+                                    'lastUpdated': datetime.datetime.now().isoformat()
+                                }
+                            },
+                            # Include specific database columns
+                            'walrusBlobId': walrus_data['blobId'],
+                            'allowlistId': walrus_data.get('allowlistId'),
+                            'documentId': walrus_data.get('documentId'),
+                            'authorizedUsers': walrus_data.get('authorizedWallets', [])
+                        }
+                        
+                        # Send the PATCH request to update the contract with the exception fallback data
+                        try:
+                            update_response = requests.patch(
+                                api_url,
+                                json=update_data,
+                                headers={'Content-Type': 'application/json'}
+                            )
+                            
+                            if update_response.status_code == 200:
+                                print(f"Contract metadata updated successfully via exception fallback for contract {contract_id}")
+                                seal_response['databaseUpdated'] = True
+                            else:
+                                print(f"Failed to update contract via exception fallback: {update_response.status_code}")
+                                seal_response['databaseUpdated'] = False
+                        except Exception as update_error:
+                            print(f"Error in exception fallback update: {str(update_error)}")
+                            seal_response['databaseUpdated'] = False
+                
+                except Exception as e:
+                    print(f"Error updating contract metadata via API: {str(e)}")
+                    print(f"Full error details: {str(sys.exc_info())}")
+                    seal_response['databaseUpdated'] = False
+                
+                print("Returning SEAL response with all data")
                 return seal_response
             else:
                 print("SEAL encryption failed, falling back to standard upload")
+                print(f"SEAL response: {json.dumps(seal_response, indent=2)}")
                 # Continue with standard upload
         except Exception as e:
             print(f"SEAL encryption error: {str(e)}")
-            print("Falling back to standard upload")
+            exit(1)
             # Continue with standard upload
     else:
         if use_seal:
@@ -252,6 +463,111 @@ def process_upload(data):
             'raw': str(raw_response)
         }
         
+        # Extract the blob ID for standard upload
+        blob_id = None
+        if "alreadyCertified" in raw_response:
+            blob_id = raw_response["alreadyCertified"].get("blobId")
+        elif "newlyCreated" in raw_response and "blobObject" in raw_response["newlyCreated"]:
+            blob_id = raw_response["newlyCreated"]["blobObject"].get("blobId")
+        
+        if blob_id:
+            # Check if we have signer addresses
+            signer_addresses = []
+            if data and 'signerAddresses' in data:
+                signer_addresses = data['signerAddresses']
+                
+            # Prepare walrus data for standard upload
+            walrus_data = {
+                'blobId': blob_id,
+                'uploadedAt': datetime.datetime.now().isoformat(),
+                'encryptionMethod': 'standard',
+                'authorizedWallets': signer_addresses
+            }
+            
+            # Update the contract via API
+            try:
+                # Get the app URL from environment or use localhost
+                app_url = os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')
+                api_url = f"{app_url}/api/contracts/{contract_id}"
+                
+                print(f"Updating contract metadata via API for standard upload: {api_url}")
+                
+                # Get existing metadata first
+                try:
+                    get_response = requests.get(api_url)
+                    existing_metadata = {}
+                    if get_response.status_code == 200:
+                        existing_contract = get_response.json()
+                        existing_metadata = existing_contract.get('metadata', {}) or {}
+                except Exception as e:
+                    print(f"Error fetching existing metadata: {str(e)}")
+                    existing_metadata = {}
+                
+                # Update the standard upload part too
+                # First, only send metadata update
+                metadata_only_update = {
+                    'metadata': {
+                        **existing_metadata,
+                        'walrus': {
+                            'storage': {
+                                'blobId': blob_id,
+                                'uploadedAt': datetime.datetime.now().isoformat(),
+                                'uploadType': 'standard'
+                            },
+                            'authorizedWallets': signer_addresses,
+                            'lastUpdated': datetime.datetime.now().isoformat()
+                        }
+                    }
+                }
+                
+                print(f"Sending metadata-only update: {json.dumps(metadata_only_update, indent=2)}")
+                metadata_response = requests.patch(
+                    api_url,
+                    json=metadata_only_update,
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                # Check if metadata update was successful
+                if metadata_response.status_code == 200:
+                    print(f"Successfully updated metadata. Now trying to update specific columns...")
+                    
+                    # Now try individual field updates
+                    field_updates = []
+                    
+                    # Try to update walrusBlobId separately
+                    if blob_id:
+                        try:
+                            blob_update = {'walrusBlobId': blob_id}
+                            blob_response = requests.patch(api_url, json=blob_update)
+                            field_updates.append(f"walrusBlobId: {blob_response.status_code}")
+                        except Exception as e:
+                            print(f"Error updating walrusBlobId field: {str(e)}")
+                    
+                    # Try to update authorizedUsers separately
+                    if signer_addresses:
+                        try:
+                            auth_update = {'authorizedUsers': signer_addresses}
+                            auth_response = requests.patch(api_url, json=auth_update)
+                            field_updates.append(f"authorizedUsers: {auth_response.status_code}")
+                        except Exception as e:
+                            print(f"Error updating authorizedUsers field: {str(e)}")
+                    
+                    print(f"Individual field update results: {', '.join(field_updates)}")
+                    response_data['databaseUpdated'] = True
+                else:
+                    print(f"Failed to update contract metadata via API: {metadata_response.status_code}")
+                    print(f"Error: {metadata_response.text}")
+                    response_data['databaseUpdated'] = False
+                
+                # Add walrus data to the response
+                response_data['walrusData'] = walrus_data
+                
+                print(f"Returning response with updates completed")
+                return response_data
+            except Exception as e:
+                print(f"Error updating contract metadata via API for standard upload: {str(e)}")
+                response_data['databaseUpdated'] = False
+        
         print(f"Returning response with hash {hash_sha256} and blob ID {blob_id if 'blob_id' in locals() else 'unknown'}")
         return response_data
         
@@ -261,6 +577,7 @@ def process_upload(data):
 
 # Support for direct execution from command line
 if __name__ == "__main__":
+    print("Starting")
     if len(sys.argv) >= 2:
         # Command-line execution mode (for development)
         request_file = sys.argv[1]

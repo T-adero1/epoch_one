@@ -40,7 +40,7 @@ async function encryptAndUpload(config) {
   process.env.ADMIN_PRIVATE_KEY = config.adminPrivateKey;
   process.env.NETWORK = config.network || 'testnet';
   
-  console.log('\n📋 Configuration:');
+  console.log('\n Configuration:');
   console.log(`- Network: ${process.env.NETWORK}`);
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
@@ -74,13 +74,13 @@ async function encryptAndUpload(config) {
     const { client: sealClient } = await seal.initSealClient(suiClient);
     
     // Create admin keypair
-    console.log('\n🔑 Creating admin keypair...');
+    console.log('\n Creating admin keypair...');
     const adminKeypair = utils.privateKeyToKeypair(config.adminPrivateKey);
     const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
     console.log(`- Admin address: ${adminAddress}`);
     
     // STEP 1: Create allowlist (document group)
-    console.log('\n🔐 STEP 1: Creating allowlist...');
+    console.log('\n STEP 1: Creating allowlist...');
     const groupName = `Contract-${config.contractId}-${Date.now()}`;
     const { allowlistId, capId } = await blockchain.createAllowlist(
       suiClient, 
@@ -91,7 +91,7 @@ async function encryptAndUpload(config) {
     console.log(`- Cap ID: ${capId}`);
     
     // STEP 2: Add users to allowlist
-    console.log('\n👥 STEP 2: Adding users to allowlist...');
+    console.log('\n STEP 2: Adding users to allowlist...');
     await blockchain.addMultipleUsersToAllowlist(
       suiClient,
       adminKeypair,
@@ -102,12 +102,12 @@ async function encryptAndUpload(config) {
     console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
     
     // STEP 3: Generate document ID using allowlist ID
-    console.log('\n📝 STEP 3: Generating document ID...');
+    console.log('\n STEP 3: Generating document ID...');
     const { documentIdHex } = utils.createDocumentId(allowlistId, config.contractId);
     console.log(`- Document ID: ${documentIdHex}`);
     
     // STEP 4: Encrypt document using the document ID
-    console.log('\n🔒 STEP 4: Encrypting document...');
+    console.log('\n STEP 4: Encrypting document...');
     const { encryptedBytes } = await seal.encryptDocument(
       sealClient,
       documentIdHex,
@@ -116,12 +116,12 @@ async function encryptAndUpload(config) {
     console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
     
     // STEP 5: Upload to Walrus
-    console.log('\n📤 STEP 5: Uploading to Walrus...');
+    console.log('\n STEP 5: Uploading to Walrus...');
     const { blobId } = await walrus.uploadToWalrus(encryptedBytes);
     console.log(`- Uploaded to Walrus: ${blobId}`);
     
     // STEP 6: Register blob in allowlist and set permissions
-    console.log('\n📋 STEP 6: Registering blob in allowlist...');
+    console.log('\n STEP 6: Registering blob in allowlist...');
     await blockchain.publishBlobToAllowlist(
       suiClient,
       adminKeypair,
@@ -147,7 +147,7 @@ async function encryptAndUpload(config) {
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
-    console.error('❌ ENCRYPT AND UPLOAD FAILED');
+    console.error(' ENCRYPT AND UPLOAD FAILED');
     console.error('='.repeat(80));
     console.error(`\nError: ${error.message}`);
     
@@ -184,7 +184,7 @@ async function downloadAndDecrypt(config) {
   process.env.USER_PRIVATE_KEY = config.userPrivateKey;
   process.env.NETWORK = config.network || 'testnet';
   
-  console.log('\n📋 Configuration:');
+  console.log('\n Configuration:');
   console.log(`- Network: ${process.env.NETWORK}`);
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
@@ -206,23 +206,23 @@ async function downloadAndDecrypt(config) {
     const { client: sealClient } = await seal.initSealClient(suiClient);
     
     // Create user keypair
-    console.log('\n🔑 Creating user keypair...');
+    console.log('\n Creating user keypair...');
     const userKeypair = utils.privateKeyToKeypair(config.userPrivateKey);
     const userAddress = userKeypair.getPublicKey().toSuiAddress();
     console.log(`- User address: ${userAddress}`);
     
     // STEP 1: Download from Walrus
-    console.log('\n📥 STEP 1: Downloading from Walrus...');
+    console.log('\n STEP 1: Downloading from Walrus...');
     const downloadedData = await walrus.downloadFromWalrus(config.blobId);
     console.log(`- Downloaded ${downloadedData.length} bytes from Walrus`);
     
     // STEP 2: Create session key
-    console.log('\n🔑 STEP 2: Creating session key...');
+    console.log('\n STEP 2: Creating session key...');
     const sessionKey = await seal.createSessionKey(userKeypair, config.allowlistPackageId);
     console.log(`- Session key created`);
     
     // STEP 3: Approve and fetch keys
-    console.log('\n🔐 STEP 3: Approving and fetching keys...');
+    console.log('\n STEP 3: Approving and fetching keys...');
     const { txKindBytes } = await seal.approveAndFetchKeys(
       suiClient,
       sealClient,
@@ -233,7 +233,7 @@ async function downloadAndDecrypt(config) {
     console.log(`- Keys fetched successfully`);
     
     // STEP 4: Decrypt document
-    console.log('\n🔓 STEP 4: Decrypting document...');
+    console.log('\n STEP 4: Decrypting document...');
     const decryptedData = await seal.decryptDocument(
       sealClient,
       sessionKey, 
@@ -243,7 +243,7 @@ async function downloadAndDecrypt(config) {
     console.log(`- Document decrypted: ${decryptedData.length} bytes`);
     
     // STEP 5: Save decrypted document
-    console.log('\n💾 STEP 5: Saving decrypted document...');
+    console.log('\n STEP 5: Saving decrypted document...');
     const outputPath = config.outputPath || path.join(process.cwd(), `decrypted-${Date.now()}.pdf`);
     fs.writeFileSync(outputPath, Buffer.from(decryptedData));
     console.log(`- Decrypted document saved to: ${outputPath}`);
@@ -264,7 +264,7 @@ async function downloadAndDecrypt(config) {
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
-    console.error('❌ DOWNLOAD AND DECRYPT FAILED');
+    console.error(' DOWNLOAD AND DECRYPT FAILED');
     console.error('='.repeat(80));
     console.error(`\nError: ${error.message}`);
     

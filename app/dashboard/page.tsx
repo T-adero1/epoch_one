@@ -49,7 +49,24 @@ interface ContractWithRelations {
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
-  metadata: { signers?: string[] } | null;
+  metadata: { 
+    signers?: string[],
+    walrus?: {
+      storage?: {
+        blobId?: string;
+        uploadType?: string;
+        uploadedAt?: string;
+      };
+      encryption?: {
+        capId?: string;
+        method?: string;
+        documentId?: string;
+        allowlistId?: string;
+      };
+      authorizedWallets?: string[];
+      lastUpdated?: string;
+    }
+  } | null;
   owner: {
     id: string;
     name: string | null;
@@ -122,15 +139,33 @@ export default function DashboardPage() {
   const loadContracts = useCallback(async () => {
     if (!user?.email) return;
     try {
-      console.log('[DASHBOARD] Starting contract data fetch');
+      console.log('[DASHBOARD] Starting contract data fetch for user:', user.email);
       setIsLoadingContracts(true);
       const data = await getContracts(user.email);
+      console.log('[DASHBOARD] Contract data received:', data);
+      
+      // Log details of COMPLETED contracts to check metadata
+      const completedContracts = data.filter(c => c.status === 'COMPLETED');
+      console.log('[DASHBOARD] COMPLETED contracts:', completedContracts);
+      completedContracts.forEach((contract, index) => {
+        console.log(`[DASHBOARD] COMPLETED contract #${index+1}:`, {
+          id: contract.id,
+          title: contract.title,
+          metadata: contract.metadata,
+          walrusData: contract.metadata?.walrus,
+          blobId: contract.metadata?.walrus?.storage?.blobId,
+          documentId: contract.metadata?.walrus?.encryption?.documentId,
+          allowlistId: contract.metadata?.walrus?.encryption?.allowlistId
+        });
+      });
+      
       setContracts(data as unknown as ContractWithRelations[]);
-      console.log('[DASHBOARD] Contract data loaded successfully');
+      console.log('[DASHBOARD] Contract data loaded successfully and set to state');
     } catch (error) {
-      console.error('Error loading contracts:', error);
+      console.error('[DASHBOARD] Error loading contracts:', error);
     } finally {
       setIsLoadingContracts(false);
+      console.log('[DASHBOARD] Contract loading complete');
     }
   }, [user?.email]);
 
@@ -627,10 +662,10 @@ export default function DashboardPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        {/* Use our ContractActions component */}
                         <ContractActions 
                           contractId={contract.id}
                           status={contract.status}
+                          contract={contract}
                           onView={() => handleViewContract(contract)}
                           onEdit={() => handleEditContract(contract)}
                           onDelete={() => handleConfirmDelete(contract.id)}

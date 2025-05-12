@@ -5,7 +5,7 @@ import sys
 import base64
 import hashlib
 import subprocess
-import tempfile
+import tempfile,traceback
 from pathlib import Path
 import uuid
 from typing import Dict, List, Any, Optional
@@ -13,6 +13,11 @@ from typing import Dict, List, Any, Optional
 # Add the root directory to path so we can import other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.walrus_sdk_manager import WalrusSDKManager
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Constants
 SEAL_PACKAGE_ID = os.environ.get('NEXT_PUBLIC_SEAL_PACKAGE_ID')
@@ -132,71 +137,85 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             config_file.write(json.dumps(config).encode('utf-8'))
         
         print(f"[SEAL] Created config file: {config_path}")
-        print(f"[SEAL] Running seal_operations.js with config")
+        print(f"[SEAL] Running seal_operations.js with config: {config_path}")
         
-        # Run the seal_operations.js script
-        cmd = f"cd {SEAL_SCRIPT_PATH} && node seal_operations.js {config_path}"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        # Run the SEAL operation and capture output
+        process = subprocess.Popen(
+            ['node', os.path.join(SEAL_SCRIPT_PATH, 'seal_operations.js'), config_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
         
-        # Check if the operation was successful
-        if result.returncode != 0:
-            print(f"[SEAL] Error in SEAL operation: {result.stderr}")
-            raise ValueError(f"SEAL operation failed: {result.stderr}")
+        # Get return code and output
+        stdout, stderr = process.communicate()
+        return_code = process.returncode
+        print(f"[SEAL] SEAL operation completed with return code: {return_code}")
         
-        # Parse the operation result from stdout
-        try:
-            # Look for a JSON object in the output
-            output_lines = result.stdout.strip().split('\n')
-            result_json = None
+        # Safely decode stdout with utf-8, replacing problematic characters
+        stdout_text = stdout.decode('utf-8', errors='replace')
+        
+        # Check if the operation was successful based on return code
+        if return_code == 0:
+            # Extract all relevant SEAL information from output
+            blob_id = None
+            allowlist_id = None
+            document_id = None
+            cap_id = None
             
-            for line in output_lines:
-                if line.startswith('{') and line.endswith('}'):
-                    try:
-                        result_json = json.loads(line)
-                        if isinstance(result_json, dict) and 'success' in result_json:
-                            break
-                    except json.JSONDecodeError:
-                        continue
+            # Look for all IDs in the output
+            for line in stdout_text.split('\n'):
+                if 'Blob ID:' in line:
+                    blob_id = line.split('Blob ID:')[1].strip()
+                elif 'Allowlist ID:' in line:
+                    allowlist_id = line.split('Allowlist ID:')[1].strip()
+                elif 'Document ID:' in line or 'Document ID (hex):' in line:
+                    document_id = line.split(':')[1].strip()
+                elif 'Capability ID:' in line or 'Cap ID:' in line:
+                    cap_id = line.split(':')[1].strip()
             
-            if not result_json:
-                raise ValueError("Could not parse operation result from output")
-            
-            if not result_json.get('success', False):
-                error_message = result_json.get('error', 'Unknown error')
-                raise ValueError(f"SEAL operation failed: {error_message}")
-            
-            # Format the response
+            # Create response with all found values
             response_data = {
                 'contractId': contract_id,
                 'encrypted': True,
-                'blobId': result_json.get('blobId'),
-                'allowlistId': result_json.get('allowlistId'),
-                'capId': result_json.get('capId'),
-                'documentId': result_json.get('documentIdHex'),
-                'signerAddresses': signer_addresses,
-                'encryption': {
-                    'method': 'seal',
-                    'packageId': SEAL_PACKAGE_ID,
-                    'allowlistId': result_json.get('allowlistId'),
-                    'documentId': result_json.get('documentIdHex'),
-                    'signerAddresses': signer_addresses
-                }
+                'blobId': blob_id,
+                'allowlistId': allowlist_id,
+                'documentId': document_id,
+                'capId': cap_id,
+                'raw_success': True,
+                'message': 'SEAL encryption succeeded'
             }
             
             print(f"[SEAL] Document successfully encrypted and uploaded")
-            print(f"[SEAL] Blob ID: {result_json.get('blobId')}")
+            if blob_id:
+                print(f"[SEAL] Blob ID: {blob_id}")
+            if allowlist_id:
+                print(f"[SEAL] Allowlist ID: {allowlist_id}")
+            if document_id:
+                print(f"[SEAL] Document ID: {document_id}")
+            if cap_id:
+                print(f"[SEAL] Capability ID: {cap_id}")
             
             return response_data
+        else:
+            # Operation failed - return an error without trying to parse
+            print(f"[SEAL] SEAL operation failed with code: {result.returncode}")
             
-        except Exception as parse_error:
-            print(f"[SEAL] Error parsing operation result: {str(parse_error)}")
-            print(f"[SEAL] Operation stdout: {result.stdout}")
-            print(f"[SEAL] Operation stderr: {result.stderr}")
+            # Create a simple error response without trying to parse stdout/stderr
+            error_response = {
+                'contractId': contract_id,
+                'encrypted': False,
+                'raw_success': False,
+                'message': f'SEAL encryption failed: Return code {result.returncode}',
+            }
             
-            raise ValueError(f"Failed to parse SEAL operation result: {str(parse_error)}")
+            # Fall back to standard upload
+            print("[SEAL] Falling back to standard upload")
+            #return fallback_standard_upload(temp_file_path, contract_id, data)
         
     except Exception as e:
-        print(f"[SEAL] ERROR during encryption/upload: {str(e)}")
+        print(f"[SEAL] Exception running SEAL operation: {str(e)}")
+        print("[SEAL] Traceback:")
+        print(traceback.format_exc())
         
         # Try standard upload as fallback
         print("[SEAL] Falling back to standard upload")

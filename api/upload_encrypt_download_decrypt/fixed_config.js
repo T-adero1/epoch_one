@@ -9,16 +9,16 @@ const NETWORK = 'testnet';
 const RPC_URL = 'https://fullnode.testnet.sui.io:443';
 
 // Package IDs
-const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0xbd4919f0182aa7c372e6c9fc02559451e564a005c779b3bf7b856c4d610eb941';
-const ALLOWLIST_PACKAGE_ID = process.env.ALLOWLIST_PACKAGE_ID || '0xbd4919f0182aa7c372e6c9fc02559451e564a005c779b3bf7b856c4d610eb941';
+const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+const ALLOWLIST_PACKAGE_ID = process.env.ALLOWLIST_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
 
 // Walrus configuration for blob storage
 const WALRUS_ENDPOINTS = [
+  'https://suiftly-testnet-agg.mhax.io/',
+  'https://suiftly-testnet-pub.mhax.io/',
   'https://walrus-testnet-1.testnet.mystenlabs.com/v1',
   'https://walrus-testnet-2.testnet.mystenlabs.com/v1',
-  'https://walrus-testnet-3.testnet.mystenlabs.com/v1',
-  'https://walrus-testnet-4.testnet.mystenlabs.com/v1',
-  'https://walrus-testnet-5.testnet.mystenlabs.com/v1'
+  
 ];
 const WALRUS_EPOCHS_TO_STORE = 2; // How many epochs to store documents
 
@@ -29,7 +29,7 @@ const USER_PRIVATE_KEY = process.env.USER_PRIVATE_KEY;   // User who will access
 // Other configuration
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max file size
 const TEMP_DIR = './temp';
-const DEFAULT_TTL_MINUTES = 10; // Session key valid for 10 minutes
+const DEFAULT_TTL_MINUTES = 15; // Session key valid for 10 minutes
 
 module.exports = {
   NETWORK,

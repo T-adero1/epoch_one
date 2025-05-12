@@ -35,7 +35,7 @@ const walrus = require('./fixed_walrus');
 const seal = require('./fixed_seal');
 
 // Hard-coded PDF file path
-const PDF_FILE_PATH = '/Users/r21m/Documents/GitHub/epoch_one/test.pdf';
+const PDF_FILE_PATH = path.join(__dirname, 'archpoint.pdf');
 
 // Create test directory if it doesn't exist
 utils.ensureDirectoryExists(config.TEMP_DIR);
@@ -47,7 +47,7 @@ async function runCompleteWorkflow(options = {}) {
   console.log('\n' + '='.repeat(80));
   console.log('COMPLETE SEAL WORKFLOW: ENCRYPT → UPLOAD → DOWNLOAD → DECRYPT');
   console.log('='.repeat(80));
-  console.log('\n📋 Configuration:');
+  console.log('\n Configuration:');
   console.log(`- Network: ${config.NETWORK}`);
   console.log(`- Seal Package ID: ${config.SEAL_PACKAGE_ID}`);
   console.log(`- Allowlist Package ID: ${config.ALLOWLIST_PACKAGE_ID}`);
@@ -69,7 +69,7 @@ async function runCompleteWorkflow(options = {}) {
       throw new Error(`PDF file not found: ${PDF_FILE_PATH}`);
     }
     
-    console.log(`\n📄 Using PDF file: ${PDF_FILE_PATH}`);
+    console.log(`\n Using PDF file: ${PDF_FILE_PATH}`);
     const fileStats = fs.statSync(PDF_FILE_PATH);
     console.log(`- File size: ${fileStats.size} bytes (${(fileStats.size / 1024 / 1024).toFixed(2)} MB)`);
     
@@ -83,13 +83,13 @@ async function runCompleteWorkflow(options = {}) {
     const { client: sealClient } = await seal.initSealClient(suiClient);
     
     // Create admin keypair
-    console.log('\n🔑 Creating admin keypair...');
+    console.log('\n Creating admin keypair...');
     const adminKeypair = utils.privateKeyToKeypair(config.ADMIN_PRIVATE_KEY);
     const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
     console.log(`- Admin address: ${adminAddress}`);
     
     // Create user keypair
-    console.log('\n🔑 Creating user keypair...');
+    console.log('\n Creating user keypair...');
     const userKeypair = utils.privateKeyToKeypair(config.USER_PRIVATE_KEY);
     const userAddress = userKeypair.getPublicKey().toSuiAddress();
     console.log(`- User address: ${userAddress}`);
@@ -135,7 +135,7 @@ async function runCompleteWorkflow(options = {}) {
     const { documentIdHex } = utils.createDocumentId(allowlistId);
     
     // STEP 4: Encrypt document using the document ID
-    console.log('\n🔒 STEP 4: Encrypting PDF document...');
+    console.log('\n STEP 4: Encrypting PDF document...');
     const { encryptedBytes } = await seal.encryptDocument(
       sealClient,
       documentIdHex,
@@ -166,7 +166,7 @@ async function runCompleteWorkflow(options = {}) {
           userAddresses
         );
       } catch (error) {
-        console.log("❌ Batch registration failed, falling back to separate transactions");
+        console.log(" Batch registration failed, falling back to separate transactions");
         // First ensure users are in allowlist
         await blockchain.addMultipleUsersToAllowlist(
           suiClient,
@@ -196,7 +196,7 @@ async function runCompleteWorkflow(options = {}) {
       );
     }
     // Create session key for user to decrypt
-    console.log('\n🔑 Creating session key for user to decrypt...');
+    console.log('\n Creating session key for user to decrypt...');
     const sessionKey = await seal.createSessionKey(userKeypair, config.ALLOWLIST_PACKAGE_ID);
     
     // Approve and fetch keys
@@ -221,14 +221,14 @@ async function runCompleteWorkflow(options = {}) {
     utils.saveToFile(Buffer.from(decryptedData), decryptedFilePath);
     
     // Verify decryption was successful
-    console.log('\n✅ Verifying decryption...');
+    console.log('\n Verifying decryption...');
     const originalHash = crypto.createHash('sha256').update(fileData).digest('hex');
     const decryptedHash = crypto.createHash('sha256').update(decryptedData).digest('hex');
     const isMatch = originalHash === decryptedHash;
     
     console.log(`- Original file hash: ${originalHash}`);
     console.log(`- Decrypted file hash: ${decryptedHash}`);
-    console.log(`- Files ${isMatch ? 'match ✅' : 'DO NOT match ❌'}`);
+    console.log(`- Files ${isMatch ? 'match ' : 'DO NOT match '}`);
     
     if (!isMatch) {
       throw new Error('Decryption verification failed - hashes do not match!');
@@ -238,7 +238,7 @@ async function runCompleteWorkflow(options = {}) {
     console.log('WORKFLOW COMPLETED SUCCESSFULLY!');
     console.log('='.repeat(80));
     
-    console.log('\n📑 Summary:');
+    console.log('\n Summary:');
     console.log(`- Original PDF file: ${PDF_FILE_PATH}`);
     console.log(`- Encrypted file: ${encryptedFilePath}`);
     console.log(`- Walrus blob ID: ${blobId}`);
@@ -261,7 +261,7 @@ async function runCompleteWorkflow(options = {}) {
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
-    console.error('❌ WORKFLOW FAILED');
+    console.error(' WORKFLOW FAILED');
     console.error('='.repeat(80));
     console.error(`\nError: ${error.message}`);
     console.error('\nStack trace:');
@@ -284,7 +284,7 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const useBatch = args.includes('--no-batch') ? false : true;
   
-  console.log(`🚀 Starting SEAL workflow with PDF file: ${PDF_FILE_PATH}`);
+  console.log(` Starting SEAL workflow with PDF file: ${PDF_FILE_PATH}`);
   console.log(`- Batch operations: ${useBatch ? 'enabled' : 'disabled'}`);
   
   runCompleteWorkflow({ useBatch })
