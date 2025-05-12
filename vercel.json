@@ -8,5 +8,10 @@
     { "src": "/api/upload_contract", "dest": "api/upload_contract.py" },
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/$1" }
-  ]
+  ],
+  "functions": {
+    "api/upload_contract.py": {
+      "maxDuration": 300
+    }
+  }
 } 

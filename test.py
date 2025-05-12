@@ -40,3 +40,33 @@ def generate_military_grade_password(length=32):
 
     # Example usage:
 #print(generate_military_grade_password())
+
+def ping_server(api_key=None):
+    """
+    Pings the EpochOne prover server
+    Args:
+        api_key (str, optional): API key for authentication via X-API-Key header
+    Returns:
+        bool: True if server is reachable, False otherwise
+    """
+    import requests
+    
+    url = "https://prover.epochone.io/ping"
+    headers = {}
+    if api_key:
+        headers['$http_x_api_key'] = api_key
+        
+    try:
+        response = requests.get(url, headers=headers)
+        print(response)
+        response.raise_for_status()
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"Error pinging server: {e}")
+        return False
+
+# Example usage:
+result = ping_server()
+result = ping_server(api_key="vTjgdqvFsanCZk6Xh3slV5ZspL6TcZKX")
+
+
