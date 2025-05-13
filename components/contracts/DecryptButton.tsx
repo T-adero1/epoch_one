@@ -503,12 +503,22 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       // Continue with key fetching and decryption
       setDecryptionStep('fetchingKeys');
       console.log("[DecryptButton] Fetching decryption keys");
-      await sealClient.fetchKeys({
-        ids: [docId],
-        txBytes: txKindBytes,
-        sessionKey,
-        threshold: 1
-      });
+      try {
+        await sealClient.fetchKeys({
+          ids: [docId],
+          txBytes: txKindBytes,
+          sessionKey,
+          threshold: 2
+        });
+        console.log("[DecryptButton] Keys fetched successfully!");
+        // Verify keys are present in the session key
+        console.log("[DecryptButton] Session key log:", {
+          sessionKey
+        });
+      } catch (error) {
+        console.error("[DecryptButton] Key fetching failed:", error);
+        throw error;
+      }
       
       // Download encrypted data
       setDecryptionStep('downloading');
