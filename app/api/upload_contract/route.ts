@@ -251,7 +251,6 @@ export async function POST(request: NextRequest) {
     
     // Prepare SEAL configuration
     const sealConfig = {
-      operation: "encrypt",
       contractId: data.contractId,
       // Pass the document content directly as base64
       documentContentBase64: contentBuffer.toString('base64'),
@@ -270,110 +269,82 @@ export async function POST(request: NextRequest) {
       network: sealConfig.network
     });
     
-    // Create a temporary file for the configuration
-    const tmpDir = os.tmpdir();
-    const configFile = path.join(tmpDir, `seal-config-${randomUUID()}.json`);
+    // Call our consolidated SEAL API that bundles all dependencies
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    const sealApiUrl = `${appUrl}/api/seal-operations-api`;
     
-    // Write the configuration to the file
-    await fs.writeFile(configFile, JSON.stringify(sealConfig, null, 2));
-    console.log(`[API Route] Configuration written to: ${configFile}`);
+    console.log(`[API Route] Calling SEAL operations API at ${sealApiUrl}`);
     
     try {
-      // Get path to seal_operations.js
-      const sealScriptPath = path.join(process.cwd(), 'api', 'upload_encrypt_download_decrypt', 'seal_operations.js');
-      console.log(`[API Route] SEAL script path: ${sealScriptPath}`);
+      // Use absolute URL for more reliable API calls in serverless environment
+      const response = await axios.post(sealApiUrl, sealConfig, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000 // 60 second timeout
+      });
       
-      // Execute the SEAL operations script
-      console.log(`[API Route] Executing: node ${sealScriptPath} ${configFile}`);
+      console.log('[API Route] SEAL API call completed with status:', response.status);
       
-      const { stdout, stderr } = await execAsync(`node "${sealScriptPath}" "${configFile}"`);
+      const result = response.data;
       
-      // Clean up the config file
-      await fs.unlink(configFile);
-      console.log(`[API Route] Deleted temporary config file`);
-      
-      if (stderr) {
-        console.error('[API Route] SEAL script stderr:', stderr);
-      }
-      
-      console.log('[API Route] SEAL script execution completed');
-      
-      // Parse the stdout as JSON for the result
-      try {
-        const result = JSON.parse(stdout);
-        console.log('[API Route] SEAL operation result:', {
-          success: result.success,
-          allowlistId: result.allowlistId,
-          blobId: result.blobId,
-          documentIdHex: result.documentIdHex
-        });
-        
-        if (!result.success) {
-          console.error('[API Route] SEAL operation failed:', result.error);
-          return NextResponse.json(
-            { 
-              error: 'SEAL Encryption Failed', 
-              details: result.error,
-              stack: result.stack 
-            },
-            { status: 500 }
-          );
-        }
-        
-        // Prepare final result (extract required data for response)
-        const responseData = {
-          success: result.success,
-          contractId: result.contractId,
-          encrypted: true,
-          blobId: result.blobId,
-          allowlistId: result.allowlistId,
-          documentId: result.documentIdHex,
-          capId: result.capId,
-          hash: result.fileHash,
-          // Include walrus data in the expected format
-          walrusData: {
-            blobId: result.blobId,
-            allowlistId: result.allowlistId,
-            documentId: result.documentIdHex,
-            capId: result.capId,
-            encryptionMethod: 'seal',
-            authorizedWallets: result.signerAddresses || []
-          }
-        };
-        
-        console.log('[API Route] Returning successful response');
-        return NextResponse.json(responseData);
-        
-      } catch (parseError: any) {
-        console.error('[API Route] Error parsing SEAL script output:', parseError);
-        console.error('[API Route] Raw SEAL script output:', stdout);
-        
+      if (!result.success) {
+        console.error('[API Route] SEAL operation failed:', result.error);
         return NextResponse.json(
           { 
-            error: 'Failed to parse SEAL operation result', 
-            details: parseError.message,
-            stdout: stdout 
+            error: 'SEAL Encryption Failed', 
+            details: result.error,
+            stack: result.stack 
           },
           { status: 500 }
         );
       }
       
-    } catch (execError: any) {
-      // Clean up the config file
-      try {
-        await fs.unlink(configFile);
-      } catch (unlinkError) {
-        console.warn('[API Route] Error deleting config file:', unlinkError);
-      }
+      // Prepare final result (extract required data for response)
+      const responseData = {
+        success: result.success,
+        contractId: result.contractId,
+        encrypted: true,
+        blobId: result.blobId,
+        allowlistId: result.allowlistId,
+        documentId: result.documentIdHex,
+        capId: result.capId,
+        hash: result.fileHash,
+        // Include walrus data in the expected format
+        walrusData: {
+          blobId: result.blobId,
+          allowlistId: result.allowlistId,
+          documentId: result.documentIdHex,
+          capId: result.capId,
+          encryptionMethod: 'seal',
+          authorizedWallets: result.signerAddresses || []
+        }
+      };
       
-      console.error('[API Route] Error executing SEAL script:', execError);
+      console.log('[API Route] Returning successful response');
+      return NextResponse.json(responseData);
+      
+    } catch (apiError: any) {
+      console.error('[API Route] Error calling SEAL API:', apiError.message);
+      
+      if (apiError.response) {
+        console.error('[API Route] SEAL API response status:', apiError.response.status);
+        console.error('[API Route] SEAL API response data:', apiError.response.data);
+        
+        return NextResponse.json(
+          { 
+            error: 'SEAL API Error', 
+            details: apiError.response.data?.error || apiError.message,
+            stack: apiError.response.data?.stack
+          },
+          { status: 500 }
+        );
+      }
       
       return NextResponse.json(
         { 
-          error: 'Failed to execute SEAL script',
-          details: execError.message,
-          stdout: execError.stdout,
-          stderr: execError.stderr
+          error: 'SEAL API Error', 
+          details: apiError.message
         },
         { status: 500 }
       );

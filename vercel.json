@@ -6,8 +6,8 @@
     { "src": "api/*.js", "use": "@vercel/node" }
   ],
   "routes": [
+    { "src": "/api/seal-operations-api", "dest": "api/seal-operations-api.js" },
     { "src": "/api/perform-seal-operations", "dest": "api/perform-seal-operations.js" },
-    { "src": "/api/walrus-upload", "dest": "api/walrus-upload/index.py" },
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/$1" }
   ]
