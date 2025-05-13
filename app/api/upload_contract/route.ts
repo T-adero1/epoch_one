@@ -290,16 +290,16 @@ export async function POST(request: NextRequest) {
       
       if (!result.success) {
         console.error('[API Route] SEAL operation failed:', result.error);
-        return NextResponse.json(
+          return NextResponse.json(
           { 
             error: 'SEAL Encryption Failed', 
             details: result.error,
             stack: result.stack 
           },
-          { status: 500 }
-        );
-      }
-      
+            { status: 500 }
+          );
+        }
+        
       // Prepare final result (extract required data for response)
       const responseData = {
         success: result.success,

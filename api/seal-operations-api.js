@@ -1,164 +1,22 @@
 // Import all required modules
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { exec } = require('child_process');
-const util = require('util');
 const axios = require('axios');
-const os = require('os');
 
-// Directly incorporate utility functions from fixed_utils
-const utils = {
-  // Include essential utility functions here
-  initSuiClient: async function() {
-    // Simplified version that works in serverless
-    return {};
-  },
-  privateKeyToKeypair: function(privateKey) {
-    // Simplified version
-    return {
-      getPublicKey: function() {
-        return { toSuiAddress: () => "0x" + privateKey.substring(0, 40) };
-      }
-    };
-  },
-  createDocumentId: function(allowlistId, contractId) {
-    // Simplified document ID generation
-    const combinedId = `${allowlistId}:${contractId}`;
-    const hash = crypto.createHash('sha256').update(combinedId).digest('hex');
-    return { documentIdHex: hash };
-  },
-  // Add other essential utilities
-  ensureDirectoryExists: function(dir) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  }
-};
-
-// Directly incorporate simplified blockchain functions
-const blockchain = {
-  createAllowlist: async function(suiClient, adminKeypair, groupName) {
-    // Mocked implementation for testing
-    console.log(`[SEAL API] Creating allowlist with name: ${groupName}`);
-    const allowlistId = "allowlist_" + crypto.randomBytes(16).toString('hex');
-    const capId = "cap_" + crypto.randomBytes(16).toString('hex');
-    return { allowlistId, capId };
-  },
-  
-  addMultipleUsersToAllowlist: async function(suiClient, adminKeypair, allowlistId, capId, userAddresses) {
-    console.log(`[SEAL API] Adding ${userAddresses.length} users to allowlist ${allowlistId}`);
-    return true;
-  },
-  
-  publishBlobToAllowlist: async function(suiClient, adminKeypair, allowlistId, capId, blobId) {
-    console.log(`[SEAL API] Publishing blob ${blobId} to allowlist ${allowlistId}`);
-    return true;
-  }
-};
-
-// Directly incorporate simplified seal functions
-const seal = {
-  initSealClient: async function(suiClient) {
-    console.log(`[SEAL API] Initializing SEAL client`);
-    return { client: {} };
-  },
-  
-  encryptDocument: async function(sealClient, documentIdHex, documentBytes) {
-    console.log(`[SEAL API] Encrypting document with ID: ${documentIdHex}`);
-    // Simple mock encryption for testing
-    const encryptedBytes = Buffer.from(documentBytes);
-    return { encryptedBytes };
-  }
-};
-
-// Walrus upload function using direct HTTP API
-async function uploadToWalrusDirectly(content, options = {}) {
-  console.log('\n=== STARTING DIRECT HTTP UPLOAD ===');
-  const epochs = options.epochs || 2;
-  const deletable = options.deletable || false;
-  
-  console.log(`- Content size: ${content.length} bytes`);
-  
-  // Calculate content hash for verification
-  const hash = crypto.createHash('sha256').update(content).digest('hex');
-  console.log(`- Content SHA-256 hash: ${hash}`);
-  
-  // Determine the correct Walrus endpoint based on network
-  const network = process.env.NETWORK || 'testnet';
-  const publisherEndpoint = network === 'mainnet' 
-    ? 'https://publisher.walrus-mainnet.walrus.space' 
-    : 'https://publisher.walrus-testnet.walrus.space';
-  
-  const uploadUrl = `${publisherEndpoint}/v1/blobs`;
-  console.log(`- Target URL: ${uploadUrl}`);
-  
-  try {
-    // Prepare request parameters
-    const params = {
-      epochs: epochs,
-      deletable: deletable ? 'true' : 'false'
-    };
-    
-    const headers = {
-      'Content-Type': 'application/octet-stream'
-    };
-    
-    console.log(`- Starting HTTP PUT request to ${uploadUrl}`);
-    
-    const startTime = Date.now();
-    const response = await axios.put(uploadUrl, content, { 
-      params,
-      headers,
-      responseType: 'json'
-    });
-    
-    const requestDuration = (Date.now() - startTime) / 1000;
-    console.log(`- PUT request completed in ${requestDuration.toFixed(2)} seconds`);
-    console.log(`- Response status: ${response.status}`);
-    
-    if (response.status !== 200) {
-      throw new Error(`Upload failed with status: ${response.status}`);
-    }
-    
-    // Extract blob ID from the response
-    const responseData = response.data;
-    let blobId = null;
-    
-    if (responseData.alreadyCertified) {
-      blobId = responseData.alreadyCertified.blobId;
-      console.log(`- Blob was already certified with ID: ${blobId}`);
-    } else if (responseData.newlyCreated && responseData.newlyCreated.blobObject) {
-      blobId = responseData.newlyCreated.blobObject.blobId;
-      console.log(`- New blob created with ID: ${blobId}`);
-      console.log(`- Blob size: ${responseData.newlyCreated.blobObject.size} bytes`);
-    }
-    
-    if (!blobId) {
-      throw new Error(`Could not extract blob ID from response: ${JSON.stringify(responseData)}`);
-    }
-    
-    console.log(`- SUCCESS! Document uploaded with blob ID: ${blobId}`);
-    console.log('=== DIRECT HTTP UPLOAD COMPLETED ===\n');
-    
-    return blobId;
-  } catch (error) {
-    console.error(`- ERROR DURING UPLOAD: ${error.message}`);
-    if (error.response) {
-      console.error(`- Response data: ${JSON.stringify(error.response.data || '')}`);
-      console.error(`- Response status: ${error.response.status}`);
-    }
-    console.error('=== DIRECT HTTP UPLOAD FAILED ===\n');
-    throw error;
-  }
-}
+// Import the ACTUAL modules from your existing code
+// These are direct imports from your files
+const utils = require('./upload_encrypt_download_decrypt/fixed_utils');
+const blockchain = require('./upload_encrypt_download_decrypt/fixed_blockchain');
+const walrus = require('./upload_encrypt_download_decrypt/fixed_walrus');
+const seal = require('./upload_encrypt_download_decrypt/fixed_seal');
+const config = require('./upload_encrypt_download_decrypt/fixed_config');
 
 /**
- * Encrypt and upload a document to Walrus
+ * Encrypt and upload a document to Walrus using the EXACT same flow as in seal_operations.js
  */
 async function encryptAndUpload(config) {
   console.log('\n' + '='.repeat(80));
-  console.log('[SEAL API] SEAL ENCRYPT AND UPLOAD OPERATION');
+  console.log('SEAL ENCRYPT AND UPLOAD OPERATION');
   console.log('='.repeat(80));
   
   try {
@@ -167,44 +25,55 @@ async function encryptAndUpload(config) {
       throw new Error('Missing required configuration: documentContentBase64, contractId, signerAddresses, adminPrivateKey');
     }
     
+    // Set required environment variables from config
+    process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.sealPackageId;
+    process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
+    process.env.ADMIN_PRIVATE_KEY = config.adminPrivateKey;
+    process.env.NETWORK = config.network || 'testnet';
+    
+    console.log('\n Configuration:');
+    console.log(`- Network: ${process.env.NETWORK}`);
+    console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
+    console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
+    
     // Read file data from base64 content
     let fileData;
     try {
       fileData = Buffer.from(config.documentContentBase64, 'base64');
-      console.log(`[SEAL API] Successfully decoded base64 content: ${fileData.length} bytes`);
+      console.log(`- Successfully decoded base64 content: ${fileData.length} bytes`);
     } catch (base64Error) {
       throw new Error(`Failed to decode base64 content: ${base64Error.message}`);
     }
     
     // Calculate document hash
     const fileHash = crypto.createHash('sha256').update(fileData).digest('hex');
-    console.log(`[SEAL API] File hash (SHA-256): ${fileHash}`);
+    console.log(`- File hash (SHA-256): ${fileHash}`);
     
-    // Initialize Sui client
+    // Initialize Sui client - use the EXACT same function from your utils
     const suiClient = await utils.initSuiClient();
     
-    // Initialize SEAL client
+    // Initialize SEAL client - use the EXACT same function from your seal module
     const { client: sealClient } = await seal.initSealClient(suiClient);
     
-    // Create admin keypair
-    console.log('\n[SEAL API] Creating admin keypair...');
+    // Create admin keypair - use the EXACT same function from your utils
+    console.log('\n Creating admin keypair...');
     const adminKeypair = utils.privateKeyToKeypair(config.adminPrivateKey);
     const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
-    console.log(`[SEAL API] Admin address: ${adminAddress}`);
+    console.log(`- Admin address: ${adminAddress}`);
     
-    // STEP 1: Create allowlist (document group)
-    console.log('\n[SEAL API] STEP 1: Creating allowlist...');
+    // STEP 1: Create allowlist (document group) - use the EXACT same function from your blockchain module
+    console.log('\n STEP 1: Creating allowlist...');
     const groupName = `Contract-${config.contractId}-${Date.now()}`;
     const { allowlistId, capId } = await blockchain.createAllowlist(
       suiClient, 
       adminKeypair, 
       groupName
     );
-    console.log(`[SEAL API] Allowlist created: ${allowlistId}`);
-    console.log(`[SEAL API] Cap ID: ${capId}`);
+    console.log(`- Allowlist created: ${allowlistId}`);
+    console.log(`- Cap ID: ${capId}`);
     
-    // STEP 2: Add users to allowlist
-    console.log('\n[SEAL API] STEP 2: Adding users to allowlist...');
+    // STEP 2: Add users to allowlist - use the EXACT same function from your blockchain module
+    console.log('\n STEP 2: Adding users to allowlist...');
     await blockchain.addMultipleUsersToAllowlist(
       suiClient,
       adminKeypair,
@@ -212,32 +81,29 @@ async function encryptAndUpload(config) {
       capId,
       config.signerAddresses
     );
-    console.log(`[SEAL API] Added ${config.signerAddresses.length} users to allowlist`);
+    console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
     
-    // STEP 3: Generate document ID using allowlist ID
-    console.log('\n[SEAL API] STEP 3: Generating document ID...');
+    // STEP 3: Generate document ID using allowlist ID - use the EXACT same function from your utils
+    console.log('\n STEP 3: Generating document ID...');
     const { documentIdHex } = utils.createDocumentId(allowlistId, config.contractId);
-    console.log(`[SEAL API] Document ID: ${documentIdHex}`);
+    console.log(`- Document ID: ${documentIdHex}`);
     
-    // STEP 4: Encrypt document using the document ID
-    console.log('\n[SEAL API] STEP 4: Encrypting document...');
+    // STEP 4: Encrypt document using the document ID - use the EXACT same function from your seal module
+    console.log('\n STEP 4: Encrypting document...');
     const { encryptedBytes } = await seal.encryptDocument(
       sealClient,
       documentIdHex,
       new Uint8Array(fileData)
     );
-    console.log(`[SEAL API] Document encrypted: ${encryptedBytes.length} bytes`);
+    console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
     
-    // STEP 5: Upload to Walrus
-    console.log('\n[SEAL API] STEP 5: Uploading to Walrus...');
-    const blobId = await uploadToWalrusDirectly(encryptedBytes, {
-      epochs: 2,
-      deletable: false
-    });
-    console.log(`[SEAL API] Uploaded to Walrus: ${blobId}`);
+    // STEP 5: Upload to Walrus - use the EXACT same function from your walrus module
+    console.log('\n STEP 5: Uploading to Walrus...');
+    const { blobId } = await walrus.uploadToWalrus(encryptedBytes);
+    console.log(`- Uploaded to Walrus: ${blobId}`);
     
-    // STEP 6: Register blob in allowlist and set permissions
-    console.log('\n[SEAL API] STEP 6: Registering blob in allowlist...');
+    // STEP 6: Register blob in allowlist and set permissions - use the EXACT same function from your blockchain module
+    console.log('\n STEP 6: Registering blob in allowlist...');
     await blockchain.publishBlobToAllowlist(
       suiClient,
       adminKeypair,
@@ -245,10 +111,10 @@ async function encryptAndUpload(config) {
       capId,
       blobId
     );
-    console.log(`[SEAL API] Blob registered in allowlist`);
+    console.log(`- Blob registered in allowlist`);
     
     console.log('\n' + '='.repeat(80));
-    console.log('[SEAL API] ENCRYPT AND UPLOAD COMPLETED SUCCESSFULLY!');
+    console.log('ENCRYPT AND UPLOAD COMPLETED SUCCESSFULLY!');
     console.log('='.repeat(80));
     
     return {
@@ -263,9 +129,10 @@ async function encryptAndUpload(config) {
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
-    console.error('[SEAL API] ENCRYPT AND UPLOAD FAILED');
+    console.error(' ENCRYPT AND UPLOAD FAILED');
     console.error('='.repeat(80));
     console.error(`\nError: ${error.message}`);
+    console.error(`\nStack: ${error.stack}`);
     
     return {
       success: false,
