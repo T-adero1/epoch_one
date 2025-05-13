@@ -570,6 +570,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       setDecryptionStep('complete');
     } catch (error) {
       console.error("[DecryptButton] Decryption error:", error);
+      console.error("[DecryptButton] Error traceback:", error instanceof Error ? error.stack : "No stack trace available");
       
       toast({
         title: "Decryption failed",
