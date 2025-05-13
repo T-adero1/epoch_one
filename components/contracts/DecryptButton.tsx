@@ -446,7 +446,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       const sealClient = new SealClient({
         suiClient,
         serverObjectIds: keyServerIds,
-        verifyKeyServers: false
+        verifyKeyServers: true
       });
 
       // Format document ID correctly

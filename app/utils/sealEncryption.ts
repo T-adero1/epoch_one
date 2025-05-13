@@ -185,7 +185,7 @@ export async function decryptDocument(
   const client = new SealClient({
     suiClient,
     serverObjectIds: keyServerIds,
-    verifyKeyServers: false, // No need to verify again for decryption
+    verifyKeyServers: true, // No need to verify again for decryption
   });
 
   // Create session key

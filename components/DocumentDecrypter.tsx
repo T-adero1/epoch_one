@@ -56,7 +56,7 @@ const DocumentDecrypter: React.FC<DecryptionProps> = ({
       const sealClient = new SealClient({
         suiClient,
         serverObjectIds: await getKeyServerIds(),
-        verifyKeyServers: false,
+        verifyKeyServers: true,
       });
       setProgress(40);
       
