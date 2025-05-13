@@ -29,7 +29,8 @@ const USER_PRIVATE_KEY = process.env.USER_PRIVATE_KEY;   // User who will access
 // Other configuration
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max file size
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : './temp';
-const DEFAULT_TTL_MINUTES = 15; // Session key valid for 10 minutes
+const DEFAULT_TTL_MINUTES = 30; // Session key valid for 10 minutes
+const EPHEMERAL_KEY_VALIDITY_MS = 30 * 60 * 1000; // 30 minutes
 
 module.exports = {
   NETWORK,
@@ -42,5 +43,6 @@ module.exports = {
   USER_PRIVATE_KEY,
   MAX_FILE_SIZE,
   TEMP_DIR,
-  DEFAULT_TTL_MINUTES
+  DEFAULT_TTL_MINUTES,
+  EPHEMERAL_KEY_VALIDITY_MS
 };

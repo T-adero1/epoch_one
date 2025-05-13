@@ -99,7 +99,7 @@ async function uploadToWalrusDirectly(content: Buffer, options: { epochs?: numbe
   console.log(`[API Route] - Content size: ${content.length} bytes`);
   console.log(`[API Route] - Epochs: ${epochs}`);
   console.log(`[API Route] - Deletable: ${deletable}`);
-  
+      
   // Calculate content hash for verification
   const hash = crypto.createHash('sha256').update(content).digest('hex');
   console.log(`[API Route] - Content SHA-256 hash: ${hash}`);
@@ -233,8 +233,8 @@ export async function POST(request: NextRequest) {
         console.log(`[API Route] Fetching signers for contract: ${data.contractId}`);
         signerAddresses = await fetchWalletAddresses(data.contractId);
       }
-    }
-    
+      }
+
     // Require signer addresses for SEAL encryption
     if (signerAddresses.length === 0) {
       console.error("[API Route] SEAL encryption requires signer addresses, but none were found");
@@ -274,8 +274,8 @@ export async function POST(request: NextRequest) {
     const sealApiUrl = `${appUrl}/api/seal-operations-api`;
     
     console.log(`[API Route] Calling SEAL operations API at ${sealApiUrl}`);
-    
-    try {
+      
+      try {
       // Use absolute URL for more reliable API calls in serverless environment
       const response = await axios.post(sealApiUrl, sealConfig, {
         headers: {
