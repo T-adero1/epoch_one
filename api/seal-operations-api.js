@@ -113,6 +113,17 @@ async function encryptAndUpload(config) {
     );
     console.log(`- Blob registered in allowlist`);
     
+    // STEP 7: Update the contract metadata in the database
+    console.log('\n STEP 7: Updating contract metadata in database...');
+    const databaseUpdated = await updateContractMetadata(config.contractId, {
+      blobId,
+      allowlistId,
+      documentIdHex,
+      capId,
+      signerAddresses: config.signerAddresses
+    });
+    console.log(`- Database updated: ${databaseUpdated}`);
+    
     console.log('\n' + '='.repeat(80));
     console.log('ENCRYPT AND UPLOAD COMPLETED SUCCESSFULLY!');
     console.log('='.repeat(80));
@@ -125,7 +136,8 @@ async function encryptAndUpload(config) {
       blobId,
       documentIdHex,
       fileHash,
-      signerAddresses: config.signerAddresses
+      signerAddresses: config.signerAddresses,
+      databaseUpdated
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
@@ -139,6 +151,130 @@ async function encryptAndUpload(config) {
       error: error.message,
       stack: error.stack
     };
+  }
+}
+
+/**
+ * Update the contract metadata in the database
+ */
+async function updateContractMetadata(contractId, data) {
+  console.log(`\n STEP 7: Updating contract metadata in database...`);
+  
+  try {
+    // Get the app URL from environment
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    const apiUrl = `${appUrl}/api/contracts/${contractId}`;
+    
+    console.log(`- Updating contract metadata via API: ${apiUrl}`);
+    
+    // First get existing metadata
+    let existingMetadata = {};
+    try {
+      console.log(`- Getting existing contract metadata...`);
+      const getResponse = await axios.get(apiUrl);
+      
+      if (getResponse.status === 200) {
+        const existingContract = getResponse.data;
+        existingMetadata = existingContract.metadata || {};
+        console.log(`- Successfully retrieved existing metadata`);
+      }
+    } catch (error) {
+      console.error(`- Error fetching existing metadata: ${error.message}`);
+    }
+    
+    // Create metadata update
+    const metadataUpdate = {
+      metadata: {
+        ...existingMetadata,
+        walrus: {
+          storage: {
+            blobId: data.blobId,
+            uploadedAt: new Date().toISOString(),
+            uploadType: 'seal'
+          },
+          encryption: {
+            method: 'seal',
+            allowlistId: data.allowlistId,
+            documentId: data.documentIdHex,
+            capId: data.capId
+          },
+          authorizedWallets: data.signerAddresses || [],
+          lastUpdated: new Date().toISOString()
+        }
+      }
+    };
+    
+    console.log(`- Sending metadata-only update`);
+    const metadataResponse = await axios.patch(
+      apiUrl,
+      metadataUpdate,
+      {
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    
+    // Check if metadata update was successful
+    if (metadataResponse.status === 200) {
+      console.log(`- Successfully updated metadata. Now updating specific columns...`);
+      
+      // Update individual fields
+      const fieldUpdates = [];
+      
+      // Update walrusBlobId separately
+      if (data.blobId) {
+        try {
+          const blobUpdate = { walrusBlobId: data.blobId };
+          const blobResponse = await axios.patch(apiUrl, blobUpdate);
+          fieldUpdates.push(`walrusBlobId: ${blobResponse.status}`);
+        } catch (error) {
+          console.error(`- Error updating walrusBlobId field: ${error.message}`);
+        }
+      }
+      
+      // Update allowlistId separately
+      if (data.allowlistId) {
+        try {
+          const allowlistUpdate = { allowlistId: data.allowlistId };
+          const allowlistResponse = await axios.patch(apiUrl, allowlistUpdate);
+          fieldUpdates.push(`allowlistId: ${allowlistResponse.status}`);
+        } catch (error) {
+          console.error(`- Error updating allowlistId field: ${error.message}`);
+        }
+      }
+      
+      // Update documentId separately
+      if (data.documentIdHex) {
+        try {
+          const docUpdate = { documentId: data.documentIdHex };
+          const docResponse = await axios.patch(apiUrl, docUpdate);
+          fieldUpdates.push(`documentId: ${docResponse.status}`);
+        } catch (error) {
+          console.error(`- Error updating documentId field: ${error.message}`);
+        }
+      }
+      
+      // Update authorizedUsers separately
+      if (data.signerAddresses && data.signerAddresses.length > 0) {
+        try {
+          const authUpdate = { authorizedUsers: data.signerAddresses };
+          const authResponse = await axios.patch(apiUrl, authUpdate);
+          fieldUpdates.push(`authorizedUsers: ${authResponse.status}`);
+        } catch (error) {
+          console.error(`- Error updating authorizedUsers field: ${error.message}`);
+        }
+      }
+      
+      console.log(`- Individual field update results: ${fieldUpdates.join(', ')}`);
+      return true;
+    } else {
+      console.error(`- Failed to update contract metadata via API: ${metadataResponse.status}`);
+      console.error(`- Error: ${metadataResponse.data}`);
+      return false;
+    }
+    
+  } catch (error) {
+    console.error(`- Error updating contract metadata: ${error.message}`);
+    return false;
   }
 }
 
