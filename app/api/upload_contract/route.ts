@@ -1,92 +1,179 @@
 import { NextRequest, NextResponse } from 'next/server';
+import axios from 'axios';
+import crypto from 'crypto';
+import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import fs from 'fs';
-import path from 'path';
-import { randomUUID } from 'crypto';
+import fs from 'fs/promises';
 import os from 'os';
+import { randomUUID } from 'crypto';
 
 // Convert exec to promise-based
 const execAsync = promisify(exec);
 
-// Function to try different Python commands until one works
-async function runPythonScript(scriptPath: string, dataPath: string): Promise<{stdout: string, stderr: string}> {
-  // Different Python commands to try in order of preference
-  const pythonCommands = ['python3', 'python', 'py'];
-  
-  let lastError: any = null;
-  
-  console.log(`[API Route] Attempting to run Python script: ${scriptPath}`);
-  console.log(`[API Route] With data file: ${dataPath}`);
-  console.log(`[API Route] Data file exists:`, fs.existsSync(dataPath));
-  
-  // Log Python version if possible
-  try {
-    const versionResult = await execAsync('python --version');
-    console.log(`[API Route] Python version check: ${versionResult.stdout.trim()}`);
-  } catch (err: any) {
-    console.log(`[API Route] Could not determine Python version: ${err.message}`);
+// Helper functions for Walrus integration
+function getPublisherEndpoint(network: string): string {
+  if (network === 'mainnet') {
+    return 'https://publisher.walrus-mainnet.walrus.space';
+  } else {
+    // Use most reliable testnet endpoints
+    return 'https://publisher.walrus-testnet.walrus.space';
   }
-  
-  // Try each command in sequence
-  for (const cmd of pythonCommands) {
-    try {
-      console.log(`[API Route] Trying Python command: ${cmd}`);
-      const fullCmd = `${cmd} "${scriptPath}" "${dataPath}"`;
-      console.log(`[API Route] Full command: ${fullCmd}`);
-      
-      const result = await execAsync(fullCmd);
-      console.log(`[API Route] Command succeeded: ${cmd}`);
-      return result;
-    } catch (error: any) {
-      console.log(`[API Route] Command failed: ${cmd} - ${error.message}`);
-      
-      if (error.stdout) {
-        console.log(`[API Route] Command stdout: ${error.stdout}`);
-      }
-      
-      if (error.stderr) {
-        console.log(`[API Route] Command stderr: ${error.stderr}`);
-      }
-      
-      lastError = error;
-      
-      // If the error is not "command not found", don't try other commands
-      if (!error.message.includes('command not found') && 
-          !error.message.includes('not recognized') &&
-          !error.message.includes('No such file or directory')) {
-        throw error;
-      }
-    }
-  }
-  
-  // If we get here, all commands failed
-  throw lastError || new Error('All Python commands failed');
 }
 
-// Function to extract JSON from stdout that's delimited by markers
-function extractJsonFromOutput(output: string, startMarker: string, endMarker: string): any {
+/**
+ * Fetch wallet addresses for contract signers
+ */
+async function fetchWalletAddresses(contractId: string, signerEmails?: string[]): Promise<string[]> {
+  console.log(`[API Route] Fetching wallet addresses for contract ${contractId}`);
+  
   try {
-    const startIndex = output.indexOf(startMarker);
-    const endIndex = output.indexOf(endMarker);
-    
-    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
-      throw new Error(`Could not find JSON markers in output: ${startMarker}...${endMarker}`);
+    // If no signer emails provided, fetch from contract
+    if (!signerEmails || signerEmails.length === 0) {
+      // Get the app URL from environment or use localhost
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+      const contractUrl = `${appUrl}/api/contracts/${contractId}`;
+      console.log(`[API Route] Fetching contract details from ${contractUrl}`);
+      
+      const contractResponse = await fetch(contractUrl);
+      if (!contractResponse.ok) {
+        console.error(`[API Route] Error fetching contract: ${contractResponse.status}`);
+        return [];
+      }
+      
+      const contractData = await contractResponse.json();
+      signerEmails = contractData?.metadata?.signers || [];
+      console.log(`[API Route] Found signer emails:`, signerEmails);
     }
     
-    const jsonString = output.substring(startIndex + startMarker.length, endIndex).trim();
-    return JSON.parse(jsonString);
+    if (!signerEmails || signerEmails.length === 0) {
+      console.log("[API Route] No signer emails found");
+      return [];
+    }
+    
+    // Fetch wallet addresses for each signer
+    const walletAddresses: string[] = [];
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    
+    for (const email of signerEmails) {
+      const userUrl = `${appUrl}/api/users?email=${encodeURIComponent(email)}`;
+      console.log(`[API Route] Fetching user details for ${email} from ${userUrl}`);
+      
+      try {
+        const userResponse = await fetch(userUrl);
+        if (!userResponse.ok) {
+          console.error(`[API Route] Error fetching user ${email}: ${userResponse.status}`);
+          continue;
+        }
+        
+        const userData = await userResponse.json();
+        const walletAddress = userData.walletAddress;
+        
+        if (walletAddress) {
+          console.log(`[API Route] Found wallet address for ${email}: ${walletAddress}`);
+          walletAddresses.push(walletAddress);
+        } else {
+          console.log(`[API Route] No wallet address found for ${email}`);
+        }
+      } catch (error) {
+        console.error(`[API Route] Error fetching user data for ${email}:`, error);
+      }
+    }
+    
+    console.log(`[API Route] Returning ${walletAddresses.length} wallet addresses`);
+    return walletAddresses;
   } catch (error) {
-    console.error('[API Route] Error extracting JSON from output:', error);
-    throw new Error('Failed to extract JSON response from Python script output');
+    console.error(`[API Route] Error fetching wallet addresses:`, error);
+    return [];
   }
 }
 
+/**
+ * Upload a document directly to Walrus using HTTP API (no Python)
+ */
+async function uploadToWalrusDirectly(content: Buffer, options: { epochs?: number; deletable?: boolean } = {}): Promise<string> {
+  console.log('[API Route] Starting direct HTTP upload to Walrus');
+  const epochs = options.epochs || 2;
+  const deletable = options.deletable || false;
+  
+  console.log(`[API Route] - Content size: ${content.length} bytes`);
+  console.log(`[API Route] - Epochs: ${epochs}`);
+  console.log(`[API Route] - Deletable: ${deletable}`);
+  
+  // Calculate content hash for verification
+  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  console.log(`[API Route] - Content SHA-256 hash: ${hash}`);
+  
+  // Determine the correct Walrus endpoint based on network
+  const network = process.env.NETWORK || 'testnet';
+  const publisherUrl = getPublisherEndpoint(network);
+  
+  const uploadUrl = `${publisherUrl}/v1/blobs`;
+  console.log(`[API Route] - Target URL: ${uploadUrl}`);
+  
+  try {
+    // Prepare request parameters
+    const params = {
+      epochs: epochs,
+      deletable: deletable ? 'true' : 'false'
+    };
+    
+    const headers = {
+      'Content-Type': 'application/octet-stream'
+    };
+    
+    console.log(`[API Route] - Starting HTTP PUT request to ${uploadUrl}`);
+    
+    const startTime = Date.now();
+    const response = await axios.put(uploadUrl, content, { 
+      params,
+      headers,
+      responseType: 'json'
+    });
+    
+    const requestDuration = (Date.now() - startTime) / 1000;
+    console.log(`[API Route] - PUT request completed in ${requestDuration.toFixed(2)} seconds`);
+    console.log(`[API Route] - Response status: ${response.status}`);
+    
+    if (response.status !== 200) {
+      throw new Error(`Upload failed with status: ${response.status}`);
+    }
+    
+    // Extract blob ID from the response
+    const responseData = response.data;
+    let blobId = null;
+    
+    if (responseData.alreadyCertified) {
+      blobId = responseData.alreadyCertified.blobId;
+      console.log(`[API Route] - Blob was already certified with ID: ${blobId}`);
+    } else if (responseData.newlyCreated && responseData.newlyCreated.blobObject) {
+      blobId = responseData.newlyCreated.blobObject.blobId;
+      console.log(`[API Route] - New blob created with ID: ${blobId}`);
+      console.log(`[API Route] - Blob size: ${responseData.newlyCreated.blobObject.size} bytes`);
+    }
+    
+    if (!blobId) {
+      throw new Error(`Could not extract blob ID from response: ${JSON.stringify(responseData)}`);
+    }
+    
+    console.log(`[API Route] - SUCCESS! Document uploaded with blob ID: ${blobId}`);
+    
+    return blobId;
+  } catch (error: any) {
+    console.error(`[API Route] - ERROR DURING UPLOAD: ${error.message}`);
+    if (error.response) {
+      console.error(`[API Route] - Response data:`, error.response.data);
+      console.error(`[API Route] - Response status: ${error.response.status}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Process the upload request using SEAL encryption
+ */
 export async function POST(request: NextRequest) {
   console.log('[API Route] POST /api/upload_contract - Request received');
-  console.log('[API Route] Request URL:', request.url);
-  console.log('[API Route] Request method:', request.method);
-  console.log('[API Route] Request headers:', Object.fromEntries([...request.headers.entries()]));
   
   try {
     // Parse the request body
@@ -98,198 +185,200 @@ export async function POST(request: NextRequest) {
       isBase64: data.isBase64
     });
     
-    // Log node environment
-    console.log('[API Route] Node environment:', process.env.NODE_ENV);
-    console.log('[API Route] Current working directory (cwd):', process.cwd());
-    
-    // Check what files exist in the current directory
-    try {
-      const rootFiles = fs.readdirSync(process.cwd());
-      console.log('[API Route] Root directory files:', rootFiles);
-      
-      if (rootFiles.includes('api')) {
-        const apiFiles = fs.readdirSync(path.join(process.cwd(), 'api'));
-        console.log('[API Route] API directory files:', apiFiles);
-      }
-    } catch (fsError) {
-      console.error('[API Route] Error reading directory:', fsError);
+    // Validate required fields
+    if (!data.contractId || !data.contractContent) {
+      return NextResponse.json(
+        { error: 'Missing required fields: contractId, contractContent' },
+        { status: 400 }
+      );
     }
     
-    // Check for Python existence on the system
-    try {
-      const pythonVersionCheck = await execAsync('python --version');
-      console.log('[API Route] Python version:', pythonVersionCheck.stdout.trim());
-    } catch (pythonError: any) {
-      console.error('[API Route] Python version check failed:', pythonError.message);
-    }
-    
-    // In production (Vercel), we would just proxy to the serverless Python function
-    // But in development, we need to call it directly
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[API Route] Development environment detected, calling Python script directly');
-      
-      // Create a temporary file to pass the request data
-      const tmpDir = os.tmpdir();
-      const requestFile = path.join(tmpDir, `${randomUUID()}.json`);
-      
-      // Write request data to temp file
-      fs.writeFileSync(requestFile, JSON.stringify(data));
-      
-      // Get the path to the Python script
-      const pythonScriptPath = path.join(process.cwd(), 'api', 'upload_contract.py');
-      console.log('[API Route] Python script path:', pythonScriptPath);
-      console.log('[API Route] Checking if Python script exists:', fs.existsSync(pythonScriptPath));
-
-      // Also try alternative paths
-      const alternativePaths = [
-        path.join(process.cwd(), 'api', 'upload_contract.py'),
-        path.join(process.cwd(), '../api', 'upload_contract.py'),
-        path.join(process.cwd(), '../../api', 'upload_contract.py'),
-        path.join(process.cwd(), 'api/upload_contract.py')
-      ];
-
-      for (const altPath of alternativePaths) {
-        const exists = fs.existsSync(altPath);
-        console.log(`[API Route] Alternative path check ${altPath}: ${exists ? 'EXISTS' : 'MISSING'}`);
-      }
-
-      // Log the current working directory for debugging
-      console.log('[API Route] Current working directory:', process.cwd());
-      console.log('[API Route] Directory contents:', fs.readdirSync(process.cwd()));
-      
-      // Try to find the correct script path
-      let actualScriptPath = pythonScriptPath;
-      if (!fs.existsSync(actualScriptPath)) {
-        // Try to locate the script in the alternative paths
-        for (const altPath of alternativePaths) {
-          if (fs.existsSync(altPath)) {
-            console.log(`[API Route] Found Python script at alternative path: ${altPath}`);
-            actualScriptPath = altPath;
-            break;
-          }
-        }
-
-        // If still not found, try a more exhaustive search
-        if (!fs.existsSync(actualScriptPath)) {
-          console.log('[API Route] Script not found in common locations, attempting broader search...');
-          
-          // Check if /api is a directory in the current working directory
-          const apiDir = path.join(process.cwd(), 'api');
-          if (fs.existsSync(apiDir) && fs.statSync(apiDir).isDirectory()) {
-            console.log('[API Route] Found /api directory, checking its contents');
-            const apiFiles = fs.readdirSync(apiDir);
-            console.log('[API Route] API directory contents:', apiFiles);
-            
-            if (apiFiles.includes('upload_contract.py')) {
-              actualScriptPath = path.join(apiDir, 'upload_contract.py');
-              console.log(`[API Route] Found script in API directory: ${actualScriptPath}`);
-            }
-          }
-        }
-      }
-
-      // Final check and warning
-      if (!fs.existsSync(actualScriptPath)) {
-        console.error(`[API Route] ⚠️ CRITICAL: Python script not found at ${actualScriptPath}`);
-        throw new Error(`Python script not found at ${actualScriptPath}`);
-      } else {
-        console.log(`[API Route] ✅ Using Python script at: ${actualScriptPath}`);
-      }
-      
+    // Decode the content if it's base64 encoded
+    let contentBuffer: Buffer;
+    if (data.isBase64) {
       try {
-        // Using the Python interpreter to run the script with our request data
-        const { stdout, stderr } = await runPythonScript(actualScriptPath, requestFile);
-        console.log('[API Route] Python script output:');
-        console.log(stdout);
+        contentBuffer = Buffer.from(data.contractContent, 'base64');
+      } catch (error) {
+        return NextResponse.json(
+          { error: 'Invalid base64 content' },
+          { status: 400 }
+        );
+      }
+    } else if (typeof data.contractContent === 'string') {
+      contentBuffer = Buffer.from(data.contractContent);
+    } else {
+      contentBuffer = data.contractContent;
+    }
+    
+    // Calculate document hash
+    const hash = crypto.createHash('sha256').update(contentBuffer).digest('hex');
+    console.log(`[API Route] Document hash (SHA-256): ${hash}`);
+    
+    // SEAL encryption is required - no fallback
+    console.log("[API Route] SEAL encryption is required - no fallback to standard upload");
+    
+    // Get signer addresses
+    let signerAddresses = data.signerAddresses || [];
+    
+    // If no signer addresses are provided, fetch them from the database
+    if (signerAddresses.length === 0) {
+      console.log("[API Route] No signer addresses provided, fetching from database");
+      // If metadata.signers is provided in the data, use it to fetch wallet addresses
+      const signerEmails = data.metadata?.signers || [];
+      if (signerEmails.length > 0) {
+        console.log(`[API Route] Using provided signer emails:`, signerEmails);
+        signerAddresses = await fetchWalletAddresses(data.contractId, signerEmails);
+      } else {
+        // Otherwise, try to fetch from existing contract
+        console.log(`[API Route] Fetching signers for contract: ${data.contractId}`);
+        signerAddresses = await fetchWalletAddresses(data.contractId);
+      }
+    }
+    
+    // Require signer addresses for SEAL encryption
+    if (signerAddresses.length === 0) {
+      console.error("[API Route] SEAL encryption requires signer addresses, but none were found");
+      return NextResponse.json(
+        { 
+          error: 'SEAL encryption requires signer addresses', 
+          details: 'No wallet addresses found for signers. Ensure users have wallet addresses configured.' 
+        },
+        { status: 400 }
+      );
+    }
+    
+    console.log(`[API Route] Using SEAL encryption for document with ${signerAddresses.length} signer addresses`);
+    
+    // Prepare SEAL configuration
+    const sealConfig = {
+      operation: "encrypt",
+      contractId: data.contractId,
+      // Pass the document content directly as base64
+      documentContentBase64: contentBuffer.toString('base64'),
+      signerAddresses: signerAddresses,
+      // Environment variables
+      adminPrivateKey: process.env.ADMIN_PRIVATE_KEY || "admin_key_placeholder",
+      sealPackageId: process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || "seal_package_id",
+      allowlistPackageId: process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID,
+      network: process.env.NETWORK || "testnet"
+    };
+    
+    console.log('[API Route] Created SEAL configuration:', {
+      contractId: sealConfig.contractId,
+      documentContentLength: sealConfig.documentContentBase64.length,
+      signerCount: sealConfig.signerAddresses.length,
+      network: sealConfig.network
+    });
+    
+    // Create a temporary file for the configuration
+    const tmpDir = os.tmpdir();
+    const configFile = path.join(tmpDir, `seal-config-${randomUUID()}.json`);
+    
+    // Write the configuration to the file
+    await fs.writeFile(configFile, JSON.stringify(sealConfig, null, 2));
+    console.log(`[API Route] Configuration written to: ${configFile}`);
+    
+    try {
+      // Get path to seal_operations.js
+      const sealScriptPath = path.join(process.cwd(), 'api', 'upload_encrypt_download_decrypt', 'seal_operations.js');
+      console.log(`[API Route] SEAL script path: ${sealScriptPath}`);
+      
+      // Execute the SEAL operations script
+      console.log(`[API Route] Executing: node ${sealScriptPath} ${configFile}`);
+      
+      const { stdout, stderr } = await execAsync(`node "${sealScriptPath}" "${configFile}"`);
+      
+      // Clean up the config file
+      await fs.unlink(configFile);
+      console.log(`[API Route] Deleted temporary config file`);
+      
+      if (stderr) {
+        console.error('[API Route] SEAL script stderr:', stderr);
+      }
+      
+      console.log('[API Route] SEAL script execution completed');
+      
+      // Parse the stdout as JSON for the result
+      try {
+        const result = JSON.parse(stdout);
+        console.log('[API Route] SEAL operation result:', {
+          success: result.success,
+          allowlistId: result.allowlistId,
+          blobId: result.blobId,
+          documentIdHex: result.documentIdHex
+        });
         
-        if (stderr) {
-          console.error('[API Route] Python script stderr:', stderr);
-        }
-        
-        // Try to extract the response JSON from stdout
-        let responseData;
-        
-        if (stdout.includes('RESPONSE_JSON_BEGIN')) {
-          // Extract successful response
-          responseData = extractJsonFromOutput(stdout, 'RESPONSE_JSON_BEGIN', 'RESPONSE_JSON_END');
-          console.log('[API Route] Successfully extracted JSON response from stdout');
-        } else if (stdout.includes('ERROR_JSON_BEGIN')) {
-          // Extract error response
-          const errorData = extractJsonFromOutput(stdout, 'ERROR_JSON_BEGIN', 'ERROR_JSON_END');
-          console.error('[API Route] Python script returned an error:', errorData);
-          return NextResponse.json(errorData, { status: 500 });
-        } else {
-          console.error('[API Route] Could not find response markers in Python output');
+        if (!result.success) {
+          console.error('[API Route] SEAL operation failed:', result.error);
           return NextResponse.json(
-            { error: 'No valid response from Python script' },
+            { 
+              error: 'SEAL Encryption Failed', 
+              details: result.error,
+              stack: result.stack 
+            },
             { status: 500 }
           );
         }
         
-        // Extract and log key details from the Walrus response
-        if (responseData) {
-          const walrusResponse = responseData.walrusResponse;
-          console.log('[API Route] Document hash:', responseData.hash);
-          
-          if (walrusResponse) {
-            try {
-              // Log blob details
-              console.log('[API Route] 🔍 Walrus response analysis:');
-              
-              if (walrusResponse.alreadyCertified) {
-                const blobId = walrusResponse.alreadyCertified.blobId;
-                console.log('[API Route] ✓ Document already on Walrus: Blob ID:', blobId);
-              } else if (walrusResponse.newlyCreated && walrusResponse.newlyCreated.blobObject) {
-                const blobObject = walrusResponse.newlyCreated.blobObject;
-                console.log('[API Route] ✓ Document uploaded to Walrus successfully:');
-                console.log('[API Route]   Blob ID:', blobObject.blobId);
-                console.log('[API Route]   Size:', blobObject.size, 'bytes');
-                console.log('[API Route]   Created at:', blobObject.creationTime);
-                
-                if (blobObject.url) {
-                  console.log('[API Route]   URL:', blobObject.url);
-                }
-              }
-              
-              console.log('[API Route] 🎉 Contract securely stored on blockchain');
-            } catch (parseError) {
-              console.log('[API Route] Error parsing Walrus response:', parseError);
-              console.log('[API Route] Raw Walrus response:', JSON.stringify(walrusResponse, null, 2));
-            }
+        // Prepare final result (extract required data for response)
+        const responseData = {
+          success: result.success,
+          contractId: result.contractId,
+          encrypted: true,
+          blobId: result.blobId,
+          allowlistId: result.allowlistId,
+          documentId: result.documentIdHex,
+          capId: result.capId,
+          hash: result.fileHash,
+          // Include walrus data in the expected format
+          walrusData: {
+            blobId: result.blobId,
+            allowlistId: result.allowlistId,
+            documentId: result.documentIdHex,
+            capId: result.capId,
+            encryptionMethod: 'seal',
+            authorizedWallets: result.signerAddresses || []
           }
-        }
+        };
         
-        // Clean up temp request file
-        fs.unlinkSync(requestFile);
-        
+        console.log('[API Route] Returning successful response');
         return NextResponse.json(responseData);
-      } catch (execError: any) {
-        console.error('[API Route] Error executing Python script:', execError);
         
-        // Clean up temp request file if it exists
-        if (fs.existsSync(requestFile)) {
-          fs.unlinkSync(requestFile);
-        }
+      } catch (parseError: any) {
+        console.error('[API Route] Error parsing SEAL script output:', parseError);
+        console.error('[API Route] Raw SEAL script output:', stdout);
         
         return NextResponse.json(
           { 
-            error: 'Failed to execute Python script',
-            details: execError.message,
-            stdout: execError.stdout,
-            stderr: execError.stderr
+            error: 'Failed to parse SEAL operation result', 
+            details: parseError.message,
+            stdout: stdout 
           },
           { status: 500 }
         );
       }
-    } else {
-      // For production environments, the request will automatically be routed
-      // to the serverless Python function by Vercel
-      console.log('[API Route] Production environment, proxying to serverless function');
-      return NextResponse.json({ 
-        error: 'Direct execution in production is not supported',
-        message: 'Request should be automatically routed to serverless function' 
-      }, { status: 500 });
+      
+    } catch (execError: any) {
+      // Clean up the config file
+      try {
+        await fs.unlink(configFile);
+      } catch (unlinkError) {
+        console.warn('[API Route] Error deleting config file:', unlinkError);
+      }
+      
+      console.error('[API Route] Error executing SEAL script:', execError);
+      
+      return NextResponse.json(
+        { 
+          error: 'Failed to execute SEAL script',
+          details: execError.message,
+          stdout: execError.stdout,
+          stderr: execError.stderr
+        },
+        { status: 500 }
+      );
     }
+    
   } catch (error: any) {
     console.error('[API Route] Error processing request:', error);
     return NextResponse.json(

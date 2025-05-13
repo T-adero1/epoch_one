@@ -1,19 +1,10 @@
 /**
- * Walrus integration for blob storage using Python script
- * This version uses the Python walrus_sdk_manager.py script directly
+ * Walrus integration for blob storage using HTTP API directly
+ * This version eliminates all filesystem dependencies for serverless compatibility
  */
-const fs = require('fs');
 const axios = require('axios');
-const path = require('path');
-const { exec } = require('child_process');
-const util = require('util');
-const execAsync = util.promisify(exec);
-const config = require('./fixed_config');
-const { ensureDirectoryExists } = require('./fixed_utils');
 const crypto = require('crypto');
-
-// Path to the Python script
-const PYTHON_SCRIPT_PATH = path.join(__dirname, '..', 'walrus_sdk_manager.py');
+const config = require('./fixed_config');
 
 /**
  * Upload a blob to Walrus storage using direct HTTP API
@@ -25,7 +16,7 @@ const PYTHON_SCRIPT_PATH = path.join(__dirname, '..', 'walrus_sdk_manager.py');
  */
 async function uploadToWalrusDirectly(content, options = {}) {
   console.log('\n=== STARTING DIRECT HTTP UPLOAD ===');
-  const epochs = options.epochs || 2;
+  const epochs = options.epochs || config.WALRUS_EPOCHS_TO_STORE || 2;
   const deletable = options.deletable || false;
   
   console.log(`- Content size: ${content.length} bytes`);
@@ -37,12 +28,10 @@ async function uploadToWalrusDirectly(content, options = {}) {
   console.log(`- Content SHA-256 hash: ${hash}`);
   
   // Determine the correct Walrus endpoint based on network
-  const network = process.env.NETWORK || 'testnet';
-  const publisherUrl = network === 'mainnet' 
-    ? 'https://publisher.walrus-mainnet.walrus.space' 
-    : 'https://walrus-testnet-publisher.trusted-point.com';
+  const network = process.env.NETWORK || config.NETWORK || 'testnet';
+  const publisherEndpoint = getPublisherEndpoint(network);
   
-  const uploadUrl = `${publisherUrl}/blob`;
+  const uploadUrl = `${publisherEndpoint}/v1/blobs`;
   console.log(`- Target URL: ${uploadUrl}`);
   
   try {
@@ -56,18 +45,17 @@ async function uploadToWalrusDirectly(content, options = {}) {
       'Content-Type': 'application/octet-stream'
     };
     
-    console.log(`- Starting HTTP POST request to ${uploadUrl}`);
+    console.log(`- Starting HTTP PUT request to ${uploadUrl}`);
     
     const startTime = Date.now();
-    const response = await axios.post(uploadUrl, content, { 
+    const response = await axios.put(uploadUrl, content, { 
       params,
       headers,
-      // Important: Disable automatic JSON parsing since the content is binary
       responseType: 'json'
     });
     
     const requestDuration = (Date.now() - startTime) / 1000;
-    console.log(`- POST request completed in ${requestDuration.toFixed(2)} seconds`);
+    console.log(`- PUT request completed in ${requestDuration.toFixed(2)} seconds`);
     console.log(`- Response status: ${response.status}`);
     
     if (response.status !== 200) {
@@ -98,7 +86,7 @@ async function uploadToWalrusDirectly(content, options = {}) {
   } catch (error) {
     console.error(`- ERROR DURING UPLOAD: ${error.message}`);
     if (error.response) {
-      console.error(`- Response data: ${JSON.stringify(error.response.data)}`);
+      console.error(`- Response data: ${JSON.stringify(error.response.data || '')}`);
       console.error(`- Response status: ${error.response.status}`);
     }
     console.error('=== DIRECT HTTP UPLOAD FAILED ===\n');
@@ -107,17 +95,146 @@ async function uploadToWalrusDirectly(content, options = {}) {
 }
 
 /**
+ * Download a blob from Walrus using direct HTTP API
+ * @param {string} blobId - The blob ID to download
+ * @returns {Promise<Uint8Array>} - The downloaded content
+ */
+async function downloadFromWalrusDirectly(blobId) {
+  console.log('\n=== STARTING DIRECT HTTP DOWNLOAD ===');
+  console.log(`- Blob ID: ${blobId}`);
+  
+  // Determine the correct Walrus endpoint based on network
+  const network = process.env.NETWORK || config.NETWORK || 'testnet';
+  const aggregatorEndpoint = getAggregatorEndpoint(network);
+  
+  const downloadUrl = `${aggregatorEndpoint}/v1/blobs/${blobId}`;
+  console.log(`- Target URL: ${downloadUrl}`);
+  
+  try {
+    console.log(`- Starting HTTP GET request to ${downloadUrl}`);
+    
+    const startTime = Date.now();
+    const response = await axios.get(downloadUrl, { 
+      responseType: 'arraybuffer'
+    });
+    
+    const requestDuration = (Date.now() - startTime) / 1000;
+    console.log(`- GET request completed in ${requestDuration.toFixed(2)} seconds`);
+    console.log(`- Response status: ${response.status}`);
+    
+    if (response.status !== 200) {
+      throw new Error(`Download failed with status: ${response.status}`);
+    }
+    
+    const contentLength = response.data.byteLength;
+    console.log(`- Downloaded content size: ${contentLength} bytes`);
+    console.log(`- Download speed: ${((contentLength / 1024 / 1024) / requestDuration).toFixed(2)} MB/s`);
+    
+    // Convert ArrayBuffer to Uint8Array
+    const content = new Uint8Array(response.data);
+    
+    // Calculate content hash for verification
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+    console.log(`- Content SHA-256 hash: ${hash}`);
+    
+    console.log(`- SUCCESS! Document downloaded with size: ${content.length} bytes`);
+    console.log('=== DIRECT HTTP DOWNLOAD COMPLETED ===\n');
+    
+    return content;
+  } catch (error) {
+    console.error(`- ERROR DURING DOWNLOAD: ${error.message}`);
+    if (error.response) {
+      console.error(`- Response status: ${error.response.status}`);
+    }
+    console.error('=== DIRECT HTTP DOWNLOAD FAILED ===\n');
+    throw error;
+  }
+}
+
+/**
+ * Check if a blob exists in Walrus using direct HTTP API
+ * @param {string} blobId - The blob ID to check
+ * @returns {Promise<{exists: boolean, metadata?: Object}>} - Result with exists flag and metadata if found
+ */
+async function checkBlobExistsDirectly(blobId) {
+  console.log(`\n=== CHECKING BLOB EXISTENCE ===`);
+  console.log(`- Blob ID: ${blobId}`);
+  
+  // Determine the correct Walrus endpoint based on network
+  const network = process.env.NETWORK || config.NETWORK || 'testnet';
+  const aggregatorEndpoint = getAggregatorEndpoint(network);
+  
+  const metadataUrl = `${aggregatorEndpoint}/v1/blobs/${blobId}/metadata`;
+  console.log(`- Target URL: ${metadataUrl}`);
+  
+  try {
+    console.log(`- Starting HTTP GET request to ${metadataUrl}`);
+    
+    const response = await axios.get(metadataUrl, { 
+      validateStatus: status => status < 500 // Accept 404 as valid response
+    });
+    
+    if (response.status === 404) {
+      console.log(` Blob does not exist in Walrus`);
+      return { exists: false };
+    }
+    
+    if (response.status !== 200) {
+      throw new Error(`Metadata request failed with status: ${response.status}`);
+    }
+    
+    console.log(` Blob exists in Walrus`);
+    return { 
+      exists: true,
+      metadata: response.data
+    };
+  } catch (error) {
+    console.error(` Failed to check blob existence: ${error.message}`);
+    return { exists: false, error: error.message };
+  }
+}
+
+/**
+ * Get the appropriate publisher endpoint based on network
+ * @param {string} network - 'mainnet' or 'testnet'
+ * @returns {string} The publisher endpoint
+ */
+function getPublisherEndpoint(network) {
+  if (network === 'mainnet') {
+    return 'https://publisher.walrus-mainnet.walrus.space';
+  } else {
+    // Use most reliable testnet endpoints
+    return 'https://publisher.walrus-testnet.walrus.space';
+  }
+}
+
+/**
+ * Get the appropriate aggregator endpoint based on network
+ * @param {string} network - 'mainnet' or 'testnet'
+ * @returns {string} The aggregator endpoint
+ */
+function getAggregatorEndpoint(network) {
+  if (network === 'mainnet') {
+    return 'https://aggregator.walrus-mainnet.walrus.space';
+  } else {
+    // Use most reliable testnet endpoints
+    return 'https://aggregator.walrus-testnet.walrus.space';
+  }
+}
+
+/**
  * Upload encrypted data to Walrus
- * This function replaces the Python subprocess call
+ * @param {Uint8Array|Buffer} encryptedBytes - The encrypted data to upload
+ * @returns {Promise<{blobId: string}>} - Object containing the blob ID
  */
 async function uploadToWalrus(encryptedBytes) {
   console.log(`\n STEP 5: Uploading to Walrus...`);
   
   try {
-    // Use direct HTTP upload instead of calling Python
+    // Use direct HTTP upload
     const blobId = await uploadToWalrusDirectly(encryptedBytes, {
-      epochs: 2,  // Default to 2 epochs
-      deletable: false  // Default to non-deletable
+      epochs: config.WALRUS_EPOCHS_TO_STORE || 2,
+      deletable: false
     });
     
     console.log(`- Uploaded to Walrus: ${blobId}`);
@@ -128,115 +245,39 @@ async function uploadToWalrus(encryptedBytes) {
   }
 }
 
-// Download a blob from Walrus using Python script
-async function downloadFromWalrus(blobId, outputPath = null) {
-  console.log('\nSTEP 6: Downloading blob from Walrus via Python script...');
+/**
+ * Download a blob from Walrus
+ * @param {string} blobId - The blob ID to download
+ * @returns {Promise<Uint8Array>} - The downloaded content as Uint8Array
+ */
+async function downloadFromWalrus(blobId) {
+  console.log('\nSTEP 6: Downloading blob from Walrus...');
   console.log(`- Blob ID: ${blobId}`);
-  console.log(`- Output path: ${outputPath || 'none (will use default from Python script)'}`);
-  console.log(`- Network: ${config.NETWORK}`);
   
   try {
-    // If no output path is provided, create one
-    if (!outputPath) {
-      outputPath = path.join(config.TEMP_DIR, `download-${blobId}-${Date.now()}.bin`);
-      ensureDirectoryExists(config.TEMP_DIR);
-    }
-    
-    // Build Python command
-    const pythonCmd = `python3 "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} download ${blobId} "${outputPath}"`;
-    console.log(`- Executing Python command: ${pythonCmd}`);
-    
-    // Execute the Python script
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync(pythonCmd);
-    const endTime = Date.now();
-    const downloadTime = (endTime - startTime) / 1000;
-    
-    // Check for errors
-    if (stderr && !stderr.includes('Document saved to:')) {
-      console.error(`- Python script error: ${stderr}`);
-      throw new Error(`Python script error: ${stderr}`);
-    }
-    
-    console.log(`- Download time: ${downloadTime.toFixed(2)} seconds`);
-    console.log(`- Python script output: ${stdout}`);
-    
-    // Check if file was downloaded
-    if (!fs.existsSync(outputPath)) {
-      // Check if the Python script saved to a different path
-      const outputPathMatch = stdout.match(/Document saved to: ([^\n]+)/);
-      if (outputPathMatch && outputPathMatch[1]) {
-        outputPath = outputPathMatch[1].trim();
-        console.log(`- Python script saved file to: ${outputPath}`);
-      } else {
-        throw new Error(`File not found at ${outputPath} and could not determine alternate path`);
-      }
-    }
-    
-    // Get file stats
-    const stats = fs.statSync(outputPath);
-    console.log(`- Downloaded file size: ${stats.size} bytes`);
-    console.log(`- Download speed: ${((stats.size / 1024 / 1024) / (downloadTime)).toFixed(2)} MB/s`);
-    
-    // Read the file into memory
-    const fileData = fs.readFileSync(outputPath);
-    console.log(` Download successful! Data size: ${fileData.length} bytes`);
-    
-    return new Uint8Array(fileData);
+    const content = await downloadFromWalrusDirectly(blobId);
+    console.log(` Download successful! Data size: ${content.length} bytes`);
+    return content;
   } catch (error) {
     console.error(` Failed to download from Walrus: ${error.message}`);
-    console.error(error.stack);
     throw error;
   }
 }
 
-// Check if a blob exists in Walrus using Python script
+/**
+ * Check if a blob exists in Walrus
+ * @param {string} blobId - The blob ID to check
+ * @returns {Promise<{exists: boolean, metadata?: Object}>} - Result with exists flag and metadata if found
+ */
 async function checkBlobExists(blobId) {
-  console.log(`\n Checking if blob exists in Walrus via Python script...`);
-  console.log(`- Blob ID: ${blobId}`);
-  console.log(`- Network: ${config.NETWORK}`);
-  
-  try {
-    // Build Python command
-    const pythonCmd = `python3 "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} metadata ${blobId}`;
-    console.log(`- Executing Python command: ${pythonCmd}`);
-    
-    // Execute the Python script
-    const { stdout, stderr } = await execAsync(pythonCmd);
-    
-    // Check for errors indicating not found
-    if (stderr && stderr.includes('No metadata found')) {
-      console.log(` Blob does not exist in Walrus`);
-      return { exists: false };
-    }
-    
-    if (stderr && !stderr.includes('Metadata:')) {
-      console.error(`- Python script error: ${stderr}`);
-      throw new Error(`Python script error: ${stderr}`);
-    }
-    
-    console.log(`- Python script output: ${stdout}`);
-    
-    // If we get metadata, the blob exists
-    const exists = stdout.includes('Metadata:') || !stdout.includes('No metadata found');
-    
-    if (exists) {
-      console.log(` Blob exists in Walrus`);
-    } else {
-      console.log(` Blob does not exist in Walrus`);
-    }
-    
-    return { exists };
-  } catch (error) {
-    // If the command fails completely, assume blob doesn't exist
-    console.error(` Failed to check blob existence: ${error.message}`);
-    return { exists: false, error: error.message };
-  }
+  return checkBlobExistsDirectly(blobId);
 }
 
 module.exports = {
   uploadToWalrus,
   uploadToWalrusDirectly,
   downloadFromWalrus,
-  checkBlobExists
+  downloadFromWalrusDirectly,
+  checkBlobExists,
+  checkBlobExistsDirectly
 };
