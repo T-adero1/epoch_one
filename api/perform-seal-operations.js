@@ -1,103 +1,181 @@
 const { execFile } = require('child_process');
 const path = require('path');
-const fs = require('fs').promises; // For async file operations if needed
+const fs = require('fs').promises; // Use promises for async file operations
 const os = require('os');
 
-// IMPORTANT: Adjust this path to correctly locate seal_operations.js
-// In Vercel, relative paths from the current JS file are usually reliable
-// If seal_operations.js is in a subdirectory like 'upload_encrypt_download_decrypt'
-// relative to the 'api' directory, this needs to be accurate.
-// Example: If 'api/upload_encrypt_download_decrypt/seal_operations.js'
-const SEAL_OPERATIONS_SCRIPT_DIR = path.resolve(__dirname, 'upload_encrypt_download_decrypt'); // Assuming it's a sibling dir
-const SEAL_OPERATIONS_SCRIPT_PATH = path.join(SEAL_OPERATIONS_SCRIPT_DIR, 'seal_operations.js');
+// --- CRITICAL: Path Resolution ---
+// Determine the correct path to the 'seal_operations.js' script
+// within the Vercel deployment environment.
+// Assuming 'api/upload_encrypt_download_decrypt/seal_operations.js' structure
+// relative to the project root. Vercel often places the 'api' directory
+// contents directly in the function's root or a similar structure.
+// We'll try a relative path from this file's directory first.
+const SEAL_OPERATIONS_SCRIPT_NAME = 'seal_operations.js';
+const SEAL_OPERATIONS_DIR_NAME = 'upload_encrypt_download_decrypt';
 
+// Path relative from the location of *this* file (api/perform-seal-operations.js)
+// Adjust if your 'upload_encrypt_download_decrypt' dir is elsewhere relative to 'api' root
+const SEAL_SCRIPT_FULL_PATH = path.resolve(__dirname, SEAL_OPERATIONS_DIR_NAME, SEAL_OPERATIONS_SCRIPT_NAME);
+const SEAL_SCRIPT_CWD = path.dirname(SEAL_SCRIPT_FULL_PATH); // Directory to run the script from
+
+// Helper function to log messages consistently
+function logNodeMessage(message, data = null, isError = false) {
+    const timestamp = new Date().toISOString();
+    const prefix = isError ? '[ERROR]' : '[INFO]';
+    console.log(`[${timestamp}] [NodeSealFunc] ${prefix} ${message}`);
+    if (data) {
+        try {
+            console.log(JSON.stringify(data, null, 2));
+        } catch (e) {
+            console.log('[Log Data (non-JSON)]:', data);
+        }
+    }
+}
+
+// Function to execute the seal_operations.js script
 async function runSealOperation(configData) {
     return new Promise(async (resolve, reject) => {
-        // The Node.js script `seal_operations.js` expects a config file path.
-        // We'll create a temporary file with the configData.
         const tempDir = os.tmpdir();
-        const tempConfigPath = path.join(tempDir, `seal_config_${Date.now()}.json`);
+        const tempConfigFilename = `seal_config_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.json`;
+        const tempConfigPath = path.join(tempDir, tempConfigFilename);
+        let configWritten = false;
 
         try {
-            await fs.writeFile(tempConfigPath, JSON.stringify(configData));
-            console.log(`[NodeSealFunc] Temp config file created at: ${tempConfigPath}`);
+            // 1. Check if the target script exists
+            try {
+                await fs.access(SEAL_SCRIPT_FULL_PATH, fs.constants.F_OK | fs.constants.X_OK); // Check existence and execute permission
+                 logNodeMessage(`Target script found and accessible: ${SEAL_SCRIPT_FULL_PATH}`);
+            } catch (accessError) {
+                 logNodeMessage(`Target script NOT FOUND or inaccessible at ${SEAL_SCRIPT_FULL_PATH}`, { error: accessError.message }, true);
+                 // Attempt to list directory contents for debugging
+                 try {
+                    const parentDirContents = await fs.readdir(path.dirname(SEAL_SCRIPT_FULL_PATH));
+                    logNodeMessage(`Contents of ${path.dirname(SEAL_SCRIPT_FULL_PATH)}:`, parentDirContents);
+                 } catch (readdirError) {
+                    logNodeMessage(`Could not list contents of ${path.dirname(SEAL_SCRIPT_FULL_PATH)}`, { error: readdirError.message }, true);
+                 }
+                 // Try listing current directory as well
+                 try {
+                    const currentDirContents = await fs.readdir(__dirname);
+                    logNodeMessage(`Contents of current directory (__dirname: ${__dirname}):`, currentDirContents);
+                 } catch (readdirError) {
+                    logNodeMessage(`Could not list contents of current directory (__dirname)`, { error: readdirError.message }, true);
+                 }
+                return reject({ status: 500, message: `Required script seal_operations.js not found at ${SEAL_SCRIPT_FULL_PATH}` });
+            }
 
-            const commandArgs = [SEAL_OPERATIONS_SCRIPT_PATH, tempConfigPath];
-            console.log(`[NodeSealFunc] Executing: node ${commandArgs.join(' ')}`);
-            
-            // Ensure SEAL_OPERATIONS_SCRIPT_DIR is correct if the script uses relative paths
+            // 2. Write config data to temporary file
+            await fs.writeFile(tempConfigPath, JSON.stringify(configData, null, 2)); // Pretty print for debugging
+            configWritten = true;
+            logNodeMessage(`Temp config file created: ${tempConfigPath}`);
+
+            // 3. Execute the script
+            const commandArgs = [SEAL_SCRIPT_FULL_PATH, tempConfigPath];
+            logNodeMessage(`Executing command: node ${commandArgs.join(' ')}`, { cwd: SEAL_SCRIPT_CWD });
+
             const execOptions = {
-                cwd: SEAL_OPERATIONS_SCRIPT_DIR, // Or path.dirname(SEAL_OPERATIONS_SCRIPT_PATH)
-                timeout: 50000, // 50 seconds, less than Vercel's max for Node.js functions
+                cwd: SEAL_SCRIPT_CWD, // Set working directory
+                timeout: 50000, // 50 seconds timeout for the script execution
+                encoding: 'utf-8' // Ensure output is treated as UTF-8 string
             };
 
             execFile('node', commandArgs, execOptions, async (error, stdout, stderr) => {
-                // Clean up temp file
-                try {
-                    await fs.unlink(tempConfigPath);
-                    console.log(`[NodeSealFunc] Temp config file ${tempConfigPath} deleted.`);
-                } catch (unlinkError) {
-                    console.error(`[NodeSealFunc] Error deleting temp config file ${tempConfigPath}:`, unlinkError);
+                // 4. Clean up temp file (regardless of success/failure)
+                 if (configWritten) {
+                    try {
+                        await fs.unlink(tempConfigPath);
+                        logNodeMessage(`Temp config file deleted: ${tempConfigPath}`);
+                    } catch (unlinkError) {
+                        logNodeMessage(`Error deleting temp config file ${tempConfigPath}`, { error: unlinkError.message }, true);
+                        // Continue despite unlink error
+                    }
                 }
 
+                // 5. Handle script execution result
                 if (error) {
-                    console.error(`[NodeSealFunc] Error executing seal_operations.js: ${error.message}`);
+                    logNodeMessage(`Error executing seal_operations.js`, { code: error.code, signal: error.signal, message: error.message }, true);
                     if (stderr) {
-                        console.error(`[NodeSealFunc] Stderr: ${stderr}`);
+                        logNodeMessage(`Stderr from script:`, stderr, true);
                     }
-                    // Reject with an object that includes status and message
+                     // Reject with structured error
                     return reject({ status: 500, message: `Script execution failed: ${error.message}`, stderr: stderr || '' });
                 }
-                if (stderr) { // Log stderr even on success, as it might contain warnings
-                    console.warn(`[NodeSealFunc] Stderr from seal_operations.js: ${stderr}`);
+
+                if (stderr) { // Log stderr even on success (as warnings)
+                    logNodeMessage(`Stderr from seal_operations.js (potential warnings):`, stderr);
                 }
-                
+
+                // 6. Parse stdout (assuming it's JSON)
                 try {
-                    // Assuming seal_operations.js prints JSON to stdout
+                    logNodeMessage(`Raw stdout from script (first 500 chars):`, stdout.substring(0, 500));
                     const result = JSON.parse(stdout);
-                    console.log('[NodeSealFunc] seal_operations.js executed successfully.');
-                    resolve(result);
+                    logNodeMessage('seal_operations.js executed successfully, parsed JSON result.');
+                    resolve(result); // Resolve the promise with the parsed JSON
                 } catch (parseError) {
-                    console.error(`[NodeSealFunc] Failed to parse JSON from seal_operations.js stdout: ${parseError.message}`);
-                    console.error(`[NodeSealFunc] Raw stdout: ${stdout}`);
-                    reject({ status: 500, message: `Failed to parse script output: ${parseError.message}`, stdout });
+                    logNodeMessage(`Failed to parse JSON from seal_operations.js stdout`, { error: parseError.message }, true);
+                    logNodeMessage(`Raw stdout was:`, stdout);
+                    // Reject with structured error
+                    reject({ status: 500, message: `Failed to parse script output: ${parseError.message}`, stdout: stdout });
                 }
-            });
-        } catch (fileError) {
-            console.error(`[NodeSealFunc] Error writing temp config file: ${fileError.message}`);
-            reject({ status: 500, message: `File system error: ${fileError.message}` });
+            }); // End execFile callback
+
+        } catch (err) { // Catch errors from fs operations or other async issues before execFile
+             logNodeMessage('Error before or during script execution setup', { error: err.message }, true);
+             // Ensure cleanup if config was written before failure
+             if (configWritten) {
+                try {
+                    await fs.unlink(tempConfigPath);
+                    logNodeMessage(`Temp config file deleted after setup error: ${tempConfigPath}`);
+                } catch (unlinkError) {
+                     logNodeMessage(`Error deleting temp config file ${tempConfigPath} after setup error`, { error: unlinkError.message }, true);
+                }
+             }
+            reject({ status: 500, message: `Setup error: ${err.message}` });
         }
-    });
+    }); // End Promise
 }
 
+// --- Vercel Serverless Function Handler ---
 export default async function handler(req, res) {
-    if (req.method === 'POST') {
-        try {
-            console.log('[NodeSealFunc] Received POST request.');
-            const { configData } = req.body;
+    logNodeMessage(`Request received`, { method: req.method, url: req.url });
 
-            if (!configData) {
-                console.log('[NodeSealFunc] Missing configData in request body.');
-                return res.status(400).json({ error: 'Missing configData in request body' });
-            }
-            
-            console.log('[NodeSealFunc] configData received, type:', typeof configData);
-            // console.log('[NodeSealFunc] configData (first 100 chars if string):', typeof configData === 'string' ? configData.substring(0,100) : JSON.stringify(configData).substring(0,100));
-
-
-            const result = await runSealOperation(configData);
-            console.log('[NodeSealFunc] Sending success response.');
-            res.status(200).json(result);
-        } catch (error) {
-            console.error('[NodeSealFunc] Error in handler:', error);
-            const status = error.status || 500;
-            // Ensure error is an object before sending
-            const errorResponse = typeof error === 'object' && error !== null ? error : { message: String(error) };
-            res.status(status).json({ error: 'Failed to perform SEAL operation', details: errorResponse.message || String(error), stderr: errorResponse.stderr, stdout: errorResponse.stdout });
-        }
-    } else {
-        console.log(`[NodeSealFunc] Method ${req.method} not allowed.`);
+    // --- CHECK METHOD ---
+    if (req.method !== 'POST') {
+        logNodeMessage(`Method ${req.method} not allowed.`, null, true);
         res.setHeader('Allow', ['POST']);
-        res.status(405).end(`Method ${req.method} Not Allowed`);
+        return res.status(405).json({ error: `Method ${req.method} Not Allowed` }); // Respond with JSON
+    }
+
+    try {
+        // --- PARSE BODY ---
+        // Vercel automatically parses JSON body for JS functions if content-type is correct
+        const configData = req.body.configData; // Assuming Python sends { "configData": ... }
+
+        if (!configData) {
+            logNodeMessage('Missing configData in request body.', req.body, true);
+            return res.status(400).json({ error: 'Missing configData in request body' });
+        }
+
+        logNodeMessage('configData received, initiating runSealOperation.');
+        // logNodeMessage('configData sample:', JSON.stringify(configData).substring(0, 200)); // Log sample
+
+        // --- EXECUTE LOGIC ---
+        const result = await runSealOperation(configData);
+
+        logNodeMessage('runSealOperation successful, sending 200 response.');
+        return res.status(200).json(result); // Send the result back
+
+    } catch (error) {
+        logNodeMessage('Error processing request in handler', error, true);
+        // Use status from structured error if available, otherwise default to 500
+        const status = error.status || 500;
+        const errorResponse = {
+            error: 'Failed to perform SEAL operation',
+            details: typeof error === 'object' && error !== null ? error.message : String(error),
+            // Include stderr/stdout from error object if present
+            ...(error.stderr && { stderr: error.stderr }),
+            ...(error.stdout && { stdout: error.stdout }),
+        };
+        return res.status(status).json(errorResponse);
     }
 }

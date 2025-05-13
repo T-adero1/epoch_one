@@ -33,6 +33,9 @@ MODULE_NAME = os.environ.get('MODULE_NAME', 'allowlist')
 SEAL_SCRIPT_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api', 'upload_encrypt_download_decrypt'))
 print(f"[SEAL] Scripts directory path: {SEAL_SCRIPT_PATH}")
 
+# This path is ONLY used for local development now
+SEAL_SCRIPT_PATH_LOCAL = os.path.abspath(os.path.join(os.path.dirname(__file__), 'upload_encrypt_download_decrypt'))
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Parse request body

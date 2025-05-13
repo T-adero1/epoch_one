@@ -2,10 +2,12 @@
   "version": 2,
   "builds": [
     { "src": "package.json", "use": "@vercel/next" },
-    { "src": "api/*.py", "use": "@vercel/python" }
+    { "src": "api/*.py", "use": "@vercel/python" },
+    { "src": "api/*.js", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/api/upload_contract", "dest": "api/upload_contract.py" },
+    { "src": "/api/perform-seal-operations", "dest": "api/perform-seal-operations.js" },
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/$1" }
   ]
