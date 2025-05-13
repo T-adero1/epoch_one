@@ -9,6 +9,9 @@ import tempfile,traceback
 from pathlib import Path
 import uuid
 from typing import Dict, List, Any, Optional
+import time
+import requests
+import datetime
 
 # Add the root directory to path so we can import other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -71,6 +74,20 @@ class handler(BaseHTTPRequestHandler):
         }
         
         self.wfile.write(json.dumps(response).encode())
+
+def log_message(message, data=None, is_error=False):
+    timestamp = datetime.datetime.now().isoformat()
+    log_prefix = "[ERROR]" if is_error else "[INFO]"
+    full_message = f"[{timestamp}] {log_prefix} {message}"
+    if data:
+        try:
+            # Attempt to serialize data to JSON for structured logging
+            print(full_message, json.dumps(data, indent=2, default=str))
+        except TypeError:
+            # Fallback to string representation if data is not JSON serializable
+            print(full_message, data)
+    else:
+        print(full_message)
 
 def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
     """Process the encryption and upload request data and return response"""
@@ -139,79 +156,183 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
         print(f"[SEAL] Created config file: {config_path}")
         print(f"[SEAL] Running seal_operations.js with config: {config_path}")
         
-        # Run the SEAL operation and capture output
-        process = subprocess.Popen(
-            ['node', os.path.join(SEAL_SCRIPT_PATH, 'seal_operations.js'), config_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Get return code and output
-        stdout, stderr = process.communicate()
-        return_code = process.returncode
-        print(f"[SEAL] SEAL operation completed with return code: {return_code}")
-        
-        # Safely decode stdout with utf-8, replacing problematic characters
-        stdout_text = stdout.decode('utf-8', errors='replace')
-        
-        # Check if the operation was successful based on return code
-        if return_code == 0:
-            # Extract all relevant SEAL information from output
-            blob_id = None
-            allowlist_id = None
-            document_id = None
-            cap_id = None
+        # Determine environment
+        # VERCEL_ENV can be 'production', 'preview', or 'development'
+        is_production_environment = os.environ.get('VERCEL_ENV') == 'production'
+        log_message(f"Environment detected: {'Production (Vercel)' if is_production_environment else 'Local/Development'}")
+        log_message(f"SEAL_SCRIPT_PATH resolved to: {SEAL_SCRIPT_PATH}") # Ensure SEAL_SCRIPT_PATH is correctly defined and logged
+
+        stdout_data = None
+        stderr_data = None
+        # process_returncode = None # If you were checking this
+
+        if is_production_environment:
+            log_message("[SEAL] Running in PRODUCTION mode. Using HTTP call to Node.js SEAL function.")
             
-            # Look for all IDs in the output
-            for line in stdout_text.split('\n'):
-                if 'Blob ID:' in line:
-                    blob_id = line.split('Blob ID:')[1].strip()
-                elif 'Allowlist ID:' in line:
-                    allowlist_id = line.split('Allowlist ID:')[1].strip()
-                elif 'Document ID:' in line or 'Document ID (hex):' in line:
-                    document_id = line.split(':')[1].strip()
-                elif 'Capability ID:' in line or 'Cap ID:' in line:
-                    cap_id = line.split(':')[1].strip()
+            # Production path: Call another Vercel function (Node.js) via HTTP
+            # You'll need to create this new Node.js function (e.g., api/perform_seal_node_operations.js)
             
-            # Create response with all found values
-            response_data = {
-                'contractId': contract_id,
-                'encrypted': True,
-                'blobId': blob_id,
-                'allowlistId': allowlist_id,
-                'documentId': document_id,
-                'capId': cap_id,
-                'raw_success': True,
-                'message': 'SEAL encryption succeeded'
+            # 1. Read content of config_path (if it's a file path and needs to be sent)
+            #    This depends on what 'config_path' is and what the Node.js script expects.
+            #    If config_path is a path to a temp file you created with JSON data:
+            config_content_for_node = {}
+            try:
+                with open(config_path, 'r') as f:
+                    config_content_for_node = json.load(f)
+                log_message(f"[SEAL] Successfully read config data from {config_path} for Node.js function call.")
+            except Exception as e:
+                log_message(f"[SEAL] Failed to read or parse config_path {config_path}: {e}", is_error=True)
+                raise Exception(f"Failed to prepare config data for Node.js SEAL function: {e}") from e
+
+            # 2. Construct payload
+            payload = {
+                "configData": config_content_for_node,
+                # Add any other parameters your seal_operations.js script might need
+                # that were previously passed via command line or environment
             }
             
-            print(f"[SEAL] Document successfully encrypted and uploaded")
-            if blob_id:
-                print(f"[SEAL] Blob ID: {blob_id}")
-            if allowlist_id:
-                print(f"[SEAL] Allowlist ID: {allowlist_id}")
-            if document_id:
-                print(f"[SEAL] Document ID: {document_id}")
-            if cap_id:
-                print(f"[SEAL] Capability ID: {cap_id}")
+            # 3. Make an HTTP POST request
+            # IMPORTANT: Create this new Node.js API route (e.g., /api/perform-seal-operations)
+            node_seal_function_url = f"{os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')}/api/perform-seal-operations"
+            log_message(f"[SEAL] Calling Node.js SEAL function at: {node_seal_function_url}")
             
-            return response_data
-        else:
-            # Operation failed - return an error without trying to parse
-            print(f"[SEAL] SEAL operation failed with code: {result.returncode}")
-            
-            # Create a simple error response without trying to parse stdout/stderr
-            error_response = {
-                'contractId': contract_id,
-                'encrypted': False,
-                'raw_success': False,
-                'message': f'SEAL encryption failed: Return code {result.returncode}',
-            }
-            
-            # Fall back to standard upload
-            print("[SEAL] Falling back to standard upload")
-            #return fallback_standard_upload(temp_file_path, contract_id, data)
+            try:
+                # Using requests library (ensure 'requests' is in your requirements.txt)
+                response = requests.post(node_seal_function_url, json=payload, timeout=55) # Timeout slightly less than function max duration
+                response.raise_for_status() # Raises an HTTPError for bad responses (4XX or 5XX)
+                
+                # Assuming the Node.js function returns JSON in its response body
+                stdout_data = response.content # Keep as bytes, as subprocess.communicate() returns bytes
+                stderr_data = b"" # Assume errors are handled by raise_for_status or in the response body
+                # process_returncode = 0 # Indicate success
+                log_message(f"[SEAL] HTTP call to Node.js SEAL function successful. Response length: {len(stdout_data)} bytes.")
+                
+            except requests.exceptions.Timeout:
+                log_message(f"[SEAL] HTTP request to Node.js SEAL function timed out.", is_error=True)
+                raise TimeoutError(f"Call to internal Node.js SEAL function timed out: {node_seal_function_url}") from None
+            except requests.exceptions.RequestException as e:
+                log_message(f"[SEAL] HTTP request to Node.js SEAL function failed: {e}", is_error=True)
+                if e.response is not None:
+                    log_message(f"[SEAL] Node.js function error response: {e.response.status_code} - {e.response.text[:500]}", is_error=True) # Log response body if available
+                raise Exception(f"Call to internal Node.js SEAL function failed: {e}") from e
+
+        else: # Local development path
+            log_message(f"[SEAL] Running in LOCAL mode. Using Node.js subprocess for seal_operations.js.")
+            node_script_full_path = os.path.join(SEAL_SCRIPT_PATH, 'seal_operations.js')
+            log_message(f"[SEAL] Attempting to execute Node.js script: {node_script_full_path} with config: {config_path}")
+
+            if not os.path.exists(node_script_full_path):
+                log_message(f"[SEAL] ERROR: Node.js script not found at {node_script_full_path}", is_error=True)
+                raise FileNotFoundError(f"Node.js script for SEAL operations not found: {node_script_full_path}")
+            if not os.path.exists(config_path):
+                log_message(f"[SEAL] ERROR: Config file for Node.js script not found at {config_path}", is_error=True)
+                raise FileNotFoundError(f"Config file for Node.js script not found: {config_path}")
+
+            command = ['node', node_script_full_path, config_path]
+            log_message(f"[SEAL] Executing command: {' '.join(command)}")
+
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=SEAL_SCRIPT_PATH # Set CWD if script relies on relative paths from its own dir
+                )
+                stdout_data, stderr_data = process.communicate(timeout=55) # Set a generous timeout for local dev
+                # process_returncode = process.returncode
+
+                log_message(f"[SEAL] Node.js script stdout (first 500 chars): {stdout_data[:500].decode('utf-8', 'ignore')}")
+                if stderr_data:
+                    log_message(f"[SEAL] Node.js script stderr: {stderr_data.decode('utf-8', 'ignore')}", is_error=True)
+                
+                # if process_returncode != 0:
+                #     log_message(f"[SEAL] Node.js script exited with code {process_returncode}", is_error=True)
+                    # Consider raising an exception if the node script fails
+                    # raise Exception(f"SEAL Node.js script failed with code {process_returncode}: {stderr_data.decode('utf-8', 'ignore')}")
+
+            except subprocess.TimeoutExpired:
+                log_message("[SEAL] Node.js script timed out during local execution.", is_error=True)
+                if process:
+                    process.kill()
+                    # Try to get any output
+                    _stdout, _stderr = process.communicate()
+                    if _stdout: log_message(f"[SEAL] Timeout stdout: {_stdout.decode('utf-8','ignore')}")
+                    if _stderr: log_message(f"[SEAL] Timeout stderr: {_stderr.decode('utf-8','ignore')}", is_error=True)
+                raise TimeoutError("SEAL Node.js script execution timed out locally.")
+            except FileNotFoundError as e:
+                # This would typically be if 'node' itself is not found in local PATH
+                log_message(f"[SEAL] FileNotFoundError during local subprocess.Popen (e.g., 'node' not found): {e}", is_error=True)
+                raise e
+            except Exception as e:
+                log_message(f"[SEAL] An unexpected error occurred while running local Node.js script: {e}", is_error=True)
+                log_message(traceback.format_exc(), is_error=True)
+                raise e
+
+        # Common handling for result (whether from subprocess or HTTP call)
+        if stdout_data is None: # Should not happen if logic is correct, but as a safeguard
+            log_message("[SEAL] CRITICAL: stdout_data is None after conditional execution.", is_error=True)
+            raise Exception("SEAL operation did not produce any output.")
+
+        if stderr_data: # Or if process_returncode != 0 and you use that
+            # This primarily applies to local dev if node script writes to stderr and continues
+            # For production HTTP, errors are usually exceptions or in stdout_data (if not JSON)
+            log_message(f"[SEAL] Operation may have had issues. Stderr: {stderr_data.decode('utf-8', 'ignore')}", is_error=True)
+            # Decide if this constitutes a failure. If the node script outputs to stderr for warnings but still gives valid JSON on stdout,
+            # you might not want to raise an exception here.
+
+        try:
+            # Assuming your node script (and the new Node.js Vercel function) outputs JSON
+            result = json.loads(stdout_data.decode('utf-8'))
+            log_message("[SEAL] Successfully parsed JSON result from operation.", {"result_keys": list(result.keys()) if isinstance(result, dict) else "Result is not a dictionary"})
+        except json.JSONDecodeError as e:
+            log_message(f"[SEAL] Failed to decode JSON from operation stdout. Error: {e}", is_error=True)
+            log_message(f"[SEAL] Raw stdout that failed to parse (first 500 chars): {stdout_data[:500].decode('utf-8', 'ignore')}", is_error=True)
+            raise Exception(f"Failed to parse JSON from SEAL operation: {e}. Output: {stdout_data.decode('utf-8', 'ignore')}")
+        except Exception as e: # Catch any other unexpected errors during/after the operation
+            log_message(f"[SEAL] Unexpected error processing operation result: {e}", is_error=True)
+            log_message(traceback.format_exc(), is_error=True)
+            raise e
         
+        # Extract all relevant SEAL information from output
+        blob_id = None
+        allowlist_id = None
+        document_id = None
+        cap_id = None
+        
+        # Look for all IDs in the output
+        for line in result.get('stdout', '').split('\n'):
+            if 'Blob ID:' in line:
+                blob_id = line.split('Blob ID:')[1].strip()
+            elif 'Allowlist ID:' in line:
+                allowlist_id = line.split('Allowlist ID:')[1].strip()
+            elif 'Document ID:' in line or 'Document ID (hex):' in line:
+                document_id = line.split(':')[1].strip()
+            elif 'Capability ID:' in line or 'Cap ID:' in line:
+                cap_id = line.split(':')[1].strip()
+        
+        # Create response with all found values
+        response_data = {
+            'contractId': contract_id,
+            'encrypted': True,
+            'blobId': blob_id,
+            'allowlistId': allowlist_id,
+            'documentId': document_id,
+            'capId': cap_id,
+            'raw_success': True,
+            'message': 'SEAL encryption succeeded'
+        }
+        
+        print(f"[SEAL] Document successfully encrypted and uploaded")
+        if blob_id:
+            print(f"[SEAL] Blob ID: {blob_id}")
+        if allowlist_id:
+            print(f"[SEAL] Allowlist ID: {allowlist_id}")
+        if document_id:
+            print(f"[SEAL] Document ID: {document_id}")
+        if cap_id:
+            print(f"[SEAL] Capability ID: {cap_id}")
+        
+        return response_data
     except Exception as e:
         print(f"[SEAL] Exception running SEAL operation: {str(e)}")
         print("[SEAL] Traceback:")
