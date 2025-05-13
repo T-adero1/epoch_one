@@ -504,8 +504,11 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       setDecryptionStep('fetchingKeys');
       console.log("[DecryptButton] Fetching decryption keys");
       try {
+        // Format the document ID for key fetching
+        const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
+        
         await sealClient.fetchKeys({
-          ids: [docId],
+          ids: [rawId], // No 0x prefix
           txBytes: txKindBytes,
           sessionKey,
           threshold: 1
