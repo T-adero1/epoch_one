@@ -500,21 +500,31 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
         onlyTransactionKind: true
       });
       
+      // Store this transaction bytes for later use in decryption
+      const fetchTxBytes = txKindBytes;
+
+      // Format the document ID and log EXACT bytes for debugging
+      const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
+      console.log("[DecryptButton] Raw document ID for key fetching:", rawId);
+      console.log("[DecryptButton] Document ID byte length:", fromHEX(rawId).length);
+
+      // Fetch keys with the properly formatted ID
+      await sealClient.fetchKeys({
+        ids: [rawId], // No 0x prefix
+        txBytes: fetchTxBytes,
+        sessionKey,
+        threshold: 1
+      });
+
+      // Log session key info for debugging
+      console.log("[DecryptButton] Keys fetched successfully");
+      
       // Continue with key fetching and decryption
       setDecryptionStep('fetchingKeys');
       console.log("[DecryptButton] Fetching decryption keys");
       try {
-        // Format the document ID for key fetching
-        const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
-        
-        await sealClient.fetchKeys({
-          ids: [rawId], // No 0x prefix
-          txBytes: txKindBytes,
-          sessionKey,
-          threshold: 1
-        });
         console.log("[DecryptButton] Keys fetched successfully!");
-        // Verify keys are present in the session key
+        // Log session key details
         console.log("[DecryptButton] Session key log:", {
           sessionKey
         });
@@ -556,7 +566,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       const decryptedData = await sealClient.decrypt({
         data: new Uint8Array(encryptedData),
         sessionKey: sessionKey,
-        txBytes: txKindBytes
+        txBytes: fetchTxBytes // Use the exact same bytes from fetching
       });
       console.log("[DecryptButton] Document decrypted successfully, size:", decryptedData.length);
 
