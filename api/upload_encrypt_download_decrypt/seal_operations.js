@@ -44,23 +44,43 @@ async function encryptAndUpload(config) {
   console.log(`- Network: ${process.env.NETWORK}`);
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
-  console.log(`- Document Path: ${config.documentPath}`);
+  
+  // NEW: Check for base64 content as an alternative to file path
+  if (config.documentContentBase64) {
+    console.log(`- Document Content: Provided as base64 (${config.documentContentBase64.length} chars)`);
+  } else {
+    console.log(`- Document Path: ${config.documentPath}`);
+  }
+  
   console.log(`- Contract ID: ${config.contractId}`);
   console.log(`- Signer Addresses: ${config.signerAddresses.length} addresses`);
   
   try {
     // Validate required fields
-    if (!config.documentPath || !config.contractId || !config.signerAddresses || !config.adminPrivateKey) {
-      throw new Error('Missing required configuration: documentPath, contractId, signerAddresses, adminPrivateKey');
+    if ((!config.documentPath && !config.documentContentBase64) || !config.contractId || !config.signerAddresses || !config.adminPrivateKey) {
+      throw new Error('Missing required configuration: Either documentPath or documentContentBase64 required, plus contractId, signerAddresses, adminPrivateKey');
     }
     
-    // Check if document exists
-    if (!fs.existsSync(config.documentPath)) {
-      throw new Error(`Document not found: ${config.documentPath}`);
+    // Read file data - either from path or base64 content
+    let fileData;
+    
+    if (config.documentContentBase64) {
+      // NEW: Use base64 content directly
+      console.log(`- Using provided base64 content instead of file path`);
+      fileData = Buffer.from(config.documentContentBase64, 'base64');
+      console.log(`- Decoded base64 content: ${fileData.length} bytes`);
+    } else {
+      // Original file path logic
+      // Check if document exists
+      if (!fs.existsSync(config.documentPath)) {
+        throw new Error(`Document not found: ${config.documentPath}`);
+      }
+      
+      // Read the file
+      fileData = fs.readFileSync(config.documentPath);
+      console.log(`- File read from path: ${config.documentPath}`);
     }
     
-    // Read the file
-    const fileData = fs.readFileSync(config.documentPath);
     console.log(`- File size: ${fileData.length} bytes (${(fileData.length / 1024 / 1024).toFixed(2)} MB)`);
     
     // Calculate document hash

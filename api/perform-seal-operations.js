@@ -41,34 +41,24 @@ async function runSealOperation(configData) {
         let configWritten = false;
 
         try {
-            // 1. Check if the target script exists
-            try {
-                await fs.access(SEAL_SCRIPT_FULL_PATH, fs.constants.F_OK | fs.constants.X_OK); // Check existence and execute permission
-                 logNodeMessage(`Target script found and accessible: ${SEAL_SCRIPT_FULL_PATH}`);
-            } catch (accessError) {
-                 logNodeMessage(`Target script NOT FOUND or inaccessible at ${SEAL_SCRIPT_FULL_PATH}`, { error: accessError.message }, true);
-                 // Attempt to list directory contents for debugging
-                 try {
-                    const parentDirContents = await fs.readdir(path.dirname(SEAL_SCRIPT_FULL_PATH));
-                    logNodeMessage(`Contents of ${path.dirname(SEAL_SCRIPT_FULL_PATH)}:`, parentDirContents);
-                 } catch (readdirError) {
-                    logNodeMessage(`Could not list contents of ${path.dirname(SEAL_SCRIPT_FULL_PATH)}`, { error: readdirError.message }, true);
-                 }
-                 // Try listing current directory as well
-                 try {
-                    const currentDirContents = await fs.readdir(__dirname);
-                    logNodeMessage(`Contents of current directory (__dirname: ${__dirname}):`, currentDirContents);
-                 } catch (readdirError) {
-                    logNodeMessage(`Could not list contents of current directory (__dirname)`, { error: readdirError.message }, true);
-                 }
-                return reject({ status: 500, message: `Required script seal_operations.js not found at ${SEAL_SCRIPT_FULL_PATH}` });
+            // IMPORTANT: Do not create a separate PDF file
+            // INSTEAD, just pass the document content in base64 format directly
+            
+            // If configData has base64 content already, use it
+            if (configData.documentContentBase64) {
+                logNodeMessage(`Using base64 document content directly, skipping file creation`);
             }
-
+            // If documentPath is provided in the config but no base64 content, warn about it
+            else if (configData.documentPath) {
+                logNodeMessage(`WARNING: Document path provided, but might not be accessible: ${configData.documentPath}`, null, true);
+                logNodeMessage(`This will likely fail in production environment - provide base64 content instead`, null, true);
+            }
+            
             // 2. Write config data to temporary file
-            await fs.writeFile(tempConfigPath, JSON.stringify(configData, null, 2)); // Pretty print for debugging
+            await fs.writeFile(tempConfigPath, JSON.stringify(configData, null, 2));
             configWritten = true;
             logNodeMessage(`Temp config file created: ${tempConfigPath}`);
-
+            
             // 3. Execute the script
             const commandArgs = [SEAL_SCRIPT_FULL_PATH, tempConfigPath];
             logNodeMessage(`Executing command: node ${commandArgs.join(' ')}`, { cwd: SEAL_SCRIPT_CWD });
