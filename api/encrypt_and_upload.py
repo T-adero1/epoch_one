@@ -193,8 +193,9 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             
             # 3. Make an HTTP POST request
             # IMPORTANT: Create this new Node.js API route (e.g., /api/perform-seal-operations)
-            node_seal_function_url = f"{os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000')}/api/perform-seal-operations"
-            log_message(f"[SEAL] Calling Node.js SEAL function at: {node_seal_function_url}")
+            app_base_url = os.environ.get('NEXT_PUBLIC_APP_URL', 'http://localhost:3000').rstrip('/')
+            node_seal_function_url = f"{app_base_url}/api/perform-seal-operations"
+            log_message(f"[SEAL] Corrected Node.js SEAL function URL: {node_seal_function_url}")
             
             try:
                 # Using requests library (ensure 'requests' is in your requirements.txt)
@@ -340,7 +341,7 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
         
         # Try standard upload as fallback
         print("[SEAL] Falling back to standard upload")
-        return fallback_standard_upload(temp_file_path, contract_id, data)
+        raise Exception(f"SEAL Encryption Failed: {str(e)}") from e
         
     finally:
         # Clean up temporary files
