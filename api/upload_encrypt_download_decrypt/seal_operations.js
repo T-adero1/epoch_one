@@ -65,13 +65,15 @@ async function encryptAndUpload(config) {
     let fileData;
     
     if (config.documentContentBase64) {
-      // NEW: Use base64 content directly
-      console.log(`- Using provided base64 content instead of file path`);
-      fileData = Buffer.from(config.documentContentBase64, 'base64');
-      console.log(`- Decoded base64 content: ${fileData.length} bytes`);
-    } else {
+      console.log(`- Using provided base64 document content directly`);
+      try {
+        fileData = Buffer.from(config.documentContentBase64, 'base64');
+        console.log(`- Successfully decoded base64 content: ${fileData.length} bytes`);
+      } catch (base64Error) {
+        throw new Error(`Failed to decode base64 content: ${base64Error.message}`);
+      }
+    } else if (config.documentPath) {
       // Original file path logic
-      // Check if document exists
       if (!fs.existsSync(config.documentPath)) {
         throw new Error(`Document not found: ${config.documentPath}`);
       }
@@ -79,6 +81,8 @@ async function encryptAndUpload(config) {
       // Read the file
       fileData = fs.readFileSync(config.documentPath);
       console.log(`- File read from path: ${config.documentPath}`);
+    } else {
+      throw new Error("No document content provided - need either documentContentBase64 or documentPath");
     }
     
     console.log(`- File size: ${fileData.length} bytes (${(fileData.length / 1024 / 1024).toFixed(2)} MB)`);

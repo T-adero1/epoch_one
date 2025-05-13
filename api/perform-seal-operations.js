@@ -46,7 +46,16 @@ async function runSealOperation(configData) {
             
             // If configData has base64 content already, use it
             if (configData.documentContentBase64) {
-                logNodeMessage(`Using base64 document content directly, skipping file creation`);
+                logNodeMessage(`Using base64 document content directly (${configData.documentContentBase64.length} chars), skipping file creation`);
+                // For security, don't log the actual base64 content, just its length
+                
+                // Verify it's valid base64
+                try {
+                    const decodedLength = Buffer.from(configData.documentContentBase64, 'base64').length;
+                    logNodeMessage(`Verified base64 content decodes to ${decodedLength} bytes`);
+                } catch (e) {
+                    logNodeMessage(`WARNING: Invalid base64 content provided`, {error: e.message}, true);
+                }
             }
             // If documentPath is provided in the config but no base64 content, warn about it
             else if (configData.documentPath) {
