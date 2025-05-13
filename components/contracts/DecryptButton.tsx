@@ -507,7 +507,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
         ids: [docId],
         txBytes: txKindBytes,
         sessionKey,
-        threshold: 2
+        threshold: 1
       });
       
       // Download encrypted data

@@ -209,7 +209,7 @@ const DocumentDecrypter: React.FC<DecryptionProps> = ({
                 ids: [rawId],
                 txBytes: txKindBytes,
                 sessionKey,
-                threshold: 2,
+                threshold: 1,
               });
               setProgress(80);
               
