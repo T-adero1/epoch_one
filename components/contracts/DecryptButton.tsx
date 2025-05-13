@@ -484,13 +484,22 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       const tx = new Transaction();
       tx.setSender(ephemeralAddress);
       
-      // Add the seal_approve move call
+      // First, ensure consistent Document ID format
+      const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
+      console.log("[DecryptButton] Raw document ID for key fetching:", rawId);
+
+      // Convert to bytes EXACTLY like in fixed_seal.js
+      const documentIdBytes = fromHEX(rawId);
+      console.log("[DecryptButton] Document ID byte length:", documentIdBytes.length);
+      console.log("[DecryptButton] First few bytes:", Array.from(documentIdBytes.slice(0, 5)));
+
+      // Then use documentIdBytes in transaction
       tx.moveCall({
         target: `${packageId}::allowlist::seal_approve`,
         arguments: [
-          tx.pure.vector('u8', Array.from(fromHEX(docId))),
+          tx.pure.vector('u8', Array.from(documentIdBytes)),
           tx.object(effectiveAllowlistId),
-          tx.object('0x6') // Clock object ID
+          tx.object('0x6')
         ]
       });
       
@@ -503,10 +512,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       // Store this transaction bytes for later use in decryption
       const fetchTxBytes = txKindBytes;
 
-      // Format the document ID and log EXACT bytes for debugging
-      const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
-      console.log("[DecryptButton] Raw document ID for key fetching:", rawId);
-      console.log("[DecryptButton] Document ID byte length:", fromHEX(rawId).length);
+
 
       // Fetch keys with the properly formatted ID
       await sealClient.fetchKeys({

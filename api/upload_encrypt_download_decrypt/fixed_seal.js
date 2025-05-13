@@ -27,7 +27,7 @@ async function initSealClient(suiClient) {
     const client = new SealClient({
       suiClient,
       serverObjectIds: keyServerIds,
-      verifyKeyServers: true // For testing, can be set to true in production
+      verifyKeyServers: true // true
     });
     
     console.log(' SEAL client initialized successfully');
