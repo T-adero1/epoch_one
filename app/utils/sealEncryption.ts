@@ -79,7 +79,7 @@ export async function encryptDocument(
   try {
     // Get allowlisted key servers
     log.debug('Fetching allowlisted key servers');
-    const keyServerIds = await getAllowlistedKeyServers(suiClient);
+    const keyServerIds = await getAllowlistedKeyServers(NETWORK);
     
     if (!keyServerIds || keyServerIds.length < 2) {
       log.error('Failed to retrieve key servers', { 
