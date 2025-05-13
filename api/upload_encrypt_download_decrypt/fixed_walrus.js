@@ -3,69 +3,127 @@
  * This version uses the Python walrus_sdk_manager.py script directly
  */
 const fs = require('fs');
+const axios = require('axios');
 const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
 const config = require('./fixed_config');
 const { ensureDirectoryExists } = require('./fixed_utils');
+const crypto = require('crypto');
 
 // Path to the Python script
 const PYTHON_SCRIPT_PATH = path.join(__dirname, '..', 'walrus_sdk_manager.py');
 
-// Upload a blob to Walrus using Python script
-async function uploadToWalrus(data, epochs = config.WALRUS_EPOCHS_TO_STORE) {
-  console.log('\n STEP 5: Uploading encrypted blob to Walrus...');
+/**
+ * Upload a blob to Walrus storage using direct HTTP API
+ * @param {Uint8Array|Buffer} content - The binary content to upload
+ * @param {Object} options - Upload options
+ * @param {number} options.epochs - Number of epochs to store (default: 2)
+ * @param {boolean} options.deletable - Whether the blob is deletable
+ * @returns {Promise<string>} - The blob ID
+ */
+async function uploadToWalrusDirectly(content, options = {}) {
+  console.log('\n=== STARTING DIRECT HTTP UPLOAD ===');
+  const epochs = options.epochs || 2;
+  const deletable = options.deletable || false;
+  
+  console.log(`- Content size: ${content.length} bytes`);
+  console.log(`- Epochs: ${epochs}`);
+  console.log(`- Deletable: ${deletable}`);
+  
+  // Calculate content hash for verification
+  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  console.log(`- Content SHA-256 hash: ${hash}`);
+  
+  // Determine the correct Walrus endpoint based on network
+  const network = process.env.NETWORK || 'testnet';
+  const publisherUrl = network === 'mainnet' 
+    ? 'https://publisher.walrus-mainnet.walrus.space' 
+    : 'https://walrus-testnet-publisher.trusted-point.com';
+  
+  const uploadUrl = `${publisherUrl}/blob`;
+  console.log(`- Target URL: ${uploadUrl}`);
   
   try {
-    // Create a temporary file for the encrypted data
-    const tempFilePath = path.join(config.TEMP_DIR, `upload-temp-${Date.now()}.bin`);
-    ensureDirectoryExists(config.TEMP_DIR);
-    fs.writeFileSync(tempFilePath, Buffer.from(data));
+    // Prepare request parameters
+    const params = {
+      epochs: epochs,
+      deletable: deletable ? 'true' : 'false'
+    };
     
-    // Use only one Python command - prefer 'py' on Windows, 'python3' otherwise
-    const isWindows = process.platform === 'win32';
-    const pythonExe = isWindows ? 'py' : 'python3';
-    const pythonCmd = `${pythonExe} "${PYTHON_SCRIPT_PATH}" --context ${config.NETWORK.toLowerCase()} upload "${tempFilePath}" --epochs ${epochs}`;
+    const headers = {
+      'Content-Type': 'application/octet-stream'
+    };
     
-    try {
-      const { stdout, stderr } = await execAsync(pythonCmd);
-      
-      // Clean up temporary file
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (cleanupError) {
-        // Silently ignore cleanup errors
-      }
-      
-      // Extract blob ID from output
-      const blobIdLine = stdout.split('\n').find(line => line.includes('Blob ID:'));
-      if (!blobIdLine) {
-        throw new Error('Could not find Blob ID in output');
-      }
-      
-      // Extract the ID from the line "Blob ID: [ID]"
-      const blobId = blobIdLine.split('Blob ID:')[1].trim();
-      console.log(` Upload successful! Blob ID: ${blobId}`);
-      
-      return { blobId };
-    } catch (execError) {
-      // Use entire stdout as error message
-      const errorMessage = execError.stdout || 'Script execution failed';
-      console.error(` Script error: ${errorMessage}`);
-      // Clean up temp file
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (cleanupError) {
-        // Silently ignore cleanup errors
-      }
-      
-      throw new Error(`Python script execution failed: ${execError.message}`);
+    console.log(`- Starting HTTP POST request to ${uploadUrl}`);
+    
+    const startTime = Date.now();
+    const response = await axios.post(uploadUrl, content, { 
+      params,
+      headers,
+      // Important: Disable automatic JSON parsing since the content is binary
+      responseType: 'json'
+    });
+    
+    const requestDuration = (Date.now() - startTime) / 1000;
+    console.log(`- POST request completed in ${requestDuration.toFixed(2)} seconds`);
+    console.log(`- Response status: ${response.status}`);
+    
+    if (response.status !== 200) {
+      throw new Error(`Upload failed with status: ${response.status}`);
     }
+    
+    // Extract blob ID from the response
+    const responseData = response.data;
+    let blobId = null;
+    
+    if (responseData.alreadyCertified) {
+      blobId = responseData.alreadyCertified.blobId;
+      console.log(`- Blob was already certified with ID: ${blobId}`);
+    } else if (responseData.newlyCreated && responseData.newlyCreated.blobObject) {
+      blobId = responseData.newlyCreated.blobObject.blobId;
+      console.log(`- New blob created with ID: ${blobId}`);
+      console.log(`- Blob size: ${responseData.newlyCreated.blobObject.size} bytes`);
+    }
+    
+    if (!blobId) {
+      throw new Error(`Could not extract blob ID from response: ${JSON.stringify(responseData)}`);
+    }
+    
+    console.log(`- SUCCESS! Document uploaded with blob ID: ${blobId}`);
+    console.log('=== DIRECT HTTP UPLOAD COMPLETED ===\n');
+    
+    return blobId;
   } catch (error) {
-    console.error(` WORKFLOW FAILED`);
-    console.error('================================================================================');
-    console.error(`\nError: ${error.message}`);
+    console.error(`- ERROR DURING UPLOAD: ${error.message}`);
+    if (error.response) {
+      console.error(`- Response data: ${JSON.stringify(error.response.data)}`);
+      console.error(`- Response status: ${error.response.status}`);
+    }
+    console.error('=== DIRECT HTTP UPLOAD FAILED ===\n');
+    throw error;
+  }
+}
+
+/**
+ * Upload encrypted data to Walrus
+ * This function replaces the Python subprocess call
+ */
+async function uploadToWalrus(encryptedBytes) {
+  console.log(`\n STEP 5: Uploading to Walrus...`);
+  
+  try {
+    // Use direct HTTP upload instead of calling Python
+    const blobId = await uploadToWalrusDirectly(encryptedBytes, {
+      epochs: 2,  // Default to 2 epochs
+      deletable: false  // Default to non-deletable
+    });
+    
+    console.log(`- Uploaded to Walrus: ${blobId}`);
+    return { blobId };
+  } catch (error) {
+    console.error(`- Error uploading to Walrus: ${error.message}`);
     throw error;
   }
 }
@@ -178,6 +236,7 @@ async function checkBlobExists(blobId) {
 
 module.exports = {
   uploadToWalrus,
+  uploadToWalrusDirectly,
   downloadFromWalrus,
   checkBlobExists
 };

@@ -8,6 +8,7 @@
   "routes": [
     { "src": "/api/upload_contract", "dest": "api/upload_contract.py" },
     { "src": "/api/perform-seal-operations", "dest": "api/perform-seal-operations.js" },
+    { "src": "/api/walrus-upload", "dest": "api/walrus-upload/index.py" },
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/$1" }
   ]
