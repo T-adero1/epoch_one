@@ -50,19 +50,7 @@ export default function ContractActions({
   const { toast } = useToast();
   const router = useRouter();
 
-  // Add comprehensive logging for contract data
-  console.log("[ContractActions] Contract data:", {
-    id: contractId,
-    status,
-    hasMetadata: !!contract?.metadata,
-    fullMetadata: contract?.metadata, // Log the full metadata structure
-    walrusData: contract?.metadata?.walrus,
-    blobId: contract?.metadata?.walrus?.storage?.blobId,
-    documentId: contract?.metadata?.walrus?.encryption?.documentId,
-    allowlistId: contract?.metadata?.walrus?.encryption?.allowlistId,
-    capId: contract?.metadata?.walrus?.encryption?.capId,
-    authorizedWallets: contract?.metadata?.walrus?.authorizedWallets
-  });
+
 
   // Extract encryption-related properties
   const blobId = contract?.metadata?.walrus?.storage?.blobId;
@@ -71,12 +59,7 @@ export default function ContractActions({
   
   // Check if DecryptButton should be shown
   const showDecryptButton = status === 'COMPLETED' && blobId && documentIdHex && allowlistId;
-  console.log("[ContractActions] Should show decrypt button:", showDecryptButton, {
-    status,
-    blobId,
-    documentIdHex,
-    allowlistId
-  });
+
 
   const handleDownloadPDF = async () => {
     try {

@@ -307,17 +307,21 @@ export async function POST(request: NextRequest) {
         encrypted: true,
         blobId: result.blobId,
         allowlistId: result.allowlistId,
-        documentId: result.documentIdHex,
+        documentId: result.documentId,
         capId: result.capId,
-        hash: result.fileHash,
+        hash: hash,
+        raw_success: true,
+        message: result.message || 'SEAL encryption succeeded',
+        databaseUpdated: result.databaseUpdated || true,
         // Include walrus data in the expected format
         walrusData: {
           blobId: result.blobId,
           allowlistId: result.allowlistId,
-          documentId: result.documentIdHex,
+          documentId: result.documentId,
           capId: result.capId,
           encryptionMethod: 'seal',
-          authorizedWallets: result.signerAddresses || []
+          authorizedWallets: signerAddresses,
+          uploadedAt: new Date().toISOString()
         }
       };
       

@@ -7,6 +7,7 @@ const { Transaction } = require('@mysten/sui/transactions');
 const { fromHEX } = require('@mysten/sui/utils');
 const crypto = require('crypto');
 const config = require('./fixed_config');
+const { P } = require('pino');
 
 // Initialize SEAL client
 async function initSealClient(suiClient) {
@@ -176,15 +177,8 @@ async function approveAndFetchKeys(suiClient, sealClient, sessionKey, allowlistI
     console.log('- Creating approval transaction...');
     const tx = new Transaction();
     
-    // CRITICAL CHANGE: Skip the address check that was causing failures
-    // Set sender only if address is available
-    if (sessionKey.address) {
-      tx.setSender(sessionKey.address);
-    } else {
-      console.log(' WARNING: Session key address is undefined - proceeding without setting sender');
-      // Proceed without setting the sender - the SDK will handle this internally
-    }
-    
+
+    console.log(`- Session key: ${sessionKey}`);
     // Convert documentIdHex to vector<u8>
     const documentId = fromHEX(documentIdHex);
     console.log(`- Document ID bytes length: ${documentId.length}`);

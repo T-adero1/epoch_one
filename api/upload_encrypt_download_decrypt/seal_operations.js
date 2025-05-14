@@ -9,12 +9,56 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 // Import utility modules
 const utils = require('./fixed_utils');
 const blockchain = require('./fixed_blockchain');
 const walrus = require('./fixed_walrus');
 const seal = require('./fixed_seal');
+
+// Create an in-memory log collection
+const logCollection = [];
+
+// Store original console methods
+const originalConsole = {
+  log: console.log,
+  error: console.error,
+  warn: console.warn,
+  info: console.info
+};
+
+// Function to collect logs
+function collectLog(message, level = 'INFO') {
+  const timestamp = new Date().toISOString();
+  const formattedMessage = `[${timestamp}] [${level}] ${message}`;
+  
+  // Store in memory
+  logCollection.push(formattedMessage);
+  
+  // Also use original console method
+  originalConsole.log(formattedMessage);
+}
+
+// Override console methods to collect logs
+console.log = message => collectLog(message, 'INFO');
+console.error = message => collectLog(message, 'ERROR');
+console.warn = message => collectLog(message, 'WARN');
+console.info = message => collectLog(message, 'INFO');
+
+// Configure logging based on environment variables
+const VERBOSE = process.env.SEAL_VERBOSE === 'true' || false;
+const DEBUG = process.env.SEAL_DEBUG === 'true' || false;
+const LOG_LEVEL = process.env.SEAL_LOG_LEVEL || 'info';
+
+// Enhanced logging function
+function logDetail(message, level = 'info') {
+  if (level === 'debug' && !DEBUG) return;
+  if (level === 'verbose' && !VERBOSE) return;
+  
+  const timestamp = new Date().toISOString();
+  console.log(`[SEAL-DETAIL] [${timestamp}] [${level.toUpperCase()}] ${message}`);
+}
 
 /**
  * Encrypt a document and upload it to Walrus
@@ -33,6 +77,10 @@ async function encryptAndUpload(config) {
   console.log('\n' + '='.repeat(80));
   console.log('SEAL ENCRYPT AND UPLOAD OPERATION');
   console.log('='.repeat(80));
+  
+  logDetail('Starting SEAL encryption with detailed logging', 'debug');
+  logDetail(`Contract ID: ${config.contractId}`, 'debug');
+  logDetail(`Signers: ${config.signerAddresses.join(', ')}`, 'debug');
   
   // Set required environment variables from config
   process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.sealPackageId;
@@ -54,6 +102,23 @@ async function encryptAndUpload(config) {
   
   console.log(`- Contract ID: ${config.contractId}`);
   console.log(`- Signer Addresses: ${config.signerAddresses.length} addresses`);
+  
+  // Log environment details
+  if (DEBUG) {
+    logDetail(`Debug logging enabled`, 'debug');
+    logDetail(`Process environment: ${JSON.stringify({
+      NODE_ENV: process.env.NODE_ENV,
+      DEBUG: process.env.DEBUG,
+      SEAL_DEBUG: process.env.SEAL_DEBUG,
+      SEAL_VERBOSE: process.env.SEAL_VERBOSE
+    })}`, 'debug');
+    logDetail(`Configuration details: ${JSON.stringify({
+      contractId: config.contractId,
+      documentContentLength: config.documentContentBase64?.length,
+      signerAddresses: config.signerAddresses,
+      options: config.options
+    })}`, 'debug');
+  }
   
   try {
     // Validate required fields
@@ -139,6 +204,10 @@ async function encryptAndUpload(config) {
     );
     console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
     
+    // Log more detailed logging in the encryptDocument function
+    logDetail(`Document encryption result - encrypted size: ${encryptedBytes.length} bytes`, 'debug');
+    logDetail(`Encryption parameters - documentId: ${documentIdHex}, original size: ${fileData.length}`, 'debug');
+    
     // STEP 5: Upload to Walrus
     console.log('\n STEP 5: Uploading to Walrus...');
     const { blobId } = await walrus.uploadToWalrus(encryptedBytes);
@@ -167,7 +236,8 @@ async function encryptAndUpload(config) {
       blobId,
       documentIdHex,
       fileHash,
-      signerAddresses: config.signerAddresses
+      signerAddresses: config.signerAddresses,
+      logs: logCollection.join('\n')
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
@@ -178,7 +248,8 @@ async function encryptAndUpload(config) {
     return {
       success: false,
       error: error.message,
-      stack: error.stack
+      stack: error.stack,
+      logs: logCollection.join('\n')
     };
   }
 }
@@ -284,7 +355,8 @@ async function downloadAndDecrypt(config) {
       success: true,
       decryptedFilePath: outputPath,
       decryptedHash,
-      decryptedSize: decryptedData.length
+      decryptedSize: decryptedData.length,
+      logs: logCollection.join('\n')
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
@@ -295,7 +367,8 @@ async function downloadAndDecrypt(config) {
     return {
       success: false,
       error: error.message,
-      stack: error.stack
+      stack: error.stack,
+      logs: logCollection.join('\n')
     };
   }
 }
@@ -318,7 +391,8 @@ function runOperation(configPath) {
     console.error(`Error reading or parsing config: ${error.message}`);
     return {
       success: false,
-      error: error.message
+      error: error.message,
+      logs: logCollection.join('\n')
     };
   }
 }

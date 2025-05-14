@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional
 import time
 import requests
 import datetime
+import re
 
 # Add the root directory to path so we can import other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -235,14 +236,41 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             command = ['node', node_script_full_path, config_path]
             log_message("[SEAL] Executing Node.js script")
 
+            # Set up enhanced environment for Node.js subprocess
+            enhanced_env = os.environ.copy()
+            enhanced_env.update({
+                'SEAL_VERBOSE': 'true', 
+                'SEAL_DEBUG': 'true',
+                'SEAL_LOG_LEVEL': 'debug'
+            })
+
+            log_message("[SEAL] Executing Node.js script with enhanced logging")
+
+            # Use the enhanced environment in the subprocess call
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=SEAL_SCRIPT_PATH,
+                env=enhanced_env  # Pass the enhanced environment here
+            )
+
             try:
-                process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=SEAL_SCRIPT_PATH
-                )
                 stdout_data, stderr_data = process.communicate(timeout=55)
+
+                # Try to extract JSON result which will contain logs
+                try:
+                    # Look for a valid JSON object in the output
+                    json_match = re.search(r'\{[\s\S]*\}', stdout_data.decode('utf-8', 'ignore'))
+                    if json_match:
+                        result = json.loads(json_match.group(0))
+                        if result.get('logs'):
+                            detailed_logs = result['logs']
+                            print("\n=== DETAILED SEAL OPERATION LOGS ===")
+                            print(detailed_logs)
+                            print("=== END DETAILED LOGS ===\n")
+                except Exception as e:
+                    print(f"[SEAL] Error parsing JSON result: {e}")
 
             except subprocess.TimeoutExpired:
                 log_message("[SEAL] Node.js script timed out during local execution.", is_error=True)
