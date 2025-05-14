@@ -83,10 +83,12 @@ async function encryptAndUpload(config) {
     );
     console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
     
-    // STEP 3: Generate document ID using allowlist ID - use the EXACT same function from your utils
+    // STEP 3: Generate document ID using allowlist ID - CRITICAL: Use EXACTLY the same function and format as fixed_utils.js
     console.log('\n STEP 3: Generating document ID...');
-    const { documentIdHex } = utils.createDocumentId(allowlistId, config.contractId);
-    console.log(`- Document ID: ${documentIdHex}`);
+    // Use the EXACT same createDocumentId implementation to ensure format consistency
+    const { documentIdHex, salt } = utils.createDocumentId(allowlistId, config.contractId);
+    console.log(`- Document ID (exact format for decryption): ${documentIdHex}`);
+    console.log(`- Salt hex: ${salt}`);
     
     // STEP 4: Encrypt document using the document ID - use the EXACT same function from your seal module
     console.log('\n STEP 4: Encrypting document...');
@@ -120,7 +122,8 @@ async function encryptAndUpload(config) {
       allowlistId,
       documentIdHex,
       capId,
-      signerAddresses: config.signerAddresses
+      signerAddresses: config.signerAddresses,
+      salt // Include salt for reference
     });
     console.log(`- Database updated: ${databaseUpdated}`);
     
@@ -134,7 +137,8 @@ async function encryptAndUpload(config) {
       allowlistId,
       capId,
       blobId,
-      documentIdHex,
+      documentIdHex, // Return the exact document ID format needed for decryption
+      salt, // Include salt in response
       fileHash,
       signerAddresses: config.signerAddresses,
       databaseUpdated
@@ -182,7 +186,7 @@ async function updateContractMetadata(contractId, data) {
       console.error(`- Error fetching existing metadata: ${error.message}`);
     }
     
-    // Create metadata update
+    // Create metadata update - ENSURE exact same format as in local environment
     const metadataUpdate = {
       metadata: {
         ...existingMetadata,
@@ -195,13 +199,19 @@ async function updateContractMetadata(contractId, data) {
           encryption: {
             method: 'seal',
             allowlistId: data.allowlistId,
-            documentId: data.documentIdHex,
-            capId: data.capId
+            documentId: data.documentIdHex, // Critical: Keep EXACT same format
+            capId: data.capId,
+            salt: data.salt // Store salt for reference
           },
           authorizedWallets: data.signerAddresses || [],
           lastUpdated: new Date().toISOString()
         }
-      }
+      },
+      // Also set database-level fields for direct queries
+      walrusBlobId: data.blobId,
+      allowlistId: data.allowlistId,
+      documentId: data.documentIdHex, // Critical: Keep EXACT same format
+      salt: data.salt // Store salt for reference
     };
     
     console.log(`- Sending metadata-only update`);
@@ -242,7 +252,7 @@ async function updateContractMetadata(contractId, data) {
         }
       }
       
-      // Update documentId separately
+      // Update documentId separately - CRITICAL: Keep EXACT same format
       if (data.documentIdHex) {
         try {
           const docUpdate = { documentId: data.documentIdHex };
@@ -250,6 +260,17 @@ async function updateContractMetadata(contractId, data) {
           fieldUpdates.push(`documentId: ${docResponse.status}`);
         } catch (error) {
           console.error(`- Error updating documentId field: ${error.message}`);
+        }
+      }
+      
+      // Update salt separately
+      if (data.salt) {
+        try {
+          const saltUpdate = { salt: data.salt };
+          const saltResponse = await axios.patch(apiUrl, saltUpdate);
+          fieldUpdates.push(`salt: ${saltResponse.status}`);
+        } catch (error) {
+          console.error(`- Error updating salt field: ${error.message}`);
         }
       }
       

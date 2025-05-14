@@ -8,7 +8,7 @@ import tempfile
 import io
 import requests
 from urllib.parse import parse_qs
-import datetime
+import datetime,traceback
 
 # Add the root directory to path so we can import the WalrusSDKManager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -391,6 +391,7 @@ def process_upload(data):
                 # Continue with standard upload
         except Exception as e:
             print(f"SEAL encryption error: {str(e)}")
+            traceback.print_exc()
             exit(1)
             # Continue with standard upload
     else:

@@ -222,38 +222,27 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
                 raise Exception(f"Call to internal Node.js SEAL function failed: {e}") from e
 
         else: # Local development path
-            log_message(f"[SEAL] Running in LOCAL mode. Using Node.js subprocess for seal_operations.js.")
+            log_message("[SEAL] Running in LOCAL mode. Using Node.js subprocess.")
             node_script_full_path = os.path.join(SEAL_SCRIPT_PATH, 'seal_operations.js')
-            log_message(f"[SEAL] Attempting to execute Node.js script: {node_script_full_path} with config: {config_path}")
 
             if not os.path.exists(node_script_full_path):
-                log_message(f"[SEAL] ERROR: Node.js script not found at {node_script_full_path}", is_error=True)
+                log_message("[SEAL] ERROR: Node.js script not found", is_error=True)
                 raise FileNotFoundError(f"Node.js script for SEAL operations not found: {node_script_full_path}")
             if not os.path.exists(config_path):
-                log_message(f"[SEAL] ERROR: Config file for Node.js script not found at {config_path}", is_error=True)
+                log_message("[SEAL] ERROR: Config file not found", is_error=True) 
                 raise FileNotFoundError(f"Config file for Node.js script not found: {config_path}")
 
             command = ['node', node_script_full_path, config_path]
-            log_message(f"[SEAL] Executing command: {' '.join(command)}")
+            log_message("[SEAL] Executing Node.js script")
 
             try:
                 process = subprocess.Popen(
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    cwd=SEAL_SCRIPT_PATH # Set CWD if script relies on relative paths from its own dir
+                    cwd=SEAL_SCRIPT_PATH
                 )
-                stdout_data, stderr_data = process.communicate(timeout=55) # Set a generous timeout for local dev
-                # process_returncode = process.returncode
-
-                log_message(f"[SEAL] Node.js script stdout (first 500 chars): {stdout_data[:500].decode('utf-8', 'ignore')}")
-                if stderr_data:
-                    log_message(f"[SEAL] Node.js script stderr: {stderr_data.decode('utf-8', 'ignore')}", is_error=True)
-                
-                # if process_returncode != 0:
-                #     log_message(f"[SEAL] Node.js script exited with code {process_returncode}", is_error=True)
-                    # Consider raising an exception if the node script fails
-                    # raise Exception(f"SEAL Node.js script failed with code {process_returncode}: {stderr_data.decode('utf-8', 'ignore')}")
+                stdout_data, stderr_data = process.communicate(timeout=55)
 
             except subprocess.TimeoutExpired:
                 log_message("[SEAL] Node.js script timed out during local execution.", is_error=True)
@@ -285,18 +274,8 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             # Decide if this constitutes a failure. If the node script outputs to stderr for warnings but still gives valid JSON on stdout,
             # you might not want to raise an exception here.
 
-        try:
-            # Assuming your node script (and the new Node.js Vercel function) outputs JSON
-            result = json.loads(stdout_data.decode('utf-8'))
-            log_message("[SEAL] Successfully parsed JSON result from operation.", {"result_keys": list(result.keys()) if isinstance(result, dict) else "Result is not a dictionary"})
-        except json.JSONDecodeError as e:
-            log_message(f"[SEAL] Failed to decode JSON from operation stdout. Error: {e}", is_error=True)
-            log_message(f"[SEAL] Raw stdout that failed to parse (first 500 chars): {stdout_data[:500].decode('utf-8', 'ignore')}", is_error=True)
-            raise Exception(f"Failed to parse JSON from SEAL operation: {e}. Output: {stdout_data.decode('utf-8', 'ignore')}")
-        except Exception as e: # Catch any other unexpected errors during/after the operation
-            log_message(f"[SEAL] Unexpected error processing operation result: {e}", is_error=True)
-            log_message(traceback.format_exc(), is_error=True)
-            raise e
+        # Don't try to parse JSON, just use the raw output directly
+        output_lines = stdout_data.decode('utf-8', 'ignore').split('\n')
         
         # Extract all relevant SEAL information from output
         blob_id = None
@@ -304,8 +283,8 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
         document_id = None
         cap_id = None
         
-        # Look for all IDs in the output
-        for line in result.get('stdout', '').split('\n'):
+        # Look for all IDs in the output lines
+        for line in output_lines:
             if 'Blob ID:' in line:
                 blob_id = line.split('Blob ID:')[1].strip()
             elif 'Allowlist ID:' in line:
