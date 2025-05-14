@@ -105,6 +105,7 @@ module.exports = async (req, res) => {
       
       // Create response with all found values - IDENTICAL to Python script
       const responseData = {
+        success: true,
         contractId: config.contractId,
         encrypted: true,
         blobId,
