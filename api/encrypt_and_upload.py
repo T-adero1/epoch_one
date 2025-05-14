@@ -12,7 +12,6 @@ from typing import Dict, List, Any, Optional
 import time
 import requests
 import datetime
-import re
 
 # Add the root directory to path so we can import other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -257,20 +256,30 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
 
             try:
                 stdout_data, stderr_data = process.communicate(timeout=55)
+                output_text = stdout_data.decode('utf-8', 'ignore')
 
-                # Try to extract JSON result which will contain logs
-                try:
-                    # Look for a valid JSON object in the output
-                    json_match = re.search(r'\{[\s\S]*\}', stdout_data.decode('utf-8', 'ignore'))
-                    if json_match:
-                        result = json.loads(json_match.group(0))
-                        if result.get('logs'):
-                            detailed_logs = result['logs']
-                            print("\n=== DETAILED SEAL OPERATION LOGS ===")
-                            print(detailed_logs)
-                            print("=== END DETAILED LOGS ===\n")
-                except Exception as e:
-                    print(f"[SEAL] Error parsing JSON result: {e}")
+                # Extract input and output blocks using the markers
+                input_data = None
+                if '==== SEAL_OPERATION_INPUT_BEGIN ====' in output_text and '==== SEAL_OPERATION_INPUT_END ====' in output_text:
+                    input_start = output_text.find('==== SEAL_OPERATION_INPUT_BEGIN ====') + len('==== SEAL_OPERATION_INPUT_BEGIN ====')
+                    input_end = output_text.find('==== SEAL_OPERATION_INPUT_END ====')
+                    input_json = output_text[input_start:input_end].strip()
+                    try:
+                        input_data = json.loads(input_json)
+                        print(f"[LOCAL] SEAL Operation Input:\n{json.dumps(input_data, indent=2)}")
+                    except json.JSONDecodeError as e:
+                        print(f"[LOCAL] Failed to parse input JSON: {e}")
+
+                output_data = None
+                if '==== SEAL_OPERATION_OUTPUT_BEGIN ====' in output_text and '==== SEAL_OPERATION_OUTPUT_END ====' in output_text:
+                    output_start = output_text.find('==== SEAL_OPERATION_OUTPUT_BEGIN ====') + len('==== SEAL_OPERATION_OUTPUT_BEGIN ====')
+                    output_end = output_text.find('==== SEAL_OPERATION_OUTPUT_END ====')
+                    output_json = output_text[output_start:output_end].strip()
+                    try:
+                        output_data = json.loads(output_json)
+                        print(f"[LOCAL] SEAL Operation Output:\n{json.dumps(output_data, indent=2)}")
+                    except json.JSONDecodeError as e:
+                        print(f"[LOCAL] Failed to parse output JSON: {e}")
 
             except subprocess.TimeoutExpired:
                 log_message("[SEAL] Node.js script timed out during local execution.", is_error=True)

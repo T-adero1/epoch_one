@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
 const crypto = require('crypto');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const axios = require('axios');
 
@@ -99,104 +99,102 @@ module.exports = async (req, res) => {
       console.log(`[${timestamp}] [INFO] [SEAL] Running in PRODUCTION mode. Using Node.js subprocess.`);
       console.log(`[${timestamp}] [INFO] [SEAL] Executing Node.js script`);
       
-      // Execute the script directly - EXACTLY like in encrypt_and_upload.py local mode
+      // And then when executing the command:
+      const env = {
+        ...process.env,
+        SEAL_VERBOSE: 'true',
+        SEAL_DEBUG: 'true',
+        SEAL_LOG_LEVEL: 'debug'
+      };
+
       const command = `node "${scriptPath}" "${configFilePath}"`;
       
       const { stdout, stderr } = await execAsync(command, {
         cwd: scriptDir,
-        timeout: 55000 // 55 second timeout like in Python script
+        timeout: 55000,
+        env  // Use the environment without NODE_DEBUG
       });
       
-      console.log('[Python Direct] Command succeeded with python');
-      console.log('[Python Direct] Python execution completed');
-      console.log('[Python Direct] stdout: ' + stdout.substring(0, 200) + '...');
-      
-      if (stderr) {
-        console.log(`[Python Direct] stderr: ${stderr}`);
+      // Extract input and output sections
+      let inputData = null;
+      const inputStartMarker = '==== SEAL_OPERATION_INPUT_BEGIN ====';
+      const inputEndMarker = '==== SEAL_OPERATION_INPUT_END ====';
+      if (stdout.includes(inputStartMarker) && stdout.includes(inputEndMarker)) {
+        const inputStart = stdout.indexOf(inputStartMarker) + inputStartMarker.length;
+        const inputEnd = stdout.indexOf(inputEndMarker);
+        const inputJson = stdout.substring(inputStart, inputEnd).trim();
+        try {
+          inputData = JSON.parse(inputJson);
+          console.log(`[PROD] SEAL Operation Input:\n${JSON.stringify(inputData, null, 2)}`);
+        } catch (e) {
+          console.error(`[PROD] Failed to parse input JSON: ${e.message}`);
+        }
+      }
+
+      let outputData = null;
+      const outputStartMarker = '==== SEAL_OPERATION_OUTPUT_BEGIN ====';
+      const outputEndMarker = '==== SEAL_OPERATION_OUTPUT_END ====';
+      if (stdout.includes(outputStartMarker) && stdout.includes(outputEndMarker)) {
+        const outputStart = stdout.indexOf(outputStartMarker) + outputStartMarker.length;
+        const outputEnd = stdout.indexOf(outputEndMarker);
+        const outputJson = stdout.substring(outputStart, outputEnd).trim();
+        try {
+          outputData = JSON.parse(outputJson);
+          console.log(`[PROD] SEAL Operation Output:\n${JSON.stringify(outputData, null, 2)}`);
+        } catch (e) {
+          console.error(`[PROD] Failed to parse output JSON: ${e.message}`);
+        }
       }
       
-      // Try to parse the JSON result from stdout, which should contain logs
-      let result = null;
-      let detailedLogs = '';
+      // Parse the output by searching for specific lines
+      const outputLines = stdout.split('\n');
       
-      try {
-        // Look for a valid JSON object in the output
-        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          result = JSON.parse(jsonMatch[0]);
-          if (result.logs) {
-            detailedLogs = result.logs;
-            console.log(`\n=== DETAILED SEAL OPERATION LOGS ===\n${detailedLogs}\n=== END DETAILED LOGS ===\n`);
-          }
-        }
-      } catch (parseError) {
-        console.error(`Error parsing JSON from stdout: ${parseError.message}`);
-      }
+      // Extract all relevant SEAL information from output
+      let blobId = null;
+      let allowlistId = null;
+      let documentId = null;
+      let capId = null;
+      let salt = null;
       
-      // If we couldn't get logs from JSON, parse the output lines as before
-      if (!result) {
-        // Parse the output by searching for specific lines - EXACTLY like in encrypt_and_upload.py
-        const outputLines = stdout.split('\n');
-        
-        // Extract all relevant SEAL information from output
-        let blobId = null;
-        let allowlistId = null;
-        let documentId = null;
-        let capId = null;
-        let salt = null;
-        
-        // Look for all IDs in the output lines - IDENTICAL to Python script
-        for (const line of outputLines) {
-          if (line.includes('Blob ID:')) {
-            blobId = line.split('Blob ID:')[1].trim();
-          } else if (line.includes('Allowlist ID:')) {
-            allowlistId = line.split('Allowlist ID:')[1].trim();
-          } else if (line.includes('Document ID:') || line.includes('Document ID (hex):')) {
-            documentId = line.split(':')[1].trim();
-          } else if (line.includes('Capability ID:') || line.includes('Cap ID:')) {
-            capId = line.split(':')[1].trim();
-          } else if (line.includes('Salt (hex):')) {
-            salt = line.split('Salt (hex):')[1].trim();
-          }
+      // Look for all IDs in the output lines
+      for (const line of outputLines) {
+        if (line.includes('Blob ID:')) {
+          blobId = line.split('Blob ID:')[1].trim();
+        } else if (line.includes('Allowlist ID:')) {
+          allowlistId = line.split('Allowlist ID:')[1].trim();
+        } else if (line.includes('Document ID:') || line.includes('Document ID (hex):')) {
+          documentId = line.split(':')[1].trim();
+        } else if (line.includes('Capability ID:') || line.includes('Cap ID:')) {
+          capId = line.split(':')[1].trim();
+        } else if (line.includes('Salt (hex):')) {
+          salt = line.split('Salt (hex):')[1].trim();
         }
-        
-        // Create result object if we couldn't parse it
-        result = {
-          success: true,
-          contractId: config.contractId,
-          blobId,
-          allowlistId,
-          documentId,
-          capId,
-          salt,
-          raw_success: true,
-          message: 'SEAL encryption succeeded',
-          // Use stdout as logs if we couldn't parse JSON
-          logs: stdout
-        };
       }
       
       // Log the same way as Python script
       console.log(`[SEAL] Document successfully encrypted and uploaded`);
-      if (result.blobId) console.log(`[SEAL] Blob ID: ${result.blobId}`);
-      if (result.allowlistId) console.log(`[SEAL] Allowlist ID: ${result.allowlistId}`);
-      if (result.documentId) console.log(`[SEAL] Document ID: ${result.documentId}`);
-      if (result.capId) console.log(`[SEAL] Capability ID: ${result.capId}`);
-      if (result.salt) console.log(`[SEAL] Salt: ${result.salt}`);
+      if (blobId) console.log(`[SEAL] Blob ID: ${blobId}`);
+      if (allowlistId) console.log(`[SEAL] Allowlist ID: ${allowlistId}`);
+      if (documentId) console.log(`[SEAL] Document ID: ${documentId}`);
+      if (capId) console.log(`[SEAL] Capability ID: ${capId}`);
+      if (salt) console.log(`[SEAL] Salt: ${salt}`);
       
       // Create response with all found values - IDENTICAL to Python script
       const responseData = {
         success: true,
         contractId: config.contractId,
         encrypted: true,
-        blobId: result.blobId,
-        allowlistId: result.allowlistId,
-        documentId: result.documentId,
-        capId: result.capId,
-        salt: result.salt,  // Include salt for document ID reconstruction
+        blobId,
+        allowlistId,
+        documentId,
+        capId,
+        salt,  // Include salt for document ID reconstruction
         raw_success: true,
         message: 'SEAL encryption succeeded',
-        logs: detailedLogs || stdout  // Include detailed logs in the response
+        logs: {
+          stdout: stdout.substring(0, 2000) + (stdout.length > 2000 ? '...(truncated)' : ''),
+          stderr: stderr.substring(0, 2000) + (stderr.length > 2000 ? '...(truncated)' : '')
+        }
       };
       
       // Log similar to Python
@@ -215,11 +213,11 @@ module.exports = async (req, res) => {
       
       // Prepare walrus data
       const walrusData = {
-        blobId: result.blobId,
-        allowlistId: result.allowlistId,
-        documentId: result.documentId,
-        capId: result.capId,
-        salt: result.salt,  // Include salt here too for document ID reconstruction
+        blobId,
+        allowlistId,
+        documentId,
+        capId,
+        salt,  // Include salt here too for document ID reconstruction
         encryptionMethod: 'seal',
         authorizedWallets: config.signerAddresses,
         uploadedAt: new Date().toISOString()
@@ -290,9 +288,9 @@ module.exports = async (req, res) => {
           const fieldUpdates = [];
           
           // Update walrusBlobId separately
-          if (result.blobId) {
+          if (blobId) {
             try {
-              const blobUpdate = { walrusBlobId: result.blobId };
+              const blobUpdate = { walrusBlobId: blobId };
               const blobResponse = await axios.patch(apiUrl, blobUpdate);
               fieldUpdates.push(`walrusBlobId: ${blobResponse.status}`);
             } catch (error) {
@@ -301,9 +299,9 @@ module.exports = async (req, res) => {
           }
           
           // Update allowlistId separately
-          if (result.allowlistId) {
+          if (allowlistId) {
             try {
-              const allowlistUpdate = { allowlistId: result.allowlistId };
+              const allowlistUpdate = { allowlistId: allowlistId };
               const allowlistResponse = await axios.patch(apiUrl, allowlistUpdate);
               fieldUpdates.push(`allowlistId: ${allowlistResponse.status}`);
             } catch (error) {
@@ -312,9 +310,9 @@ module.exports = async (req, res) => {
           }
           
           // Update documentId separately
-          if (result.documentId) {
+          if (documentId) {
             try {
-              const docUpdate = { documentId: result.documentId };
+              const docUpdate = { documentId: documentId };
               const docResponse = await axios.patch(apiUrl, docUpdate);
               fieldUpdates.push(`documentId: ${docResponse.status}`);
             } catch (error) {
@@ -350,8 +348,7 @@ module.exports = async (req, res) => {
       console.log(`RESPONSE_JSON_END`);
       console.log(`Upload completed successfully`);
       
-      return res.status(200).json(responseData);
-      
+      res.status(200).json(responseData);
     } finally {
       // Clean up temporary file - SAME as Python cleanup
       try {

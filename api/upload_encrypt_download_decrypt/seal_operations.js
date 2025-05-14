@@ -9,42 +9,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const os = require('os');
 
 // Import utility modules
 const utils = require('./fixed_utils');
 const blockchain = require('./fixed_blockchain');
 const walrus = require('./fixed_walrus');
 const seal = require('./fixed_seal');
-
-// Create an in-memory log collection
-const logCollection = [];
-
-// Store original console methods
-const originalConsole = {
-  log: console.log,
-  error: console.error,
-  warn: console.warn,
-  info: console.info
-};
-
-// Function to collect logs
-function collectLog(message, level = 'INFO') {
-  const timestamp = new Date().toISOString();
-  const formattedMessage = `[${timestamp}] [${level}] ${message}`;
-  
-  // Store in memory
-  logCollection.push(formattedMessage);
-  
-  // Also use original console method
-  originalConsole.log(formattedMessage);
-}
-
-// Override console methods to collect logs
-console.log = message => collectLog(message, 'INFO');
-console.error = message => collectLog(message, 'ERROR');
-console.warn = message => collectLog(message, 'WARN');
-console.info = message => collectLog(message, 'INFO');
 
 // Configure logging based on environment variables
 const VERBOSE = process.env.SEAL_VERBOSE === 'true' || false;
@@ -236,8 +206,7 @@ async function encryptAndUpload(config) {
       blobId,
       documentIdHex,
       fileHash,
-      signerAddresses: config.signerAddresses,
-      logs: logCollection.join('\n')
+      signerAddresses: config.signerAddresses
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
@@ -248,8 +217,7 @@ async function encryptAndUpload(config) {
     return {
       success: false,
       error: error.message,
-      stack: error.stack,
-      logs: logCollection.join('\n')
+      stack: error.stack
     };
   }
 }
@@ -355,8 +323,7 @@ async function downloadAndDecrypt(config) {
       success: true,
       decryptedFilePath: outputPath,
       decryptedHash,
-      decryptedSize: decryptedData.length,
-      logs: logCollection.join('\n')
+      decryptedSize: decryptedData.length
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));
@@ -367,8 +334,7 @@ async function downloadAndDecrypt(config) {
     return {
       success: false,
       error: error.message,
-      stack: error.stack,
-      logs: logCollection.join('\n')
+      stack: error.stack
     };
   }
 }
@@ -380,20 +346,47 @@ function runOperation(configPath) {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     
+    // Add clear input logging markers
+    console.log('==== SEAL_OPERATION_INPUT_BEGIN ====');
+    console.log(JSON.stringify(config, (key, value) => {
+      // Don't log private keys or full document content (just length)
+      if (key === 'adminPrivateKey' || key === 'userPrivateKey') {
+        return '[REDACTED]';
+      }
+      if (key === 'documentContentBase64' && typeof value === 'string') {
+        return `[BASE64_CONTENT_LENGTH:${value.length}]`;
+      }
+      return value;
+    }, 2));
+    console.log('==== SEAL_OPERATION_INPUT_END ====');
+    
+    let result;
     if (config.operation === 'encrypt') {
-      return encryptAndUpload(config);
+      result = encryptAndUpload(config);
     } else if (config.operation === 'decrypt') {
-      return downloadAndDecrypt(config);
+      result = downloadAndDecrypt(config);
     } else {
       throw new Error(`Invalid operation: ${config.operation}. Must be 'encrypt' or 'decrypt'`);
     }
+    
+    // Add promise handling to log output
+    return Promise.resolve(result).then(resultValue => {
+      // Add clear output logging markers
+      console.log('==== SEAL_OPERATION_OUTPUT_BEGIN ====');
+      console.log(JSON.stringify(resultValue, null, 2));
+      console.log('==== SEAL_OPERATION_OUTPUT_END ====');
+      return resultValue;
+    });
   } catch (error) {
     console.error(`Error reading or parsing config: ${error.message}`);
-    return {
+    const errorResult = {
       success: false,
-      error: error.message,
-      logs: logCollection.join('\n')
+      error: error.message
     };
+    console.log('==== SEAL_OPERATION_OUTPUT_BEGIN ====');
+    console.log(JSON.stringify(errorResult, null, 2));
+    console.log('==== SEAL_OPERATION_OUTPUT_END ====');
+    return errorResult;
   }
 }
 
@@ -414,7 +407,6 @@ if (require.main === module) {
   
   runOperation(configPath)
     .then(result => {
-      console.log(JSON.stringify(result, null, 2));
       if (result.success) {
         process.exit(0);
       } else {
