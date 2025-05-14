@@ -1,154 +1,41 @@
-// Import all required modules
-const path = require('path');
-const crypto = require('crypto');
+
 const axios = require('axios');
 
-// Import the ACTUAL modules from your existing code
-// These are direct imports from your files
-const utils = require('./upload_encrypt_download_decrypt/fixed_utils');
-const blockchain = require('./upload_encrypt_download_decrypt/fixed_blockchain');
-const walrus = require('./upload_encrypt_download_decrypt/fixed_walrus');
-const seal = require('./upload_encrypt_download_decrypt/fixed_seal');
-const config = require('./upload_encrypt_download_decrypt/fixed_config');
+
+
+// Import the actual seal_operations.js module
+const sealOperations = require('./upload_encrypt_download_decrypt/seal_operations');
 
 /**
- * Encrypt and upload a document to Walrus using the EXACT same flow as in seal_operations.js
+ * API wrapper for the SEAL operations
+ * This simply forwards requests to the original seal_operations.js module
+ * to ensure consistent behavior between local and production environments
  */
 async function encryptAndUpload(config) {
-  console.log('\n' + '='.repeat(80));
-  console.log('SEAL ENCRYPT AND UPLOAD OPERATION');
-  console.log('='.repeat(80));
+  console.log('[SEAL API Wrapper] Forwarding request to seal_operations.js module');
   
   try {
-    // Validate required fields
-    if ((!config.documentContentBase64) || !config.contractId || !config.signerAddresses || !config.adminPrivateKey) {
-      throw new Error('Missing required configuration: documentContentBase64, contractId, signerAddresses, adminPrivateKey');
+    // Call the original implementation directly
+    const result = await sealOperations.encryptAndUpload(config);
+    
+    // If successful, update the contract metadata in the database
+    if (result.success) {
+      console.log('[SEAL API Wrapper] Encryption successful, updating contract metadata');
+      
+      const databaseUpdated = await updateContractMetadata(config.contractId, {
+        blobId: result.blobId,
+        allowlistId: result.allowlistId,
+        documentIdHex: result.documentIdHex,
+        capId: result.capId,
+        signerAddresses: result.signerAddresses
+      });
+      
+      result.databaseUpdated = databaseUpdated;
     }
     
-    // Set required environment variables from config
-    process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.sealPackageId;
-    process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
-    process.env.ADMIN_PRIVATE_KEY = config.adminPrivateKey;
-    process.env.NETWORK = config.network || 'testnet';
-    
-    console.log('\n Configuration:');
-    console.log(`- Network: ${process.env.NETWORK}`);
-    console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
-    console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
-    
-    // Read file data from base64 content
-    let fileData;
-    try {
-      fileData = Buffer.from(config.documentContentBase64, 'base64');
-      console.log(`- Successfully decoded base64 content: ${fileData.length} bytes`);
-    } catch (base64Error) {
-      throw new Error(`Failed to decode base64 content: ${base64Error.message}`);
-    }
-    
-    // Calculate document hash
-    const fileHash = crypto.createHash('sha256').update(fileData).digest('hex');
-    console.log(`- File hash (SHA-256): ${fileHash}`);
-    
-    // Initialize Sui client - use the EXACT same function from your utils
-    const suiClient = await utils.initSuiClient();
-    
-    // Initialize SEAL client - use the EXACT same function from your seal module
-    const { client: sealClient } = await seal.initSealClient(suiClient);
-    
-    // Create admin keypair - use the EXACT same function from your utils
-    console.log('\n Creating admin keypair...');
-    const adminKeypair = utils.privateKeyToKeypair(config.adminPrivateKey);
-    const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
-    console.log(`- Admin address: ${adminAddress}`);
-    
-    // STEP 1: Create allowlist (document group) - use the EXACT same function from your blockchain module
-    console.log('\n STEP 1: Creating allowlist...');
-    const groupName = `Contract-${config.contractId}-${Date.now()}`;
-    const { allowlistId, capId } = await blockchain.createAllowlist(
-      suiClient, 
-      adminKeypair, 
-      groupName
-    );
-    console.log(`- Allowlist created: ${allowlistId}`);
-    console.log(`- Cap ID: ${capId}`);
-    
-    // STEP 2: Add users to allowlist - use the EXACT same function from your blockchain module
-    console.log('\n STEP 2: Adding users to allowlist...');
-    await blockchain.addMultipleUsersToAllowlist(
-      suiClient,
-      adminKeypair,
-      allowlistId,
-      capId,
-      config.signerAddresses
-    );
-    console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
-    
-    // STEP 3: Generate document ID using allowlist ID - CRITICAL: Use EXACTLY the same function and format as fixed_utils.js
-    console.log('\n STEP 3: Generating document ID...');
-    // Use the EXACT same createDocumentId implementation to ensure format consistency
-    const { documentIdHex, salt } = utils.createDocumentId(allowlistId, config.contractId);
-    console.log(`- Document ID (exact format for decryption): ${documentIdHex}`);
-    console.log(`- Salt hex: ${salt}`);
-    
-    // STEP 4: Encrypt document using the document ID - use the EXACT same function from your seal module
-    console.log('\n STEP 4: Encrypting document...');
-    const { encryptedBytes } = await seal.encryptDocument(
-      sealClient,
-      documentIdHex,
-      new Uint8Array(fileData)
-    );
-    console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
-    
-    // STEP 5: Upload to Walrus - use the EXACT same function from your walrus module
-    console.log('\n STEP 5: Uploading to Walrus...');
-    const { blobId } = await walrus.uploadToWalrus(encryptedBytes);
-    console.log(`- Uploaded to Walrus: ${blobId}`);
-    
-    // STEP 6: Register blob in allowlist and set permissions - use the EXACT same function from your blockchain module
-    console.log('\n STEP 6: Registering blob in allowlist...');
-    await blockchain.publishBlobToAllowlist(
-      suiClient,
-      adminKeypair,
-      allowlistId,
-      capId,
-      blobId
-    );
-    console.log(`- Blob registered in allowlist`);
-    
-    // STEP 7: Update the contract metadata in the database
-    console.log('\n STEP 7: Updating contract metadata in database...');
-    const databaseUpdated = await updateContractMetadata(config.contractId, {
-      blobId,
-      allowlistId,
-      documentIdHex,
-      capId,
-      signerAddresses: config.signerAddresses,
-      salt // Include salt for reference
-    });
-    console.log(`- Database updated: ${databaseUpdated}`);
-    
-    console.log('\n' + '='.repeat(80));
-    console.log('ENCRYPT AND UPLOAD COMPLETED SUCCESSFULLY!');
-    console.log('='.repeat(80));
-    
-    return {
-      success: true,
-      contractId: config.contractId,
-      allowlistId,
-      capId,
-      blobId,
-      documentIdHex, // Return the exact document ID format needed for decryption
-      salt, // Include salt in response
-      fileHash,
-      signerAddresses: config.signerAddresses,
-      databaseUpdated
-    };
+    return result;
   } catch (error) {
-    console.error('\n' + '='.repeat(80));
-    console.error(' ENCRYPT AND UPLOAD FAILED');
-    console.error('='.repeat(80));
-    console.error(`\nError: ${error.message}`);
-    console.error(`\nStack: ${error.stack}`);
+    console.error('[SEAL API Wrapper] Error:', error);
     
     return {
       success: false,
@@ -162,7 +49,7 @@ async function encryptAndUpload(config) {
  * Update the contract metadata in the database
  */
 async function updateContractMetadata(contractId, data) {
-  console.log(`\n STEP 7: Updating contract metadata in database...`);
+  console.log(`[SEAL API Wrapper] Updating contract metadata for ${contractId}`);
   
   try {
     // Get the app URL from environment
@@ -186,7 +73,7 @@ async function updateContractMetadata(contractId, data) {
       console.error(`- Error fetching existing metadata: ${error.message}`);
     }
     
-    // Create metadata update - ENSURE exact same format as in local environment
+    // Create metadata update - IDENTICAL format to the one used in Python code
     const metadataUpdate = {
       metadata: {
         ...existingMetadata,
@@ -199,9 +86,8 @@ async function updateContractMetadata(contractId, data) {
           encryption: {
             method: 'seal',
             allowlistId: data.allowlistId,
-            documentId: data.documentIdHex, // Critical: Keep EXACT same format
-            capId: data.capId,
-            salt: data.salt // Store salt for reference
+            documentId: data.documentIdHex,
+            capId: data.capId
           },
           authorizedWallets: data.signerAddresses || [],
           lastUpdated: new Date().toISOString()
@@ -210,8 +96,7 @@ async function updateContractMetadata(contractId, data) {
       // Also set database-level fields for direct queries
       walrusBlobId: data.blobId,
       allowlistId: data.allowlistId,
-      documentId: data.documentIdHex, // Critical: Keep EXACT same format
-      salt: data.salt // Store salt for reference
+      documentId: data.documentIdHex
     };
     
     console.log(`- Sending metadata-only update`);
@@ -252,7 +137,7 @@ async function updateContractMetadata(contractId, data) {
         }
       }
       
-      // Update documentId separately - CRITICAL: Keep EXACT same format
+      // Update documentId separately
       if (data.documentIdHex) {
         try {
           const docUpdate = { documentId: data.documentIdHex };
@@ -260,17 +145,6 @@ async function updateContractMetadata(contractId, data) {
           fieldUpdates.push(`documentId: ${docResponse.status}`);
         } catch (error) {
           console.error(`- Error updating documentId field: ${error.message}`);
-        }
-      }
-      
-      // Update salt separately
-      if (data.salt) {
-        try {
-          const saltUpdate = { salt: data.salt };
-          const saltResponse = await axios.patch(apiUrl, saltUpdate);
-          fieldUpdates.push(`salt: ${saltResponse.status}`);
-        } catch (error) {
-          console.error(`- Error updating salt field: ${error.message}`);
         }
       }
       
