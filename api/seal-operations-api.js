@@ -44,7 +44,7 @@ function safeConsoleLog(message, prefix = "") {
  * by running seal_operations.js as a subprocess and parsing the output
  */
 module.exports = async (req, res) => {
-  console.log('[Python Direct] Command received');
+
   
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
