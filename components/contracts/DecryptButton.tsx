@@ -398,6 +398,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
     console.log("[DecryptButton] Starting decryption process");
     
     if (!user?.address) {
+      console.log("[DecryptButton] user.address:", user?.address); // null or undefined
       console.error("[DecryptButton] No user address found");
       toast({
         title: "Authentication required",
@@ -408,10 +409,12 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
     }
 
     if (!ephemeralKeypair || !ephemeralAddress) {
+      console.log("[DecryptButton] ephemeralKeypair:", ephemeralKeypair); // null or undefined
+      console.log("[DecryptButton] ephemeralAddress:", ephemeralAddress); // null or undefined
       console.error("[DecryptButton] No ephemeral wallet available");
       toast({
         title: "Error",
-        description: "Ephemeral wallet not initialized",
+        description: "Ephemeral wallet not initialized", 
         variant: "destructive"
       });
       return;
@@ -424,36 +427,42 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       
       // Fetch contract details
       const contractData = contractDetails || await fetchContractDetails();
+      console.log("[DecryptButton] contractData:", contractData);
       
       // Extract blockchain metadata
       const walrusData = contractData.metadata?.walrus;
+      console.log("[DecryptButton] walrusData:", walrusData);
+      
       const effectiveBlobId = walrusData?.storage?.blobId || blobId;
       const effectiveDocumentId = walrusData?.encryption?.documentId || documentIdHex;
       const effectiveAllowlistId = walrusData?.encryption?.allowlistId || allowlistId;
       
       console.log("[DecryptButton] Using blockchain metadata:", {
-        blobId: effectiveBlobId,
-        documentId: effectiveDocumentId,
-        allowlistId: effectiveAllowlistId
+        effectiveBlobId,
+        effectiveDocumentId,
+        effectiveAllowlistId
       });
       
       // Initialize clients
       console.log("[DecryptButton] Initializing Sui client");
       const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
       const keyServerIds = await getAllowlistedKeyServers('testnet');
-      console.log("[DecryptButton] Key servers:", keyServerIds);
+      console.log("[DecryptButton] keyServerIds:", keyServerIds);
       
       const sealClient = new SealClient({
         suiClient,
         serverObjectIds: keyServerIds,
         verifyKeyServers: true
       });
+      console.log("[DecryptButton] sealClient:", sealClient);
 
       // Format document ID correctly
       const docId = effectiveDocumentId.startsWith('0x') ? 
         effectiveDocumentId.substring(2) : effectiveDocumentId;
+      console.log("[DecryptButton] docId:", docId);
       
       const packageId = process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID || '';
+      console.log("[DecryptButton] packageId:", packageId);
       
       // Authorize ephemeral key
       await authorizeEphemeralKey(suiClient, packageId, docId);
@@ -465,14 +474,17 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
         packageId,
         ttlMin: TTL_MIN
       });
+      console.log("[DecryptButton] sessionKey:", sessionKey);
       
       // Get personal message and sign it with ephemeral key
       const personalMessage = sessionKey.getPersonalMessage();
+      console.log("[DecryptButton] personalMessage:", personalMessage);
       console.log("[DecryptButton] Personal message length:", personalMessage.length);
       
       // Use the ephemeral key to sign the personal message
       setDecryptionStep('signingMessage');
       const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
+      console.log("[DecryptButton] signature:", signature);
       
       // Set the signature on the session key
       console.log("[DecryptButton] Setting signature on session key");
@@ -483,13 +495,15 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       console.log("[DecryptButton] Creating transaction for approval");
       const tx = new Transaction();
       tx.setSender(ephemeralAddress);
+      console.log("[DecryptButton] transaction:", tx);
       
       // First, ensure consistent Document ID format
       const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
-      console.log("[DecryptButton] Raw document ID for key fetching:", rawId);
+      console.log("[DecryptButton] rawId:", rawId);
 
       // Convert to bytes EXACTLY like in fixed_seal.js
       const documentIdBytes = fromHEX(rawId);
+      console.log("[DecryptButton] documentIdBytes:", documentIdBytes);
       console.log("[DecryptButton] Document ID byte length:", documentIdBytes.length);
       console.log("[DecryptButton] First few bytes:", Array.from(documentIdBytes.slice(0, 5)));
 
@@ -508,11 +522,11 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
         client: suiClient, 
         onlyTransactionKind: true
       });
+      console.log("[DecryptButton] txKindBytes:", txKindBytes);
       
       // Store this transaction bytes for later use in decryption
       const fetchTxBytes = txKindBytes;
-
-
+      console.log("[DecryptButton] fetchTxBytes:", fetchTxBytes);
 
       // Fetch keys with the properly formatted ID
       await sealClient.fetchKeys({
@@ -552,6 +566,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
           documentIdHex: effectiveDocumentId
         })
       });
+      console.log("[DecryptButton] download response:", response);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -563,46 +578,70 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       }
 
       const encryptedData = await response.arrayBuffer();
+      console.log("[DecryptButton] encryptedData:", encryptedData);
       console.log("[DecryptButton] Encrypted data downloaded, size:", encryptedData.byteLength);
       
       // Decrypt the data
-      setDecryptionStep('decrypting');
-      console.log("[DecryptButton] Decrypting document");
-      toast({ title: "Decrypting contract..." });
-      const decryptedData = await sealClient.decrypt({
-        data: new Uint8Array(encryptedData),
-        sessionKey: sessionKey,
-        txBytes: fetchTxBytes // Use the exact same bytes from fetching
-      });
-      console.log("[DecryptButton] Document decrypted successfully, size:", decryptedData.length);
+      let decryptedData;
+      try {
+        setDecryptionStep('decrypting');
+        console.log("[DecryptButton] Decrypting document");
+        toast({ title: "Decrypting contract..." });
+        
+        decryptedData = await sealClient.decrypt({
+          data: new Uint8Array(encryptedData),
+          sessionKey: sessionKey,
+          txBytes: fetchTxBytes // Use the exact same bytes from fetching
+        });
+        console.log("[DecryptButton] decryptedData:", decryptedData);
+        console.log("[DecryptButton] Document decrypted successfully, size:", decryptedData.length);
+      } catch (error) {
+        console.error("[DecryptButton] Failed to decrypt data:", error);
+        throw new Error(`Decryption failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
 
-      // Create download for user
-      setDecryptionStep('savingFile');
-      console.log("[DecryptButton] Creating download");
-      const blob = new Blob([decryptedData], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Contract-${contractId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      console.log("[DecryptButton] Download triggered");
-      toast({
-        title: "Contract downloaded successfully",
-        variant: "success"
-      });
-      
-      setDecryptionStep('complete');
+      // Create blob from decrypted data
+      let blob;
+      let url;
+      try {
+        setDecryptionStep('savingFile'); 
+        console.log("[DecryptButton] Creating download");
+        blob = new Blob([decryptedData], { type: 'application/pdf' });
+        console.log("[DecryptButton] blob:", blob);
+        url = URL.createObjectURL(blob);
+        console.log("[DecryptButton] url:", url);
+      } catch (error) {
+        console.error("[DecryptButton] Failed to create blob:", error);
+        throw new Error(`Failed to create download: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+
+      // Trigger download
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Contract-${contractId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log("[DecryptButton] Download triggered");
+        toast({
+          title: "Contract downloaded successfully",
+          variant: "success"
+        });
+        
+        setDecryptionStep('complete');
+      } catch (error) {
+        console.error("[DecryptButton] Failed to trigger download:", error);
+        throw new Error(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     } catch (error) {
       console.error("[DecryptButton] Decryption error:", error);
       console.error("[DecryptButton] Error traceback:", error instanceof Error ? error.stack : "No stack trace available");
       
       toast({
-        title: "Decryption failed",
+        title: "Decryption failed", 
         description: error instanceof Error ? error.message : "An unknown error occurred",
         variant: "destructive"
       });
@@ -630,6 +669,8 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       'complete': 'Decryption complete!',
       'error': 'Decryption failed'
     };
+    console.log("[DecryptButton] decryptionStep:", decryptionStep);
+    console.log("[DecryptButton] steps:", steps);
     
     return (
       <div className="mt-2 text-sm text-gray-600">
@@ -651,142 +692,6 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
   
 
 
-  // Modified testZkLoginTransaction - Send SUI from zkLogin wallet to admin wallet
-  const testZkLoginTransaction = async () => {
-    try {
-      const adminAddress = "0xb21f25e47d081017776083518f8d8b0d2138107299edb20883468f5d85194d03";
-      
-      if (!user?.address || !ephemeralKeypair) {
-        console.error("[TEST] Missing zkLogin wallet data");
-        return false;
-      }
-      
-      console.log("[TEST] Starting user-to-admin transaction test");
-      console.log("[TEST] User zkLogin address:", user.address);
-      console.log("[TEST] Sending to admin address:", adminAddress);
-      
-      // Create SuiClient
-      const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
-      
-      // Get session data and JWT from current session
-      const sessionData = localStorage.getItem(EPHEMERAL_STORAGE_KEY);
-      if (!sessionData) {
-        console.error("[TEST] No session data found in localStorage");
-        return false;
-      }
-      
-      const sessionObj = JSON.parse(sessionData);
-      const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
-      
-      if (!zkLoginState || !zkLoginState.jwt) {
-        console.error("[TEST] Missing zkLoginState or JWT in session");
-        return false;
-      }
-      
-      // Verify zkLogin session integrity
-      const jwt = zkLoginState.jwt;
-      const jwtHeader = jwt.split('.')[0];
-      const zkProofHeader = zkLoginState.zkProofs.headerBase64;
-      
-      console.log("[TEST] JWT header:", jwtHeader);
-      console.log("[TEST] ZK proof header:", zkProofHeader);
-      console.log("[TEST] Headers match:", jwtHeader === zkProofHeader);
-      
-      if (jwtHeader !== zkProofHeader) {
-        console.error("[TEST] ZK proof was generated with a different JWT than the one in the session!");
-        return false;
-      }
-      
-      // Get salt from current session
-      const salt = zkLoginState.salt;
-      if (!salt) {
-        console.error("[TEST] No salt found in zkLoginState!");
-        return false;
-      }
-      
-      console.log("[TEST] Using salt from zkLoginState:", salt);
-      
-      // Build transaction to send minimum SUI to admin
-      const tx = new Transaction();
-      tx.setSender(user.address);
-      
-      // Split 1 MIST (minimum amount) and send to admin
-      const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
-      tx.transferObjects([coin], tx.pure.address(adminAddress));
-      
-      tx.setGasBudget(10000000);
-      
-      // Sign with ephemeral key
-      console.log("[TEST] Signing with ephemeral key");
-      const { bytes: txBytes, signature: userSignature } = 
-        await tx.sign({ client: suiClient, signer: ephemeralKeypair });
-      
-      // Parse JWT and create address seed
-      const jwtBody = JSON.parse(atob(jwt.split('.')[1]));
-      const addressSeed = genAddressSeed(
-        BigInt(salt),
-        'sub',
-        jwtBody.sub,
-        jwtBody.aud
-      ).toString();
-      
-      // Verify address
-      const expectedAddress = jwtToAddress(jwt, salt);
-      console.log("[TEST] Expected address with salt:", expectedAddress);
-      console.log("[TEST] Actual user address:", user.address);
-      console.log("[TEST] Address match:", expectedAddress === user.address);
-      
-      // Create zkLogin signature using current session's proofs
-      console.log("[TEST] Creating zkLogin signature");
-      const zkLoginSignature = getZkLoginSignature({
-        inputs: {
-          ...zkLoginState.zkProofs,
-          addressSeed,
-        },
-        maxEpoch: zkLoginState.maxEpoch,
-        userSignature,
-      });
-      
-      // Execute transaction
-      console.log("[TEST] Executing user-to-admin transaction");
-      const result = await suiClient.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature: zkLoginSignature, 
-        options: { showEffects: true },
-      });
-      
-      console.log("[TEST] User-to-admin transaction success:", result.digest);
-      toast({
-        title: "Success",
-        description: `You sent 1 MIST to admin wallet: ${adminAddress.substring(0, 10)}...`,
-        variant: "success",
-      });
-      return true;
-    } catch (error) {
-      console.error("[TEST] zkLogin transaction failed:", error);
-      // Enhanced error reporting
-      if (error instanceof Error) {
-        console.error("[TEST] Error name:", error.name);
-        console.error("[TEST] Error message:", error.message);
-        toast({
-          title: "Failed",
-          description: error.message,
-        variant: "destructive",
-      });
-        if ('stack' in error) {
-          console.error("[TEST] Error stack:", error.stack);
-        }
-      } else {
-        console.error("[TEST] Unknown error type:", typeof error);
-        toast({
-          title: "Failed",
-          description: "Unknown error during transaction",
-          variant: "destructive",
-        });
-      }
-      return false;
-    }
-  };
 
 
   return (
@@ -813,19 +718,7 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
       
       
       
-      <Button
-        onClick={testZkLoginTransaction}
-        disabled={isDecrypting || !ephemeralAddress}
-        variant="secondary"
-        size="sm"
-        className="flex items-center gap-1"
-      >
-        Test zkLogin TX
-      </Button>
-      
-
-      
-     
+ 
       
      
       
