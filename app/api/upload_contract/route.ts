@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
     
     // Call our consolidated SEAL API that bundles all dependencies
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-    const sealApiUrl = `${appUrl}api/seal-operations-api`;
+    const sealApiUrl = `${appUrl}/api/seal-operations-api`;
     
     console.log(`[API Route] Calling SEAL operations API at ${sealApiUrl}`);
       
