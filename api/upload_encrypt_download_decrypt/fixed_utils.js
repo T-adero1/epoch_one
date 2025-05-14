@@ -15,7 +15,7 @@ const { suiPrivkeyToKeypair } = require('./sui_key_utils');
 
 // Initialize SUI client
 async function initSuiClient() {
-  console.log('\n🔌 Initializing Sui client...');
+  console.log('\n Initializing Sui client...');
   const client = new SuiClient({ url: config.RPC_URL });
   
   // Validate the client is working

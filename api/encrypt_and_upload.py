@@ -36,6 +36,21 @@ print(f"[SEAL] Scripts directory path: {SEAL_SCRIPT_PATH}")
 # This path is ONLY used for local development now
 SEAL_SCRIPT_PATH_LOCAL = os.path.abspath(os.path.join(os.path.dirname(__file__), 'upload_encrypt_download_decrypt'))
 
+def safe_console_print(text, prefix=""):
+    """Print text to console safely, handling unicode encoding issues in Windows."""
+    try:
+        print(f"{prefix}{text}")
+    except UnicodeEncodeError:
+        # Fall back to ascii encoding with replacement for non-ascii chars
+        try:
+            # Try printing with ascii encoding, replacing problematic chars
+            print(f"{prefix}{text.encode('ascii', 'replace').decode('ascii')}")
+        except:
+            # Last resort - just report we couldn't print it
+            print(f"{prefix}[Content contains characters that cannot be displayed in console]")
+            # Optionally log the length
+            print(f"{prefix}[Content length: {len(text)} characters]")
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Parse request body
@@ -256,8 +271,23 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
 
             try:
                 stdout_data, stderr_data = process.communicate(timeout=55)
+                
+                # Get decoded stdout and handle encoding issues
                 output_text = stdout_data.decode('utf-8', 'ignore')
-
+                
+                # Log the raw output safely
+                print("[SEAL] Raw stdout from seal_operations.js:")
+                print("------- BEGIN RAW STDOUT -------")
+                safe_console_print(output_text)
+                print("------- END RAW STDOUT -------")
+                
+                if stderr_data:
+                    stderr_text = stderr_data.decode('utf-8', 'ignore')
+                    print("[SEAL] Raw stderr from seal_operations.js:")
+                    print("------- BEGIN RAW STDERR -------")
+                    safe_console_print(stderr_text)
+                    print("------- END RAW STDERR -------")
+                
                 # Extract input and output blocks using the markers
                 input_data = None
                 if '==== SEAL_OPERATION_INPUT_BEGIN ====' in output_text and '==== SEAL_OPERATION_INPUT_END ====' in output_text:

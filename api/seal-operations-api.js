@@ -13,6 +13,31 @@ const execAsync = promisify(exec);
 // Near the beginning of the file add:
 const ENHANCED_LOGGING = process.env.ENHANCED_LOGGING === 'true' || false;
 
+// Add this function early in the file
+function extractSaltFromDocumentId(documentId, allowlistId) {
+  // Remove 0x prefix from allowlist ID if present
+  const cleanAllowlistId = allowlistId?.startsWith('0x') ? allowlistId.substring(2) : allowlistId;
+  
+  // If documentId starts with the allowlistId (without 0x), extract the salt
+  if (documentId && cleanAllowlistId && documentId.startsWith(cleanAllowlistId)) {
+    return documentId.substring(cleanAllowlistId.length);
+  }
+  
+  console.log(`[SEAL-API] WARNING: Could not extract salt from documentId: ${documentId}`);
+  return '';
+}
+
+// Add this helper function
+function safeConsoleLog(message, prefix = "") {
+  try {
+    console.log(`${prefix}${message}`);
+  } catch (error) {
+    // If it fails, try a safer approach
+    console.log(`${prefix}[Content contains characters that cannot be displayed properly]`);
+    console.log(`${prefix}[Content length: ${message.length} characters]`);
+  }
+}
+
 /**
  * Main handler for SEAL API operations
  * This implementation matches the Python encrypt_and_upload.py approach
@@ -114,6 +139,19 @@ module.exports = async (req, res) => {
         timeout: 55000,
         env  // Use the environment without NODE_DEBUG
       });
+      
+      // Log the raw output safely
+      console.log("[SEAL-API] Raw stdout from seal_operations.js:");
+      console.log("------- BEGIN RAW STDOUT -------");
+      safeConsoleLog(stdout.toString('utf8'));
+      console.log("------- END RAW STDOUT -------");
+
+      if (stderr && stderr.length > 0) {
+        console.log("[SEAL-API] Raw stderr from seal_operations.js:");
+        console.log("------- BEGIN RAW STDERR -------");
+        safeConsoleLog(stderr.toString('utf8'));
+        console.log("------- END RAW STDERR -------");
+      }
       
       // Extract input and output sections
       let inputData = null;
@@ -347,6 +385,41 @@ module.exports = async (req, res) => {
       console.log(JSON.stringify(responseData));
       console.log(`RESPONSE_JSON_END`);
       console.log(`Upload completed successfully`);
+      
+      // Ensure we have the document ID and related information correctly extracted
+      if (responseData.success || responseData.documentId) {
+        // Extract salt if not already present
+        if (!responseData.salt && responseData.documentId && responseData.allowlistId) {
+          responseData.salt = extractSaltFromDocumentId(responseData.documentId, responseData.allowlistId);
+          console.log(`[SEAL-API] Extracted salt from document ID: ${responseData.salt}`);
+        }
+        
+        // Make sure document ID is complete (should include allowlistId without 0x prefix + salt)
+        const cleanAllowlistId = responseData.allowlistId?.startsWith('0x') 
+          ? responseData.allowlistId.substring(2) 
+          : responseData.allowlistId;
+          
+        // Validate document ID format
+        if (responseData.documentId && cleanAllowlistId && responseData.salt) {
+          const expectedDocId = `${cleanAllowlistId}${responseData.salt}`;
+          if (responseData.documentId !== expectedDocId) {
+            console.log(`[SEAL-API] WARNING: Document ID format mismatch. Got: ${responseData.documentId}, Expected: ${expectedDocId}`);
+            // Correct the document ID
+            responseData.documentId = expectedDocId;
+            console.log(`[SEAL-API] Corrected document ID to: ${responseData.documentId}`);
+          }
+        }
+      }
+      
+      // Ensure the walrusData includes the salt
+      if (responseData.walrusData && responseData.salt) {
+        responseData.walrusData.salt = responseData.salt;
+        
+        // Also ensure it's in the encryption section if it exists
+        if (responseData.walrusData.encryption) {
+          responseData.walrusData.encryption.salt = responseData.salt;
+        }
+      }
       
       res.status(200).json(responseData);
     } finally {
