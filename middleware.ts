@@ -6,6 +6,26 @@ export function middleware(request: NextRequest) {
   // Get the path
   const path = request.nextUrl.pathname;
 
+  // Define exempted paths that don't require password verification
+  const isPasswordExemptPath = 
+    path === '/api/verify-password' ||
+    path.startsWith('/_next') || 
+    path.includes('favicon') ||
+    path.includes('.svg') ||
+    path.includes('.png') ||
+    path.includes('.jpg') ||
+    path.includes('.ico');
+
+  // Check for site password cookie
+  const hasSitePassword = request.cookies.has('site-password-verified');
+  
+  // Only perform the password check if the request isn't for an exempt path
+  if (!hasSitePassword && !isPasswordExemptPath) {
+    // Instead of redirecting, we'll let the client component handle showing the password modal
+    // This way we avoid redirect loops
+    return NextResponse.next();
+  }
+
   // Define public paths that don't require authentication
   const isPublicPath = path === '/' || 
                        path === '/login' || 

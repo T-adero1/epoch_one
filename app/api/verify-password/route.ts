@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 // Get the site password from environment variables
 // Fallback to a default for development or if not set
@@ -18,7 +19,25 @@ export async function POST(req: NextRequest) {
 
     // Check if the password matches
     if (password === SITE_PASSWORD) {
-      return NextResponse.json({ success: true }, { status: 200 });
+      // Create a response object
+      const response = NextResponse.json(
+        { success: true },
+        { status: 200 }
+      );
+
+      // Set an HTTP-only cookie that can't be accessed by JavaScript
+      // This makes it more secure as it can't be modified through browser dev tools
+      response.cookies.set({
+        name: 'site-password-verified',
+        value: 'true',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 60 * 60 * 24 * 7, // 1 week
+        path: '/',
+        sameSite: 'strict'
+      });
+
+      return response;
     }
 
     // Password doesn't match

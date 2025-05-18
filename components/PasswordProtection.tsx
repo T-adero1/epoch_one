@@ -6,12 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cn } from "@/lib/utils"
+import { setCookie, getCookie } from 'cookies-next'
 
-const PASSWORD = process.env.NEXT_PUBLIC_SITE_PASSWORD
-const PASSWORD_KEY = 'epochone_authenticated'
-
-// Clear any existing authentication on page load
-
+const PASSWORD_COOKIE = 'site-password-verified'
 
 // Custom DialogContent without close button
 function CustomDialogContent({
@@ -37,28 +34,50 @@ function CustomDialogContent({
 
 export function PasswordProtection({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const authenticated = localStorage.getItem(PASSWORD_KEY) === 'true'
-    setIsAuthenticated(authenticated)
-    if (!authenticated) {
+    // Check if the cookie exists
+    const passwordCookie = getCookie(PASSWORD_COOKIE)
+    if (passwordCookie === 'true') {
+      setIsAuthenticated(true)
+    } else {
       setShowDialog(true)
     }
+    setIsLoading(false)
   }, [])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (password === PASSWORD) {
-      localStorage.setItem(PASSWORD_KEY, 'true')
-      setIsAuthenticated(true)
-      setShowDialog(false)
-      setError('')
-    } else {
-      setError('Incorrect password')
+    setError('')
+    
+    try {
+      const response = await fetch('/api/verify-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password }),
+      })
+
+      if (response.ok) {
+        // Set cookie with HTTP-only flag through the API response
+        setIsAuthenticated(true)
+        setShowDialog(false)
+      } else {
+        const data = await response.json()
+        setError(data.message || 'Incorrect password')
+      }
+    } catch (err) {
+      setError('Something went wrong. Please try again.')
     }
+  }
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
 
   if (!isAuthenticated) {
