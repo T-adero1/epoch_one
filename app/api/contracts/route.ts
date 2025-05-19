@@ -30,9 +30,26 @@ export async function GET(request: Request) {
       userId = user.id;
     }
 
+    // Build the where clause to include:
+    // 1. Contracts owned by the user
+    // 2. Contracts where user is a signer
+    // 3. Completed contracts
     const where = {
-      ...(userId && { ownerId: userId }),
-      ...(status && { status: status }),
+      OR: [
+        // User's own contracts
+        { ownerId: userId },
+        // Contracts where user is a signer
+        {
+          metadata: {
+            path: ['signers'],
+            array_contains: userEmail
+          }
+        },
+        // Completed contracts
+        { status: 'COMPLETED' }
+      ],
+      // Apply status filter if provided
+      ...(status && { status: status })
     };
 
     const contracts = await prisma.contract.findMany({

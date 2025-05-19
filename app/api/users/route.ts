@@ -64,13 +64,13 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/users - Create a new user
+// POST /api/users - Create or update a user
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { email, name, walletAddress, googleId } = body;
     
-    log.info('Creating new user', { 
+    log.info('Creating/updating user', { 
       email: email || '',
       name: name || '',
       hasName: Boolean(name),
@@ -94,60 +94,85 @@ export async function POST(request: Request) {
     });
     
     if (existingUser) {
-      log.info('User already exists', { 
+      log.info('Updating existing user', { 
         email: email || '', 
-        userId: existingUser.id || ''
+        userId: existingUser.id || '',
+        updates: {
+          name: name || undefined,
+          walletAddress: walletAddress || undefined,
+          googleId: googleId || undefined
+        }
       });
       
       // Update existing user if new data is provided
-      if (name || walletAddress || googleId) {
-        const updatedUser = await prisma.user.update({
-          where: { email },
-          data: {
-            ...(name && { name }),
-            ...(walletAddress && { walletAddress }),
-            ...(googleId && { googleId })
-          }
-        });
-        
-        log.info('Updated existing user', { 
-          userId: updatedUser.id || '',
-          email: updatedUser.email || '',
-          updatedName: Boolean(name),
-          updatedWalletAddress: Boolean(walletAddress),
-          updatedGoogleId: Boolean(googleId)
-        });
-        
-        return NextResponse.json(updatedUser);
-      }
+      const updatedUser = await prisma.user.update({
+        where: { email },
+        data: {
+          ...(name && { name }),
+          ...(walletAddress && { walletAddress }),
+          ...(googleId && { googleId })
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          walletAddress: true,
+          googleId: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
       
-      return NextResponse.json(existingUser);
+      log.info('Successfully updated user', { 
+        userId: updatedUser.id || '',
+        email: updatedUser.email || '',
+        updatedName: Boolean(name),
+        updatedWalletAddress: Boolean(walletAddress),
+        updatedGoogleId: Boolean(googleId)
+      });
+      
+      return NextResponse.json(updatedUser);
     }
     
     // Create new user
+    log.info('Creating new user', {
+      email,
+      hasName: Boolean(name),
+      hasWalletAddress: Boolean(walletAddress),
+      hasGoogleId: Boolean(googleId)
+    });
+    
     const newUser = await prisma.user.create({
       data: {
         email,
         name,
-        walletAddress,
+        walletAddress: walletAddress || `placeholder-${Date.now()}`,
         googleId
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        walletAddress: true,
+        googleId: true,
+        createdAt: true,
+        updatedAt: true
       }
     });
     
-    log.info('User created successfully', { 
+    log.info('Successfully created new user', { 
       userId: newUser.id || '',
-      email: newUser.email || '',
-      hasGoogleId: Boolean(googleId)
+      email: newUser.email || ''
     });
     
     return NextResponse.json(newUser);
   } catch (error) {
-    log.error('Error creating user', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
+    log.error('Error creating/updating user', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      email: body?.email || ''
     });
     return NextResponse.json(
-      { error: 'Failed to create user' },
+      { error: 'Failed to create/update user' },
       { status: 500 }
     );
   }
