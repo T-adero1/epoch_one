@@ -215,11 +215,27 @@ export default function DashboardPage() {
         },
       });
 
+      // Add the new contract to the list
       setContracts([contract as unknown as ContractWithRelations, ...contracts]);
+      
+      // Close the creation modal
       setIsCreatingContract(false);
+      
+      // Reset the new contract form
       setNewContract({ title: '', description: '', content: '', signers: [''] });
+      
+      // Set the selected contract and open the editor
+      setSelectedContract(contract as unknown as ContractWithRelations);
+      setIsEditingContract(true);
+      
+    
     } catch (error) {
       console.error('Error creating contract:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create contract. Please try again.",
+        variant: "destructive",
+      });
     }
   };
   

@@ -9,13 +9,15 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText, FileSignature } from 'lucide-react'
+import { MoreVertical, FileDown, Pencil, Trash2, Send, FileText, FileSignature, Loader2 } from 'lucide-react'
 import { ContractStatus } from '@prisma/client'
 import { generateContractPDF } from '@/app/utils/pdf'
 import { useToast } from '@/components/ui/use-toast'
 
 import { useRouter } from 'next/navigation'
 import DecryptButton from '@/components/contracts/DecryptButton'
+import { useState, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 
 interface ContractActionsProps {
   contractId: string
@@ -38,6 +40,32 @@ interface ContractActionsProps {
   onSend: () => void
 }
 
+// Create a custom DecryptAction component
+const DecryptAction = forwardRef<{ handleDecrypt: () => Promise<void> }, {
+  isDecrypting: boolean;
+  onDecrypt: () => void;
+}>(({ isDecrypting, onDecrypt }, ref) => {
+  useImperativeHandle(ref, () => ({
+    handleDecrypt: onDecrypt
+  }));
+
+  return (
+    <div className="flex items-center">
+      {isDecrypting ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <span>Decrypting...</span>
+        </>
+      ) : (
+        <>
+          <FileDown className="mr-2 h-4 w-4" />
+          <span>Decrypt and Download</span>
+        </>
+      )}
+    </div>
+  );
+});
+
 export default function ContractActions({ 
   contractId,
   status, 
@@ -49,8 +77,9 @@ export default function ContractActions({
 }: ContractActionsProps) {
   const { toast } = useToast();
   const router = useRouter();
-
-
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptionStep, setDecryptionStep] = useState<string>('idle');
+  const { user } = useZkLogin();
 
   // Extract encryption-related properties
   const blobId = contract?.metadata?.walrus?.storage?.blobId;
@@ -60,6 +89,8 @@ export default function ContractActions({
   // Check if DecryptButton should be shown
   const showDecryptButton = status === 'COMPLETED' && blobId && documentIdHex && allowlistId;
 
+  // Add ref for DecryptButton
+  const decryptButtonRef = useRef<{ handleDecrypt: () => Promise<void> }>(null);
 
   const handleDownloadPDF = async () => {
     try {
@@ -177,6 +208,12 @@ export default function ContractActions({
     router.push(`/sign/${contractId}`);
   };
 
+  const handleDecrypt = async () => {
+    if (decryptButtonRef.current) {
+      await decryptButtonRef.current.handleDecrypt();
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -213,31 +250,38 @@ export default function ContractActions({
           </DropdownMenuItem>
         )}
         
-        <DropdownMenuItem onClick={handleDownloadPDF} className="cursor-pointer">
-          <FileDown className="mr-2 h-4 w-4" />
-          <span>Download as PDF</span>
-        </DropdownMenuItem>
-        
-        <DropdownMenuSeparator />
-        
-        <DropdownMenuItem onClick={onDelete} className="cursor-pointer text-red-600">
-          <Trash2 className="mr-2 h-4 w-4" />
-          <span>Delete</span>
-        </DropdownMenuItem>
+        {status !== ContractStatus.COMPLETED && (
+          <DropdownMenuItem onClick={handleDownloadPDF} className="cursor-pointer">
+            <FileDown className="mr-2 h-4 w-4" />
+            <span>Download as PDF</span>
+          </DropdownMenuItem>
+        )}
         
         {showDecryptButton ? (
-          <DropdownMenuItem>
-            <DecryptButton
-              contractId={contractId}
-              blobId={blobId}
-              documentIdHex={documentIdHex}
-              allowlistId={allowlistId}
-              status={status}
+          <DropdownMenuItem 
+            onClick={handleDecrypt} 
+            className="cursor-pointer"
+            disabled={isDecrypting}
+          >
+            <DecryptAction
+              ref={decryptButtonRef}
+              isDecrypting={isDecrypting}
+              onDecrypt={handleDecrypt}
             />
+            {/* Hidden DecryptButton that we'll call */}
+            <div className="hidden">
+              <DecryptButton
+                ref={decryptButtonRef}
+                contractId={contractId}
+                blobId={blobId}
+                documentIdHex={documentIdHex}
+                allowlistId={allowlistId}
+                status={status}
+              />
+            </div>
           </DropdownMenuItem>
         ) : status === 'COMPLETED' ? (
           <DropdownMenuItem className="text-amber-500">
-            {/* Show diagnostic info when status is COMPLETED but we're missing fields */}
             <span>
               Missing decrypt info: {!blobId ? 'blobId ' : ''}
               {!documentIdHex ? 'documentId ' : ''}
@@ -245,6 +289,13 @@ export default function ContractActions({
             </span>
           </DropdownMenuItem>
         ) : null}
+        
+        <DropdownMenuSeparator />
+        
+        <DropdownMenuItem onClick={onDelete} className="cursor-pointer text-red-600">
+          <Trash2 className="mr-2 h-4 w-4" />
+          <span>Delete</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

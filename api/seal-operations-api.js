@@ -286,8 +286,8 @@ module.exports = async (req, res) => {
           console.error(`Error fetching existing metadata: ${error.message}`);
         }
         
-        // Create metadata update - IDENTICAL format to the one used in Python code
-        const metadataUpdate = {
+        // Create combined update with metadata and individual fields
+        const combinedUpdate = {
           metadata: {
             ...existingMetadata,
             walrus: {
@@ -301,79 +301,45 @@ module.exports = async (req, res) => {
                 allowlistId: walrusData.allowlistId,
                 documentId: walrusData.documentId,
                 capId: walrusData.capId,
-                salt: walrusData.salt  // Add salt here for document ID reconstruction
+                salt: walrusData.salt
               },
               authorizedWallets: walrusData.authorizedWallets || [],
               lastUpdated: new Date().toISOString()
             }
-          }
+          },
+          // Set content to null to remove it from the database
+          content: null
         };
+
+        // Add individual field updates to the same request
+        if (blobId) {
+          combinedUpdate.walrusBlobId = blobId;
+        }
+        if (allowlistId) {
+          combinedUpdate.allowlistId = allowlistId;
+        }
+        if (documentId) {
+          combinedUpdate.documentId = documentId;
+        }
+        if (config.signerAddresses && config.signerAddresses.length > 0) {
+          combinedUpdate.authorizedUsers = config.signerAddresses;
+        }
         
-        console.log(`Sending metadata-only update: ${JSON.stringify(metadataUpdate, null, 2)}`);
-        const metadataResponse = await axios.patch(
+        console.log(`Sending combined update: ${JSON.stringify(combinedUpdate, null, 2)}`);
+        const updateResponse = await axios.patch(
           apiUrl,
-          metadataUpdate,
+          combinedUpdate,
           {
             headers: { 'Content-Type': 'application/json' }
           }
         );
         
-        // Check if metadata update was successful
-        if (metadataResponse.status === 200) {
-          console.log(`Successfully updated metadata. Now trying to update specific columns...`);
-          
-          // Update individual fields - IDENTICAL to Python code
-          const fieldUpdates = [];
-          
-          // Update walrusBlobId separately
-          if (blobId) {
-            try {
-              const blobUpdate = { walrusBlobId: blobId };
-              const blobResponse = await axios.patch(apiUrl, blobUpdate);
-              fieldUpdates.push(`walrusBlobId: ${blobResponse.status}`);
-            } catch (error) {
-              console.error(`Error updating walrusBlobId field: ${error.message}`);
-            }
-          }
-          
-          // Update allowlistId separately
-          if (allowlistId) {
-            try {
-              const allowlistUpdate = { allowlistId: allowlistId };
-              const allowlistResponse = await axios.patch(apiUrl, allowlistUpdate);
-              fieldUpdates.push(`allowlistId: ${allowlistResponse.status}`);
-            } catch (error) {
-              console.error(`Error updating allowlistId field: ${error.message}`);
-            }
-          }
-          
-          // Update documentId separately
-          if (documentId) {
-            try {
-              const docUpdate = { documentId: documentId };
-              const docResponse = await axios.patch(apiUrl, docUpdate);
-              fieldUpdates.push(`documentId: ${docResponse.status}`);
-            } catch (error) {
-              console.error(`Error updating documentId field: ${error.message}`);
-            }
-          }
-          
-          // Update authorizedUsers separately
-          if (config.signerAddresses && config.signerAddresses.length > 0) {
-            try {
-              const authUpdate = { authorizedUsers: config.signerAddresses };
-              const authResponse = await axios.patch(apiUrl, authUpdate);
-              fieldUpdates.push(`authorizedUsers: ${authResponse.status}`);
-            } catch (error) {
-              console.error(`Error updating authorizedUsers field: ${error.message}`);
-            }
-          }
-          
-          console.log(`Individual field update results: ${fieldUpdates.join(', ')}`);
+        if (updateResponse.status === 200) {
+          console.log(`Successfully updated contract data`);
           responseData.databaseUpdated = true;
         } else {
-          console.error(`Failed to update contract metadata via API: ${metadataResponse.status}`);
-          console.error(`Error: ${JSON.stringify(metadataResponse.data)}`);
+          console.error(`Failed to update contract data via API: ${updateResponse.status}`);
+          console.error(`Error: ${JSON.stringify(updateResponse.data)}`);
         }
         
       } catch (dbError) {

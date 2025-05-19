@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, Loader2 } from 'lucide-react';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
@@ -114,13 +114,13 @@ const EPHEMERAL_STORAGE_KEY = "epochone_session";
 // Ephemeral key validity (1 hour in milliseconds)
 const EPHEMERAL_KEY_VALIDITY_MS = 60 * 60 * 1000;
 
-const DecryptButton: React.FC<DecryptButtonProps> = ({
+const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, DecryptButtonProps>(({
   contractId,
   blobId,
   documentIdHex,
   allowlistId,
   status
-}) => {
+}, ref) => {
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptionStep, setDecryptionStep] = useState<string>('idle');
   const { user, zkLoginState } = useZkLogin();
@@ -690,9 +690,10 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
     ephemeralAddress
   });
   
-
-
-
+  // Expose handleDecrypt through ref
+  useImperativeHandle(ref, () => ({
+    handleDecrypt
+  }));
 
   return (
     <div className="flex flex-col gap-2">
@@ -716,18 +717,9 @@ const DecryptButton: React.FC<DecryptButtonProps> = ({
         )}
       </Button>
       
-      
-      
- 
-      
-     
-      
-      
-      
       {renderProgress()}
     </div>
   );
-};
-
+});
 
 export default DecryptButton;
