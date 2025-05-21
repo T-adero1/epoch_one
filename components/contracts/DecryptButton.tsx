@@ -242,25 +242,12 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
     setDecryptionStep('authorizing');
     
     try {
-      // Get admin private key from environment (sponsor)
-      const adminPrivateKeyBech32 = process.env.NEXT_PUBLIC_ADMIN_PRIVATE_KEY;
-      if (!adminPrivateKeyBech32) {
-        throw new Error('Admin private key not available in environment variables');
-      }
-      
-      // Use the same function to decode bech32 private key
-      const adminPrivateKeyBytes = decodeSuiPrivateKey(adminPrivateKeyBech32);
-      const adminKeypair = Ed25519Keypair.fromSecretKey(adminPrivateKeyBytes);
-      
-      const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
-      console.log("[DecryptButton] Admin wallet address (sponsor):", adminAddress);
-      
       // Format docId correctly - ensure no 0x prefix
       const docIdFormatted = docId.startsWith('0x') ? docId.substring(2) : docId;
       
-      // STEP 1: Create transaction with ADMIN ADDRESS as sender
+      // STEP 1: Create transaction with user address as sender
       const tx = new Transaction();
-      tx.setSender(user.address); // User address is the sender for gas payment
+      tx.setSender(user.address);
       
       // Add the Move call
       console.log("[DecryptButton] Adding Move call to authorize ephemeral key:", ephemeralAddress);
@@ -276,42 +263,61 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
         ],
       });
       
-      // STEP 2: Find a gas coin owned by the admin/sponsor
-      console.log("[DecryptButton] Finding gas payment coins for sponsor");
-      const coins = await suiClient.getCoins({
-        owner: adminAddress,
-        coinType: '0x2::sui::SUI',
+      // STEP 2: Build transaction kind bytes (no gas info)
+      const txKindBytes = await tx.build({ 
+        client: suiClient, 
+        onlyTransactionKind: true 
+      });
+      console.log("[DecryptButton] Transaction kind bytes built");
+      
+      // STEP 3: Request sponsorship from server
+      console.log("[DecryptButton] Requesting transaction sponsorship from server");
+      console.log("[DecryptButton] Sponsor request params:", {
+        sender: user.address,
+        allowlistId,
+        ephemeralAddress,
+        documentId: docIdFormatted,
+        validityMs: EPHEMERAL_KEY_VALIDITY_MS
       });
 
-      if (coins.data.length === 0) {
-        throw new Error('Sponsor has no SUI coins to pay for gas');
-      }
+      const sponsorResponse = await fetch('/api/auth/sponsor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: user.address,
+          allowlistId,
+          ephemeralAddress,
+          documentId: docIdFormatted,
+          validityMs: EPHEMERAL_KEY_VALIDITY_MS
+        })
+      });
 
-      // Use the first coin as gas payment
-      const gasCoin = coins.data[0];
+      if (!sponsorResponse.ok) {
+        let errorText;
+        try {
+          const errorJson = await sponsorResponse.json();
+          errorText = JSON.stringify(errorJson);
+        } catch (e) {
+          errorText = await sponsorResponse.text();
+        }
+        console.error("[DecryptButton] Sponsorship failed:", {
+          status: sponsorResponse.status,
+          error: errorText
+        });
+        throw new Error(`Sponsorship failed: ${sponsorResponse.status} ${errorText}`);
+      }
       
-      // STEP 3: Set gas configuration
-      tx.setGasPayment([{
-        objectId: gasCoin.coinObjectId,
-        version: gasCoin.version,
-        digest: gasCoin.digest
-      }]);
-      tx.setGasOwner(adminAddress);
-      tx.setGasBudget(30000000);
+      const { sponsoredTxBytes } = await sponsorResponse.json();
       
-      // STEP 4: Build transaction bytes
-      const txBytes = await tx.build({ client: suiClient });
-      console.log("[DecryptButton] Transaction bytes built with sender:", adminAddress);
+      // STEP 4: Sign the sponsored bytes with ephemeral key
+      console.log("[DecryptButton] Signing sponsored transaction with ephemeral keypair");
+      const txBlock = Transaction.from(fromB64(sponsoredTxBytes));
+      const { signature: userSignature } = await txBlock.sign({
+        client: suiClient,
+        signer: ephemeralKeypair
+      });
       
-      // STEP 5: Sign with ephemeral key
-      console.log("[DecryptButton] Signing transaction with ephemeral keypair...");
-      const { signature: userSignature } = await tx.sign({ client: suiClient, signer: ephemeralKeypair });
-      console.log("[DecryptButton] Ephemeral signature:", 
-        typeof userSignature === 'string' 
-          ? `string (length: ${userSignature.length})` 
-          : `binary (${typeof userSignature})`);
-      
-      // STEP 6: Get session data and create zkLogin signature - USING SAME APPROACH AS TEST
+      // STEP 5: Get session data and create zkLogin signature
       const sessionData = localStorage.getItem(EPHEMERAL_STORAGE_KEY);
       if (!sessionData) {
         throw new Error("No session data found in localStorage");
@@ -324,15 +330,13 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
         throw new Error("Missing zkLogin state, jwt, or proofs in the session");
       }
       
-      // Get salt from current session (match test function approach)
+      // Get salt from current session
       const salt = zkLoginState.salt;
       if (!salt) {
         throw new Error("No salt found in zkLoginState!");
       }
       
-      console.log("[DecryptButton] Using salt from zkLoginState:", salt);
-      
-      // Parse JWT and create address seed (exactly as in test function)
+      // Parse JWT and create address seed
       const jwt = zkLoginState.jwt;
       const jwtBody = JSON.parse(atob(jwt.split('.')[1]));
       const addressSeed = genAddressSeed(
@@ -342,13 +346,7 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
         jwtBody.aud
       ).toString();
       
-      // Verify address matches expected
-      const expectedAddress = jwtToAddress(jwt, salt);
-      console.log("[DecryptButton] Expected address with salt:", expectedAddress);
-      console.log("[DecryptButton] Actual user address:", user.address);
-      console.log("[DecryptButton] Address match:", expectedAddress === user.address);
-      
-      // Create zkLogin signature - USING SAME APPROACH AS TEST
+      // Create zkLogin signature
       console.log("[DecryptButton] Creating zkLogin signature");
       const zkLoginSignature = getZkLoginSignature({
         inputs: {
@@ -359,29 +357,28 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
         userSignature,
       });
       
-      // STEP 7: Sign with admin key (as the sender)
-      console.log("[DecryptButton] Signing transaction with admin/sponsor key...");
-      const { signature: sponsorSignature } = await Transaction.from(txBytes).sign({
-        client: suiClient,
-        signer: adminKeypair,
+      // STEP 6: Send to server for execution
+      console.log("[DecryptButton] Sending to server for execution");
+      const executeResponse = await fetch('/api/auth/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sponsoredTxBytes,
+          zkLoginSignature
+        })
       });
       
-      // STEP 8: Submit transaction with signatures in correct order
-      console.log("[DecryptButton] Submitting transaction with signatures");
-      console.log('[DecryptButton] zkLoginSignature type:', typeof zkLoginSignature);
-      console.log('[DecryptButton] sponsorSignature type:', typeof sponsorSignature);
+      if (!executeResponse.ok) {
+        const errorText = await executeResponse.text();
+        throw new Error(`Execution failed: ${executeResponse.status} ${errorText}`);
+      }
       
-      const result = await suiClient.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature: [zkLoginSignature, sponsorSignature],
-        options: { showEffects: true, showEvents: true }
-      });
-      
-      console.log("[DecryptButton] Transaction executed, digest:", result.digest);
+      const { digest } = await executeResponse.json();
+      console.log("[DecryptButton] Transaction executed, digest:", digest);
       
       // Wait for transaction confirmation
       await suiClient.waitForTransaction({
-        digest: result.digest,
+        digest: digest,
         options: { showEffects: true }
       });
       
@@ -446,12 +443,20 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       // Initialize clients
       console.log("[DecryptButton] Initializing Sui client");
       const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+      // Get key servers and format them correctly with weights
       const keyServerIds = await getAllowlistedKeyServers('testnet');
-      console.log("[DecryptButton] keyServerIds:", keyServerIds);
-      
+      console.log("[DecryptButton] Raw keyServerIds:", keyServerIds);
+
+      // Remove duplicates and format as [id, weight] tuples
+      const uniqueKeyServerIds = [...new Set(keyServerIds)];
+      const formattedServerIds = uniqueKeyServerIds.map(id => [id, 1] as [string, number]);
+      console.log("[DecryptButton] Formatted server IDs:", formattedServerIds);
+
+      // Create SealClient with properly formatted parameters
       const sealClient = new SealClient({
-        suiClient,
-        serverObjectIds: keyServerIds,
+        suiClient: suiClient as any, // Type cast to bypass version mismatch
+        serverObjectIds: formattedServerIds,
         verifyKeyServers: true
       });
       console.log("[DecryptButton] sealClient:", sealClient);
