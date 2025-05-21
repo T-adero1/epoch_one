@@ -447,7 +447,7 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       // Get key servers and format them correctly with weights
       const keyServerIds = await getAllowlistedKeyServers('testnet');
       console.log("[DecryptButton] Raw keyServerIds:", keyServerIds);
-
+      
       // Remove duplicates and format as [id, weight] tuples
       const uniqueKeyServerIds = [...new Set(keyServerIds)];
       const formattedServerIds = uniqueKeyServerIds.map(id => [id, 1] as [string, number]);

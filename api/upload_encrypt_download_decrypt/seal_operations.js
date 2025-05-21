@@ -41,6 +41,9 @@ function logDetail(message, level = 'info') {
  * @param {string} config.sealPackageId - SEAL package ID
  * @param {string} config.allowlistPackageId - Allowlist package ID (optional)
  * @param {string} config.network - Network to use (default: testnet)
+ * @param {boolean} config.preEncrypted - Indicates if the document is pre-encrypted
+ * @param {string} config.documentIdHex - Document ID for decryption
+ * @param {string} config.documentSalt - Document salt for decryption
  * @returns {Promise<Object>} - Result object with allowlistId, capId, blobId, documentIdHex
  */
 async function encryptAndUpload(config) {
@@ -63,11 +66,19 @@ async function encryptAndUpload(config) {
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
   
-  // NEW: Check for base64 content as an alternative to file path
-  if (config.documentContentBase64) {
-    console.log(`- Document Content: Provided as base64 (${config.documentContentBase64.length} chars)`);
+  // NEW: Check if document is pre-encrypted
+  const isPreEncrypted = config.preEncrypted === true;
+  if (isPreEncrypted) {
+    console.log(`- Document is PRE-ENCRYPTED by client`);
+    console.log(`- Document ID: ${config.documentIdHex}`);
+    console.log(`- Document Salt: ${config.documentSalt}`);
   } else {
-    console.log(`- Document Path: ${config.documentPath}`);
+    // Regular logging
+    if (config.documentContentBase64) {
+      console.log(`- Document Content: Provided as base64 (${config.documentContentBase64.length} chars)`);
+    } else {
+      console.log(`- Document Path: ${config.documentPath}`);
+    }
   }
   
   console.log(`- Contract ID: ${config.contractId}`);
@@ -161,22 +172,34 @@ async function encryptAndUpload(config) {
     console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
     
     // STEP 3: Generate document ID using allowlist ID
-    console.log('\n STEP 3: Generating document ID...');
-    const { documentIdHex } = utils.createDocumentId(allowlistId, config.contractId);
-    console.log(`- Document ID: ${documentIdHex}`);
+    let documentIdHex;
+    if (isPreEncrypted && config.documentIdHex) {
+      // If pre-encrypted, use the provided document ID
+      documentIdHex = config.documentIdHex;
+      console.log(`\n STEP 3: Using client-provided document ID: ${documentIdHex}`);
+    } else {
+      // Otherwise, generate a new document ID
+      console.log('\n STEP 3: Generating document ID...');
+      const result = utils.createDocumentId(allowlistId, config.contractId);
+      documentIdHex = result.documentIdHex;
+      console.log(`- Document ID: ${documentIdHex}`);
+    }
     
-    // STEP 4: Encrypt document using the document ID
-    console.log('\n STEP 4: Encrypting document...');
-    const { encryptedBytes } = await seal.encryptDocument(
-      sealClient,
-      documentIdHex,
-      new Uint8Array(fileData)
-    );
-    console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
-    
-    // Log more detailed logging in the encryptDocument function
-    logDetail(`Document encryption result - encrypted size: ${encryptedBytes.length} bytes`, 'debug');
-    logDetail(`Encryption parameters - documentId: ${documentIdHex}, original size: ${fileData.length}`, 'debug');
+    // STEP 4: Encrypt document using the document ID (SKIP if pre-encrypted)
+    let encryptedBytes;
+    if (isPreEncrypted) {
+      console.log('\n STEP 4: SKIPPING encryption - document is already encrypted by client');
+      encryptedBytes = new Uint8Array(fileData); // Just use the provided encrypted data
+    } else {
+      console.log('\n STEP 4: Encrypting document...');
+      const { encryptedBytes: newEncryptedBytes } = await seal.encryptDocument(
+        sealClient,
+        documentIdHex,
+        new Uint8Array(fileData)
+      );
+      encryptedBytes = newEncryptedBytes;
+      console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
+    }
     
     // STEP 5: Upload to Walrus
     console.log('\n STEP 5: Uploading to Walrus...');
@@ -206,7 +229,9 @@ async function encryptAndUpload(config) {
       blobId,
       documentIdHex,
       fileHash,
-      signerAddresses: config.signerAddresses
+      signerAddresses: config.signerAddresses,
+      // Include additional info for pre-encrypted docs
+      preEncrypted: isPreEncrypted
     };
   } catch (error) {
     console.error('\n' + '='.repeat(80));

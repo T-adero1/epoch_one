@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import crypto from 'crypto';
-import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import fs from 'fs/promises';
-import os from 'os';
-import { randomUUID } from 'crypto';
+
 
 // Convert exec to promise-based
 const execAsync = promisify(exec);

@@ -70,7 +70,20 @@ export async function POST(request: NextRequest) {
     const requestFile = path.join(tmpDir, `${randomUUID()}.json`);
     
     // Write request data to temp file
-    fs.writeFileSync(requestFile, JSON.stringify(data));
+    const requestData = { ...data };
+    
+    // Update the handler to include pre-encrypted data
+    if (data.preEncrypted) {
+      // If document is pre-encrypted by client, pass these flags to Python backend
+      requestData.preEncrypted = true;
+      requestData.documentIdHex = data.documentIdHex;
+      requestData.documentSalt = data.documentSalt;
+      
+      console.log("[API Route] Document is pre-encrypted by client");
+      console.log("[API Route] Document ID (hex):", data.documentIdHex);
+    }
+    
+    fs.writeFileSync(requestFile, JSON.stringify(requestData));
     
     // List of possible Python commands
     const pythonCommands = ['python', 'python3', 'py'];
