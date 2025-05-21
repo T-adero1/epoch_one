@@ -808,6 +808,8 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         googleId: jwtPayload.sub || null
       };
       
+      saveUserToDatabase(userData); 
+
       // Update zkLoginState with salt for consistency
       const updatedZkLoginState: ZkLoginState = {
         ...intermediateState,
