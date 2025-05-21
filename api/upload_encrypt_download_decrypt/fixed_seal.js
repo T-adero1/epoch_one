@@ -18,23 +18,32 @@ async function initSealClient(suiClient) {
     // Get allowlisted key servers
     console.log('- Fetching allowlisted key servers...');
     const keyServerIds = await getAllowlistedKeyServers(config.NETWORK);
-    console.log(` Found ${keyServerIds.length} key servers:`);
-    keyServerIds.forEach((id, index) => {
+    
+    // Deduplicate the key server IDs
+    const uniqueKeyServerIds = [...new Set(keyServerIds)];
+    if (uniqueKeyServerIds.length !== keyServerIds.length) {
+      console.log(` Found ${keyServerIds.length} key servers with duplicates`);
+      console.log(` Deduplicated to ${uniqueKeyServerIds.length} unique key servers`);
+    } else {
+      console.log(` Found ${keyServerIds.length} key servers (all unique)`);
+    }
+    
+    uniqueKeyServerIds.forEach((id, index) => {
       console.log(`  ${index + 1}. ${id}`);
     });
     
-    // Create SEAL client
-    console.log('- Creating SEAL client with fetched key servers...');
+    // Create SEAL client with deduplicated key servers
+    console.log('- Creating SEAL client with unique key servers...');
     const client = new SealClient({
       suiClient,
-      serverObjectIds: keyServerIds,
+      serverObjectIds: uniqueKeyServerIds,
       verifyKeyServers: true // true
     });
     
     console.log(' SEAL client initialized successfully');
     return {
       client,
-      keyServerIds
+      keyServerIds: uniqueKeyServerIds
     };
   } catch (error) {
     console.error(` Failed to initialize SEAL client: ${error.message}`);
