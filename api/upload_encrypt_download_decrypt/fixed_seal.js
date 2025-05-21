@@ -13,6 +13,7 @@ const { P } = require('pino');
 async function initSealClient(suiClient) {
   console.log('\n Initializing SEAL client...');
   console.log(`- Network: ${config.NETWORK}`);
+  console.log('- Sui client:', suiClient);
   
   try {
     // Get allowlisted key servers
@@ -36,7 +37,7 @@ async function initSealClient(suiClient) {
     console.log('- Creating SEAL client with unique key servers...');
     const client = new SealClient({
       suiClient,
-      serverObjectIds: uniqueKeyServerIds,
+      serverObjectIds: getAllowlistedKeyServers(config.NETWORK),
       verifyKeyServers: true // true
     });
     
