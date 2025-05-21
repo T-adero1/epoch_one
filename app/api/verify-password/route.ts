@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 
 // Get the site password from environment variables
 // Fallback to a default for development or if not set
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'eslb6ssJ[3a4&9Hg;hK%i4u2vPKI8b.J4M,T]3:|iBk}b70J<';
+const SITE_PASSWORD = process.env.SITE_PASSWORD || '<$*}%|ay*!n{sWo;CT1&{fY+9VQir`Kr4mF,nTo(%Nd0q)/0';
 
 export async function POST(req: NextRequest) {
   try {
