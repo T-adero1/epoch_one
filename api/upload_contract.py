@@ -125,10 +125,20 @@ def process_upload(data):
     pre_encrypted = data.get('preEncrypted', False)
     document_id_hex = data.get('documentIdHex')
     document_salt = data.get('documentSalt')
+    # NEW: Get allowlist ID from client
+    client_allowlist_id = data.get('allowlistId')
+    # Add client_cap_id alongside client_allowlist_id
+    client_cap_id = data.get('capId')
     
     if pre_encrypted:
         print(f"Document is pre-encrypted by client with ID: {document_id_hex}")
-        
+        if client_allowlist_id:
+            print(f"Using client-provided allowlist ID: {client_allowlist_id}")
+            if client_cap_id:
+                print(f"Using client-provided capability ID: {client_cap_id}")
+            else:
+                print("WARNING: Client provided allowlist ID but no capability ID!")
+    
     # Decode the content if it's base64 encoded
     if data.get('isBase64', False):
         try:
@@ -171,10 +181,13 @@ def process_upload(data):
                 'documentContent': base64.b64encode(contract_content).decode('utf-8') if isinstance(contract_content, bytes) else contract_content,
                 'isBase64': True if isinstance(contract_content, bytes) else False,
                 'signerAddresses': signer_addresses,
-                # NEW: Pass pre-encrypted flag and document ID
+                # Pass pre-encrypted flag and document ID
                 'preEncrypted': pre_encrypted,
                 'documentIdHex': document_id_hex,
-                'documentSalt': document_salt
+                'documentSalt': document_salt,
+                # NEW: Pass allowlist ID from client
+                'allowlistId': client_allowlist_id,
+                'capId': client_cap_id
             }
             
             # Process SEAL encryption and upload

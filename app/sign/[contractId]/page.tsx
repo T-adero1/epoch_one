@@ -10,10 +10,9 @@ import SignatureDrawingCanvas from '@/components/contracts/SignatureCanvas'
 import { canUserSignContract, getUserSignatureStatus } from '@/app/utils/signatures'
 import { format } from 'date-fns'
 import { SignZkLoginModal } from '@/components/SignZkLoginModal'
-import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal'
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
-import { Transaction } from '@mysten/sui/transactions'
-import { fromHEX, toHEX } from '@mysten/sui/utils'
+
+import { randomBytes } from 'crypto'
+import ClientSideEncryptor from '@/components/contracts/ClientSideEncryptor'
 
 // Define a proper interface for the contract object used in this component
 interface ContractDetail {
@@ -87,9 +86,41 @@ function generateContractDocument(contractData: ContractDetail): string {
   return base64Content;
 }
 
-// Add these constants at the top of your file
-const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-const NETWORK = 'testnet';
+
+// Add this helper function somewhere before your component or in a utils file
+function createClientDocumentId(contractId: string): { documentIdHex: string; documentSalt: string } {
+  console.log('[ContractSigning] Generating secure document ID');
+  
+  try {
+    // Generate a random salt (5 bytes, same as server implementation)
+    const salt = randomBytes(5);
+    console.log(`[ContractSigning] Generated salt: ${Buffer.from(salt).toString('hex')}`);
+    
+    // Create a deterministic base from contractId
+    const contractIdBytes = Buffer.from(contractId);
+    console.log(`[ContractSigning] Contract ID bytes length: ${contractIdBytes.length}`);
+    
+    // Combine into a single ID (contractIdBytes + salt)
+    const fullIdBytes = Buffer.concat([contractIdBytes, salt]);
+    console.log(`[ContractSigning] Combined ID length: ${fullIdBytes.length} bytes`);
+    
+    // Convert to hex representation for use with SEAL
+    const documentIdHex = Buffer.from(fullIdBytes).toString('hex');
+    const saltHex = Buffer.from(salt).toString('hex');
+    
+    console.log(`[ContractSigning] Document ID generated successfully`);
+    console.log(`[ContractSigning] Document ID (hex): ${documentIdHex}`);
+    console.log(`[ContractSigning] Salt (hex): ${saltHex}`);
+    
+    return { documentIdHex, documentSalt: saltHex };
+  } catch (err) {
+    console.error('[ContractSigning] Error generating document ID:', err);
+    // Fallback to simple hex encoding of contractId
+    const fallbackId = Buffer.from(contractId).toString('hex');
+    console.log('[ContractSigning] Using fallback document ID:', fallbackId);
+    return { documentIdHex: fallbackId, documentSalt: fallbackId };
+  }
+}
 
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
@@ -105,6 +136,12 @@ export default function ContractSigningPage() {
   const [signatureStatus, setSignatureStatus] = useState<'SIGNED' | 'PENDING' | 'NOT_REQUIRED'>('NOT_REQUIRED')
   const [showLoginModal, setShowLoginModal] = useState(false)
   const [requiredEmail, setRequiredEmail] = useState<string | null>(null)
+  const [showEncryptor, setShowEncryptor] = useState(false)
+  const [encryptionData, setEncryptionData] = useState<{
+    documentBase64: string;
+    signerAddresses: string[];
+    signerEmails: string[];
+  } | null>(null)
   
   // Fetch just enough contract info to get the required signer email
   const fetchContractBasicInfo = useCallback(async () => {
@@ -348,197 +385,102 @@ export default function ContractSigningPage() {
       }
       
       // If contract is now COMPLETED and user is the owner, encrypt and upload to Walrus
+      console.log('[ContractSigning] Checking if contract needs encryption:', {
+        status: updatedContract.status,
+        isCompleted: updatedContract.status === 'COMPLETED',
+        ownerEmail: updatedContract.owner?.email,
+        userEmail: user.email,
+        isOwner: updatedContract.owner?.email === user.email
+      });
+
       if (updatedContract.status === 'COMPLETED' && updatedContract.owner?.email === user.email) {
-        console.log('[ContractSigning] Contract COMPLETED and current user is owner, proceeding with client-side encryption');
+        console.log('[ContractSigning] Contract COMPLETED and current user is owner, preparing encryption');
         
         try {
           // Prepare document data
           console.log('[ContractSigning] Preparing document for client-side encryption');
-          console.log('[ContractSigning] Document base64 length:', documentBase64.length);
-          
-          // Get signer emails
-          const signerEmails = updatedContract?.metadata?.signers || [];
+          const documentBase64 = generateContractDocument(updatedContract);
+          console.log('[ContractSigning] Document generated:', {
+            base64Length: documentBase64.length,
+            firstBytes: documentBase64.substring(0, 50) + '...',
+            contractId: updatedContract.id
+          });
           
           // Extract the signer email (other than current user)
+          const signerEmails = updatedContract?.metadata?.signers || [];
+          console.log('[ContractSigning] Found signer emails:', signerEmails);
           const signerEmail = signerEmails.find((email: string) => email !== user.email) || '';
-          console.log('[ContractSigning] Signer email found:', signerEmail);
+          console.log('[ContractSigning] Selected signer email:', signerEmail);
           
-          // Fetch signer wallet address from user API
+          // Initialize signerWalletAddress
           let signerWalletAddress = null;
+          
+          // Fetch signer wallet address
           if (signerEmail) {
             try {
               console.log('[ContractSigning] Fetching wallet address for signer:', signerEmail);
-              const userResponse = await fetch(`/api/users?email=${encodeURIComponent(signerEmail)}`);
+              const userApiUrl = `/api/users?email=${encodeURIComponent(signerEmail)}`;
+              console.log('[ContractSigning] User API URL:', userApiUrl);
+              const userResponse = await fetch(userApiUrl);
+              console.log('[ContractSigning] User API response:', {
+                status: userResponse.status,
+                ok: userResponse.ok
+              });
               
               if (userResponse.ok) {
                 const userData = await userResponse.json();
+                console.log('[ContractSigning] User data received:', {
+                  hasWalletAddress: !!userData.walletAddress,
+                  walletAddressPrefix: userData.walletAddress ? userData.walletAddress.substring(0, 10) : 'none'
+                });
                 signerWalletAddress = userData.walletAddress || null;
-                console.log('[ContractSigning] Signer wallet address found:', 
-                  signerWalletAddress ? `${signerWalletAddress.substring(0, 10)}...` : 'none');
               } else {
-                console.error('[ContractSigning] Failed to fetch signer user data:', userResponse.status);
+                console.error('[ContractSigning] Failed to fetch signer user data:', {
+                  status: userResponse.status,
+                  statusText: userResponse.statusText
+                });
               }
             } catch (err) {
-              console.error('[ContractSigning] Error fetching signer wallet address:', err);
+              console.error('[ContractSigning] Error fetching signer wallet address:', {
+                error: err,
+                message: err instanceof Error ? err.message : 'Unknown error'
+              });
             }
           }
           
           // Now you can safely create the signerAddresses array
           const signerAddresses = [userAddress, signerWalletAddress].filter(Boolean);
+          console.log('[ContractSigning] Prepared signer addresses:', {
+            count: signerAddresses.length,
+            addresses: signerAddresses.map(addr => addr?.substring(0, 10) + '...')
+          });
           
-          if (signerAddresses.length === 0) {
+          if (signerAddresses.length > 0) {
+            console.log('[ContractSigning] Setting encryption data with:', {
+              documentBase64Length: documentBase64.length,
+              signerAddressCount: signerAddresses.length,
+              signerEmailCount: signerEmails.length
+            });
+            
+            // Set the encryption data state
+            setEncryptionData({
+              documentBase64,
+              signerAddresses,
+              signerEmails
+            });
+            
+            console.log('[ContractSigning] Showing encryptor component');
+            // Set the flag to show the encryptor component
+            setShowEncryptor(true);
+          } else {
             throw new Error('No signer addresses available for encryption');
           }
-          
-          console.log('[ContractSigning] Client-side encryption with signer addresses:', signerAddresses);
-          
-          // STEP 1: Initialize Sui client
-          console.log('[ContractSigning] Initializing Sui client');
-          const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
-          
-          // STEP 2: Initialize SEAL client
-          console.log('[ContractSigning] Initializing SEAL client');
-          const keyServerIds = await getAllowlistedKeyServers(NETWORK);
-          console.log(`[ContractSigning] Found ${keyServerIds.length} key servers`);
-          
-          const sealClient = new SealClient({
-            suiClient: suiClient as any,
-            serverObjectIds: keyServerIds.map(id => [id, 1]), // Format as [string, number][] as required
-            verifyKeyServers: true
+        } catch (encryptionErr) {
+          console.error('[ContractSigning] Error preparing encryption:', {
+            error: encryptionErr,
+            message: encryptionErr instanceof Error ? encryptionErr.message : 'Unknown error',
+            stack: encryptionErr instanceof Error ? encryptionErr.stack : 'No stack trace'
           });
-          
-          // STEP 3: Generate document ID
-          console.log('[ContractSigning] Generating document ID');
-          // If you want a deterministic ID based on signers (similar to fixed_utils.js)
-          const documentSalt = toHEX(new TextEncoder().encode(contractId.substring(0, 16)));
-          const documentIdHex = documentSalt;
-          console.log('[ContractSigning] Document ID (hex):', documentIdHex);
-          
-          // STEP 4: Decrypt base64 content to bytes
-          console.log('[ContractSigning] Decoding base64 content to bytes');
-          const documentBytes = new Uint8Array(Buffer.from(documentBase64, 'base64'));
-          console.log('[ContractSigning] Document bytes size:', documentBytes.length);
-          
-          // STEP 5: Encrypt document
-          console.log('[ContractSigning] Encrypting document client-side');
-          const { encryptedObject: encryptedBytes } = await sealClient.encrypt({
-            threshold: 1,
-            packageId: SEAL_PACKAGE_ID,
-            id: documentIdHex,
-            data: documentBytes
-          });
-          console.log('[ContractSigning] Document encrypted successfully');
-          console.log('[ContractSigning] Encrypted data size:', encryptedBytes.length);
-          
-          // STEP 6: Encode encrypted data to base64 for transmission
-          const encryptedBase64 = Buffer.from(encryptedBytes).toString('base64');
-          console.log('[ContractSigning] Encoded encrypted data to base64, length:', encryptedBase64.length);
-          
-          // STEP 7: Send encrypted document to server
-          console.log('[ContractSigning] Sending encrypted document to server');
-          
-          // Add more debugging to help diagnose the issue
-          console.log("[ContractSigning] NODE_ENV:", process.env.NODE_ENV);
-          const isDevelopment = process.env.NODE_ENV === 'development';
-          console.log("[ContractSigning] isDevelopment:", isDevelopment);
-          const apiEndpoint = isDevelopment ? '/api/python_direct' : '/api/upload_contract';
-          console.log("[ContractSigning] Using API endpoint:", apiEndpoint);
-          
-          const walrusUploadResponse = await fetch(apiEndpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              contractId: contractId,
-              contractContent: encryptedBase64,
-              isBase64: true,
-              context: 'testnet',
-              deletable: false,
-              signerAddresses: signerAddresses,
-              metadata: {
-                signers: signerEmails,
-                creator: updatedContract.owner?.email || user.email
-              },
-              // Important: Tell server the content is already encrypted
-              preEncrypted: true,
-              documentIdHex: documentIdHex,
-              documentSalt: documentSalt,
-              // Still enable SEAL for server-side blockchain operations
-              useSeal: true
-            })
-          });
-          
-          console.log('[ContractSigning] Walrus upload API response received:', {
-            status: walrusUploadResponse.status,
-            ok: walrusUploadResponse.ok,
-            statusText: walrusUploadResponse.statusText,
-            headers: Object.fromEntries([...walrusUploadResponse.headers.entries()]),
-          });
-          
-          if (!walrusUploadResponse.ok) {
-            console.error('[ContractSigning] Walrus upload failed with status:', walrusUploadResponse.status);
-            try {
-              const contentType = walrusUploadResponse.headers.get('content-type') || '';
-              if (contentType.includes('application/json')) {
-                const errorJson = await walrusUploadResponse.json();
-                console.error('[ContractSigning] Walrus upload error JSON details:', errorJson);
-              } else {
-                const errorText = await walrusUploadResponse.text();
-                console.error('[ContractSigning] Walrus upload error details:', errorText);
-              }
-              
-              // Try to diagnose the 404 issue
-              if (walrusUploadResponse.status === 404) {
-                console.error('[ContractSigning] 404 Not Found error detected. Possible causes:');
-                console.error(' - The API route /api/upload_contract does not exist');
-                console.error(' - There may be a mismatch between the Next.js API route and the Python script');
-                console.error(' - The development server might not be properly configured');
-                console.error(' - Check if api/upload_contract.py exists in the right location');
-              }
-            } catch (responseError) {
-              console.error('[ContractSigning] Could not parse error response:', responseError);
-            }
-            // Don't throw error here - contract is still signed, just not uploaded to Walrus
-          } else {
-            const walrusData = await walrusUploadResponse.json()
-            console.log('[ContractSigning] ✅ Contract successfully uploaded to Walrus:', walrusData);
-            console.log('[ContractSigning] Walrus response keys:', Object.keys(walrusData));
-            
-            if (walrusData.walrusResponse) {
-              console.log('[ContractSigning] Walrus raw response analysis:');
-              console.log('[ContractSigning] - Keys in response:', Object.keys(walrusData.walrusResponse));
-              
-              // If there's a blob ID in the response, log it
-              const blobId = walrusData.walrusResponse.newlyCreated?.blobObject?.blobId || 
-                            walrusData.walrusResponse.alreadyCertified?.blobId;
-              
-              if (blobId) {
-                console.log('[ContractSigning] 🎉 Contract permanently stored on Walrus with blob ID:', blobId);
-              }
-            }
-            
-            // Store this data in your database using an API route
-            if (walrusData.blobId) {
-              console.log('[ContractSigning] Document stored with blob ID:', walrusData.blobId);
-              console.log('[ContractSigning] Full Walrus data:', {
-                blobId: walrusData.blobId,
-                allowlistId: walrusData.allowlistId,
-                documentId: walrusData.documentId,
-                capId: walrusData.capId
-              });
-              
-              
-            }
-          }
-        } catch (walrusErr: any) {
-          console.error('[ContractSigning] Exception during Walrus upload:', walrusErr);
-          console.error('[ContractSigning] Error details:', {
-            name: walrusErr.name,
-            message: walrusErr.message,
-            stack: walrusErr.stack
-          });
-          // Don't throw error - contract is still signed, just not uploaded to Walrus
         }
       } else {
         console.log('[ContractSigning] Skipping Walrus upload:', {
@@ -546,7 +488,8 @@ export default function ContractSigningPage() {
           isCompleted: updatedContract.status === 'COMPLETED',
           ownerEmail: updatedContract.owner?.email,
           currentUserEmail: user.email,
-          isOwner: updatedContract.owner?.email === user.email
+          isOwner: updatedContract.owner?.email === user.email,
+          metadata: updatedContract.metadata
         });
       }
       
@@ -555,7 +498,9 @@ export default function ContractSigningPage() {
       console.error('[ContractSigning] Exception in signing process:', {
         error: err,
         message: err.message,
-        stack: err.stack
+        stack: err.stack,
+        type: err.constructor.name,
+        data: err.data
       });
       setError(errorMsg)
     } finally {
@@ -795,6 +740,27 @@ export default function ContractSigningPage() {
                     You have successfully signed this contract.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {showEncryptor && encryptionData && (
+              <div className="border rounded-md p-6 bg-blue-50 mt-4">
+                <h3 className="text-lg font-medium mb-4">Encrypt Document</h3>
+                <p className="mb-4">Your contract has been signed. You can now encrypt it for secure storage.</p>
+                
+                <ClientSideEncryptor
+                  contractId={contractId}
+                  documentContent={encryptionData.documentBase64}
+                  signerAddresses={encryptionData.signerAddresses}
+                  signerEmails={encryptionData.signerEmails}
+                  onSuccess={(data) => {
+                    console.log('[ContractSigning] Encryption successful:', data);
+                    setShowEncryptor(false);
+                  }}
+                  onError={(err) => {
+                    console.error('[ContractSigning] Encryption error:', err);
+                  }}
+                />
               </div>
             )}
           </div>

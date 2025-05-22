@@ -312,6 +312,9 @@ async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, 
       ]
     });
     
+    // IMPORTANT: Manually set gas budget instead of using dry run
+    tx.setGasBudget(30000000); // Set a high enough gas budget (30M)
+    
     // Build the transaction
     console.log('- Building transaction...');
     const txBytes = await tx.build({ client });

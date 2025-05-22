@@ -35,7 +35,7 @@ const walrus = require('./fixed_walrus');
 const seal = require('./fixed_seal');
 
 // Hard-coded PDF file path
-const PDF_FILE_PATH = path.join(__dirname, 'twetst_contract.pdf');
+const PDF_FILE_PATH = path.join(__dirname, 'archpoint.pdf');
 
 // Create test directory if it doesn't exist
 utils.ensureDirectoryExists(config.TEMP_DIR);
