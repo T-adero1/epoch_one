@@ -18,23 +18,95 @@ async function initSealClient(suiClient) {
     // Get allowlisted key servers
     console.log('- Fetching allowlisted key servers...');
     const keyServerIds = await getAllowlistedKeyServers(config.NETWORK);
-    console.log(` Found ${keyServerIds.length} key servers:`);
-    keyServerIds.forEach((id, index) => {
+    
+    // Deduplicate the key server IDs
+    const uniqueKeyServerIds = [...new Set(keyServerIds)];
+    console.log(` Found ${uniqueKeyServerIds.length} unique key servers`);
+    
+    uniqueKeyServerIds.forEach((id, index) => {
       console.log(`  ${index + 1}. ${id}`);
     });
     
-    // Create SEAL client
-    console.log('- Creating SEAL client with fetched key servers...');
-    const client = new SealClient({
-      suiClient,
-      serverObjectIds: keyServerIds,
-      verifyKeyServers: true // true
-    });
+    // Detect environment - production environments typically set this
+    const isProdLike = process.env.NODE_ENV === 'production' || process.env.VERCEL;
+    console.log(`- Detected environment: ${isProdLike ? 'production-like' : 'development-like'}`);
     
-    console.log(' SEAL client initialized successfully');
+    let client = null;
+    let error = null;
+    
+    // Try different initialization strategies based on environment
+    if (isProdLike) {
+      console.log('- Using production-compatible format first [id, 1] pairs');
+      try {
+        // Format for production: [id, 1] pairs for Map constructor
+        const formattedServerIds = uniqueKeyServerIds.map(id => [id, 1]);
+        client = new SealClient({
+          suiClient,
+          serverObjectIds: formattedServerIds,
+          verifyKeyServers: true
+        });
+        console.log(' SEAL client initialized successfully with production format');
+      } catch (e) {
+        console.log(` Production format failed, will try alternative formats: ${e.message}`);
+        error = e;
+      }
+    }
+    
+    // If production format failed or we're in dev, try local format
+    if (!client) {
+      try {
+        console.log('- Trying local format (array of IDs)');
+        client = new SealClient({
+          suiClient,
+          serverObjectIds: uniqueKeyServerIds,
+          verifyKeyServers: true
+        });
+        console.log(' SEAL client initialized successfully with local format');
+      } catch (e) {
+        console.log(` Local format failed: ${e.message}`);
+        error = e || error;
+      }
+    }
+    
+    // Last resort: try with just single server ID
+    if (!client) {
+      try {
+        if (uniqueKeyServerIds.length > 0) {
+          console.log('- Trying fallback with single server ID');
+          const singleServerId = uniqueKeyServerIds[0];
+          
+          // Try production format with single ID
+          try {
+            client = new SealClient({
+              suiClient,
+              serverObjectIds: [[singleServerId, 1]],
+              verifyKeyServers: true
+            });
+            console.log(' SEAL client initialized successfully with single server (production format)');
+          } catch (e) {
+            // Try local format with single ID
+            client = new SealClient({
+              suiClient,
+              serverObjectIds: [singleServerId],
+              verifyKeyServers: true
+            });
+            console.log(' SEAL client initialized successfully with single server (local format)');
+          }
+        }
+      } catch (e) {
+        console.log(` All initialization attempts failed: ${e.message}`);
+        error = e || error;
+      }
+    }
+    
+    // If all attempts failed, throw the last error
+    if (!client) {
+      throw error || new Error('Failed to initialize SEAL client with any format');
+    }
+    
     return {
       client,
-      keyServerIds
+      keyServerIds: uniqueKeyServerIds
     };
   } catch (error) {
     console.error(` Failed to initialize SEAL client: ${error.message}`);

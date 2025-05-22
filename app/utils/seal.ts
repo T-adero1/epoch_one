@@ -43,11 +43,6 @@ interface ContractMetadata {
   [key: string]: unknown;
 }
 
-// Type for request metadata that includes signers
-interface RequestMetadata {
-  signers: string[];
-  [key: string]: unknown;
-}
 
 /**
  * Checks if a contract is encrypted with SEAL
