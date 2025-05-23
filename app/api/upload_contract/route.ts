@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import crypto from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 
+// Convert exec to promise-based
+const execAsync = promisify(exec);
 
+// Helper functions for Walrus integration
+function getPublisherEndpoint(network: string): string {
+  if (network === 'mainnet') {
+    return 'https://publisher.walrus-mainnet.walrus.space';
+  } else {
+    // Use most reliable testnet endpoints
+    return 'https://publisher.walrus-testnet.walrus.space';
+  }
+}
 
 /**
  * Fetch wallet addresses for contract signers
@@ -72,6 +85,86 @@ async function fetchWalletAddresses(contractId: string, signerEmails?: string[])
   }
 }
 
+/**
+ * Upload a document directly to Walrus using HTTP API (no Python)
+ */
+async function uploadToWalrusDirectly(content: Buffer, options: { epochs?: number; deletable?: boolean } = {}): Promise<string> {
+  console.log('[API Route] Starting direct HTTP upload to Walrus');
+  const epochs = options.epochs || 2;
+  const deletable = options.deletable || false;
+  
+  console.log(`[API Route] - Content size: ${content.length} bytes`);
+  console.log(`[API Route] - Epochs: ${epochs}`);
+  console.log(`[API Route] - Deletable: ${deletable}`);
+      
+  // Calculate content hash for verification
+  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  console.log(`[API Route] - Content SHA-256 hash: ${hash}`);
+  
+  // Determine the correct Walrus endpoint based on network
+  const network = process.env.NETWORK || 'testnet';
+  const publisherUrl = getPublisherEndpoint(network);
+  
+  const uploadUrl = `${publisherUrl}/v1/blobs`;
+  console.log(`[API Route] - Target URL: ${uploadUrl}`);
+  
+  try {
+    // Prepare request parameters
+    const params = {
+      epochs: epochs,
+      deletable: deletable ? 'true' : 'false'
+    };
+    
+    const headers = {
+      'Content-Type': 'application/octet-stream'
+    };
+    
+    console.log(`[API Route] - Starting HTTP PUT request to ${uploadUrl}`);
+    
+    const startTime = Date.now();
+    const response = await axios.put(uploadUrl, content, { 
+      params,
+      headers,
+      responseType: 'json'
+    });
+    
+    const requestDuration = (Date.now() - startTime) / 1000;
+    console.log(`[API Route] - PUT request completed in ${requestDuration.toFixed(2)} seconds`);
+    console.log(`[API Route] - Response status: ${response.status}`);
+    
+    if (response.status !== 200) {
+      throw new Error(`Upload failed with status: ${response.status}`);
+    }
+    
+    // Extract blob ID from the response
+    const responseData = response.data;
+    let blobId = null;
+    
+    if (responseData.alreadyCertified) {
+      blobId = responseData.alreadyCertified.blobId;
+      console.log(`[API Route] - Blob was already certified with ID: ${blobId}`);
+    } else if (responseData.newlyCreated && responseData.newlyCreated.blobObject) {
+      blobId = responseData.newlyCreated.blobObject.blobId;
+      console.log(`[API Route] - New blob created with ID: ${blobId}`);
+      console.log(`[API Route] - Blob size: ${responseData.newlyCreated.blobObject.size} bytes`);
+    }
+    
+    if (!blobId) {
+      throw new Error(`Could not extract blob ID from response: ${JSON.stringify(responseData)}`);
+    }
+    
+    console.log(`[API Route] - SUCCESS! Document uploaded with blob ID: ${blobId}`);
+    
+    return blobId;
+  } catch (error: any) {
+    console.error(`[API Route] - ERROR DURING UPLOAD: ${error.message}`);
+    if (error.response) {
+      console.error(`[API Route] - Response data:`, error.response.data);
+      console.error(`[API Route] - Response status: ${error.response.status}`);
+    }
+    throw error;
+  }
+}
 
 /**
  * Process the upload request using SEAL encryption
@@ -177,18 +270,28 @@ export async function POST(request: NextRequest) {
       allowlistPackageId: process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID,
       network: process.env.NETWORK || "testnet",
       
-      // ADD THESE: Pre-encrypted flags
-      preEncrypted: preEncrypted,
-      documentIdHex: documentIdHex,
-      documentSalt: documentSalt,
-      allowlistId: clientAllowlistId,
-      capId: clientCapId,
+      // NEW: Forward pre-encrypted flags from client
+      preEncrypted: data.preEncrypted || false,
+      documentIdHex: data.documentIdHex,
+      documentSalt: data.documentSalt,
+      allowlistId: data.allowlistId,
+      capId: data.capId,
       
-      // ADD THESE: Skip flags for consistency
-      skipAllowlistCreation: preEncrypted && clientAllowlistId,
-      skipDocumentIdGeneration: preEncrypted && documentIdHex,
-      useExistingAllowlist: clientAllowlistId,
-      useExistingDocumentId: documentIdHex
+      // NEW: Set skip flags to prevent double processing
+      skipAllowlistCreation: data.preEncrypted && data.allowlistId,
+      skipDocumentIdGeneration: data.preEncrypted && data.documentIdHex,
+      useExistingAllowlist: data.allowlistId,
+      useExistingDocumentId: data.documentIdHex,
+      
+      // NEW: Options for backward compatibility
+      options: {
+        publicKeys: signerAddresses,
+        verbose: true,
+        skipCreateAllowlist: data.preEncrypted && data.allowlistId,
+        skipGenerateDocumentId: data.preEncrypted && data.documentIdHex,
+        existingAllowlistId: data.allowlistId,
+        existingDocumentId: data.documentIdHex
+      }
     };
     
     console.log('[API Route] Created SEAL configuration:', {
