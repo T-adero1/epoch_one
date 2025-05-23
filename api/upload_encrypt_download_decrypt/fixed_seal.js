@@ -17,96 +17,44 @@ async function initSealClient(suiClient) {
   try {
     // Get allowlisted key servers
     console.log('- Fetching allowlisted key servers...');
-    const keyServerIds = await getAllowlistedKeyServers(config.NETWORK);
+    let keyServerString = await getAllowlistedKeyServers(config.NETWORK);
+    console.log(`- Key server IDs (raw): ${keyServerString}`);
     
-    // Deduplicate the key server IDs
-    const uniqueKeyServerIds = [...new Set(keyServerIds)];
-    console.log(` Found ${uniqueKeyServerIds.length} unique key servers`);
+    // Parse the key server string properly
+    let formattedServerIds = [];
     
-    uniqueKeyServerIds.forEach((id, index) => {
-      console.log(`  ${index + 1}. ${id}`);
+    // If it's a string, parse it
+    if (typeof keyServerString === 'string') {
+      // Split by comma to get individual server entries
+      const serverEntries = keyServerString.split(',').map(e => e.trim());
+      console.log(`- Split server entries: ${JSON.stringify(serverEntries)}`);
+      
+      // Convert to proper [id, weight] format
+      formattedServerIds = serverEntries.map(entry => {
+        return [entry, 1]; // Use weight 1 for each server
+      });
+    } 
+    // If it's already an array
+    else if (Array.isArray(keyServerString)) {
+      formattedServerIds = keyServerString.map(entry => {
+        return [entry, 1]; // Use weight 1 for each server
+      });
+    }
+    
+    console.log(`- Formatted server IDs: ${JSON.stringify(formattedServerIds)}`);
+    
+    // Create client with correctly formatted server IDs
+    const client = new SealClient({
+      suiClient,
+      serverObjectIds: formattedServerIds,
+      verifyKeyServers: true
     });
     
-    // Detect environment - production environments typically set this
-    const isProdLike = process.env.NODE_ENV === 'production' || process.env.VERCEL;
-    console.log(`- Detected environment: ${isProdLike ? 'production-like' : 'development-like'}`);
-    
-    let client = null;
-    let error = null;
-    
-    // Try different initialization strategies based on environment
-    if (isProdLike) {
-      console.log('- Using production-compatible format first [id, 1] pairs');
-      try {
-        // Format for production: [id, 1] pairs for Map constructor
-        const formattedServerIds = uniqueKeyServerIds.map(id => [id, 1]);
-        client = new SealClient({
-          suiClient,
-          serverObjectIds: formattedServerIds,
-          verifyKeyServers: false
-        });
-        console.log(' SEAL client initialized successfully with production format');
-      } catch (e) {
-        console.log(` Production format failed, will try alternative formats: ${e.message}`);
-        error = e;
-      }
-    }
-    
-    // If production format failed or we're in dev, try local format
-    if (!client) {
-      try {
-        console.log('- Trying local format (array of IDs)');
-        client = new SealClient({
-          suiClient,
-          serverObjectIds: uniqueKeyServerIds,
-          verifyKeyServers: false
-        });
-        console.log(' SEAL client initialized successfully with local format');
-      } catch (e) {
-        console.log(` Local format failed: ${e.message}`);
-        error = e || error;
-      }
-    }
-    
-    // Last resort: try with just single server ID
-    if (!client) {
-      try {
-        if (uniqueKeyServerIds.length > 0) {
-          console.log('- Trying fallback with single server ID');
-          const singleServerId = uniqueKeyServerIds[0];
-          
-          // Try production format with single ID
-          try {
-            client = new SealClient({
-              suiClient,
-              serverObjectIds: [[singleServerId, 1]],
-              verifyKeyServers: false
-            });
-            console.log(' SEAL client initialized successfully with single server (production format)');
-          } catch (e) {
-            // Try local format with single ID
-            client = new SealClient({
-              suiClient,
-              serverObjectIds: [singleServerId],
-              verifyKeyServers: false
-            });
-            console.log(' SEAL client initialized successfully with single server (local format)');
-          }
-        }
-      } catch (e) {
-        console.log(` All initialization attempts failed: ${e.message}`);
-        error = e || error;
-      }
-    }
-    
-    // If all attempts failed, throw the last error
-    if (!client) {
-      throw error || new Error('Failed to initialize SEAL client with any format');
-    }
+    console.log(' SEAL client initialized successfully');
     
     return {
       client,
-      keyServerIds: uniqueKeyServerIds
+      keyServerIds: formattedServerIds.map(pair => pair[0]) // Just the IDs
     };
   } catch (error) {
     console.error(` Failed to initialize SEAL client: ${error.message}`);
@@ -133,12 +81,7 @@ async function createSessionKey(keypair, packageId) {
       ttlMin: config.DEFAULT_TTL_MINUTES
     });
     
-    // Add detailed logging about the session key
-    console.log('- SESSION KEY DETAILS:');
-    console.log(`  - Original address: ${userAddress}`);
-    console.log(`  - Session key address: ${sessionKey.address || 'undefined'}`);
-    console.log(`  - Keys:`, Object.keys(sessionKey));
-    console.log(`  - Properties:`, Object.getOwnPropertyNames(sessionKey));
+    console.log('sessionKey', sessionKey);
     
     // Get personal message to sign
     const personalMessage = sessionKey.getPersonalMessage();
@@ -206,7 +149,7 @@ async function encryptDocument(sealClient, documentIdHex, data) {
     // Encrypt the document
     console.log('- Performing encryption with SEAL...');
     const { encryptedObject: encryptedBytes, key: backupKey } = await sealClient.encrypt({
-      threshold: 1,
+      threshold: 2,
       packageId: config.SEAL_PACKAGE_ID,
       id: documentIdHex,
       data
@@ -295,18 +238,19 @@ async function approveAndFetchKeys(suiClient, sealClient, sessionKey, allowlistI
     console.log('  - Fetch keys parameters:');
     console.log(`    - ID: ${rawId}`);
     console.log(`    - txBytes length: ${txKindBytes.length}`);
-    console.log(`    - Using threshold: 1`);
+    console.log(`    - Using threshold: 2`);
     
     try {
       await sealClient.fetchKeys({
         ids: [rawId],
         txBytes: txKindBytes,
         sessionKey,
-        threshold: 1  // Only require 1 key server response
+        threshold: 2  // Only require 1 key server response
       });
       
       console.log(' Keys fetched successfully from key servers');
       console.log('- These keys will be used to decrypt the document');
+      console.log('sessionKey', sessionKey);
       
       return {
         txKindBytes,
@@ -339,10 +283,7 @@ async function decryptDocument(sealClient, sessionKey, encryptedBytes, txKindByt
     console.log('- Performing decryption with SEAL...');
     
     try {
-      // Log session key state before decrypt
-      console.log('- Session key state for decryption:');
-      console.log(`  - Has signature: ${!!sessionKey.signature}`);
-      console.log(`  - Address property: ${sessionKey.address || 'undefined'}`);
+
       
       const decryptedData = await sealClient.decrypt({
         data: encryptedBytes,

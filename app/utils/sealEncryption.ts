@@ -78,21 +78,46 @@ export async function encryptDocument(
     const allowlistId = contractId.startsWith('0x') ? contractId : `0x${contractId}`;
     log.info('Starting SEAL encryption', { allowlistId });
     
-    // Get ALL allowlisted key servers (not just first 2)
+    // Get allowlisted key servers
     log.debug('Fetching allowlisted key servers');
-    const keyServerIds = await getAllowlistedKeyServers(NETWORK);
+    const keyServerResponse = await getAllowlistedKeyServers(NETWORK);
+    log.debug('Key server IDs (raw):', keyServerResponse);
     
-    if (!keyServerIds || keyServerIds.length < 1) {
+    // Parse the key server string properly
+    let formattedServerIds: Array<[string, number]> = [];
+    let keyServerIds: string[] = [];
+    
+    // If it's a string, parse it
+    if (typeof keyServerResponse === 'string') {
+      // Split by comma to get individual server entries
+      const serverEntries = keyServerResponse.split(',').map((e: string) => e.trim());
+      log.debug('Split server entries:', serverEntries);
+      
+      // Convert to proper [id, weight] format
+      formattedServerIds = serverEntries.map((entry: string): [string, number] => {
+        return [entry, 1]; // Use weight 1 for each server
+      });
+      keyServerIds = serverEntries; // Extract just the IDs
+    }
+    // If it's already an array
+    else if (Array.isArray(keyServerResponse)) {
+      formattedServerIds = keyServerResponse.map((entry: string): [string, number] => {
+        return [entry, 1]; // Use weight 1 for each server
+      });
+      keyServerIds = keyServerResponse; // Extract just the IDs
+    }
+    
+    if (!formattedServerIds || formattedServerIds.length < 1) {
       throw new Error('Failed to retrieve key servers or not enough servers available');
     }
     
-    log.info('Retrieved key servers', { count: keyServerIds.length });
+    log.info('Retrieved key servers', { count: formattedServerIds.length });
     
-    // Initialize SEAL client with ALL key servers
+    // Create client with correctly formatted server IDs
     const client = new SealClient({
       suiClient,
-      serverObjectIds: keyServerIds,
-      verifyKeyServers: true,
+      serverObjectIds: formattedServerIds,
+      verifyKeyServers: true
     });
 
     // Convert document to bytes
