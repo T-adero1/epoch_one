@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { SealClient, getAllowlistedKeyServers } from '@mysten/seal';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
@@ -11,6 +11,8 @@ interface ClientSideEncryptorProps {
   documentContent: string;
   signerAddresses: string[];
   signerEmails: string[];
+  autoStart?: boolean;
+  showLogs?: boolean;
   onSuccess?: (data: any) => void;
   onError?: (error: Error) => void;
 }
@@ -20,6 +22,8 @@ export default function ClientSideEncryptor({
   documentContent,
   signerAddresses,
   signerEmails,
+  autoStart = false,
+  showLogs = true,
   onSuccess,
   onError
 }: ClientSideEncryptorProps) {
@@ -33,31 +37,33 @@ export default function ClientSideEncryptor({
   const NETWORK = 'testnet';
 
   function addLog(message: string) {
-    setLogs(prev => [...prev, message]);
+    if (showLogs) {
+      setLogs(prev => [...prev, message]);
+    }
     console.log('[ClientEncryptor]', message);
   }
 
-  // Create document ID from allowlist ID + salt - EXACTLY as in fixed_utils.js
+  useEffect(() => {
+    if (autoStart && status === 'idle') {
+      encryptDocument();
+    }
+  }, [autoStart, status]);
+
   const createDocumentIdFromAllowlist = (allowlistId: string) => {
     addLog(`Creating document ID from allowlist ID: ${allowlistId}`);
     
     try {
-      // Remove 0x prefix if present
       const cleanAllowlistId = allowlistId.startsWith('0x') ? allowlistId.slice(2) : allowlistId;
       
-      // Convert allowlist ID to bytes
       const allowlistBytes = fromHEX(cleanAllowlistId);
       addLog(`Allowlist bytes length: ${allowlistBytes.length}`);
       
-      // Generate a random salt (5 bytes)
       const saltBytes = new Uint8Array(crypto.getRandomValues(new Uint8Array(5)));
       addLog(`Generated salt: ${toHEX(saltBytes)}`);
       
-      // Combine into a single ID (allowlistId + salt) - EXACTLY as in fixed_utils.js
       const fullIdBytes = new Uint8Array([...allowlistBytes, ...saltBytes]);
       addLog(`Combined ID length: ${fullIdBytes.length} bytes`);
       
-      // Convert to hex
       const documentIdHex = toHEX(fullIdBytes);
       const saltHex = toHEX(saltBytes);
       
@@ -77,13 +83,12 @@ export default function ClientSideEncryptor({
       setStatus('preparing');
       setProgress(10);
       setError(null);
-      setLogs([]);
+      if (showLogs) setLogs([]);
       
       addLog(`Starting document encryption for contract: ${contractId}`);
       addLog(`Document content length: ${documentContent.length}`);
       addLog(`Signer addresses: ${signerAddresses.join(', ')}`);
       
-      // STEP 1: Create allowlist on server first
       addLog('Requesting allowlist creation from server');
       addLog(`Using signer addresses: ${signerAddresses.join(', ')}`);
       
@@ -96,10 +101,8 @@ export default function ClientSideEncryptor({
         })
       });
       
-      // Log response status for debugging
       addLog(`Allowlist server response: ${allowlistResponse.status}`);
       
-      // If response is not ok, get the error details
       if (!allowlistResponse.ok) {
         const errorText = await allowlistResponse.text();
         addLog(`Server error: ${errorText}`);
@@ -112,11 +115,9 @@ export default function ClientSideEncryptor({
       
       setProgress(30);
       
-      // STEP 2: Initialize Sui client
       addLog('Initializing Sui client');
       const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
       
-      // STEP 3: Initialize SEAL client
       setStatus('encrypting');
       addLog('Initializing SEAL client');
       const keyServerIds = await getAllowlistedKeyServers(NETWORK);
@@ -128,11 +129,9 @@ export default function ClientSideEncryptor({
         verifyKeyServers: true
       });
       
-      // STEP 4: Generate proper document ID using allowlist ID
       addLog(`Generating document ID from allowlist ID: ${allowlistId}`);
       const { documentIdHex, documentSalt } = createDocumentIdFromAllowlist(allowlistId);
       
-      // STEP 5: Decode content to bytes (if base64) or convert to bytes
       addLog('Preparing document content');
       const isBase64 = /^[A-Za-z0-9+/]*={0,2}$/.test(documentContent.trim());
       
@@ -148,7 +147,6 @@ export default function ClientSideEncryptor({
       
       setProgress(50);
       
-      // STEP 6: Encrypt document - EXACTLY as in fixed_seal.js
       addLog(`Encrypting document with SEAL`);
       addLog(`Using document ID: ${documentIdHex}`);
       addLog(`Using salt: ${documentSalt}`);
@@ -166,11 +164,9 @@ export default function ClientSideEncryptor({
       setProgress(70);
       setStatus('uploading');
       
-      // STEP 7: Encode encrypted data to base64 for transmission
       const encryptedBase64 = Buffer.from(encryptedBytes).toString('base64');
       addLog(`Encoded encrypted data to base64, length: ${encryptedBase64.length}`);
       
-      // STEP 8: Send encrypted document to server
       addLog(`Sending encrypted document to server`);
       
       const isDevelopment = process.env.NODE_ENV === 'development';
@@ -191,14 +187,11 @@ export default function ClientSideEncryptor({
           metadata: {
             signers: signerEmails,
           },
-          // Important: Tell server the content is already encrypted
           preEncrypted: true,
           documentIdHex,
           documentSalt,
-          // Include these IDs so server can skip blockchain operations
           allowlistId,
           capId,
-          // Still enable SEAL for server-side blockchain operations
           useSeal: true
         })
       });
@@ -236,22 +229,24 @@ export default function ClientSideEncryptor({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-4">
-        <Button 
-          onClick={encryptDocument} 
-          disabled={status !== 'idle' && status !== 'error'}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          {status === 'idle' ? 'Encrypt Document' : 
-           status === 'preparing' ? 'Preparing...' : 
-           status === 'encrypting' ? 'Encrypting...' : 
-           status === 'uploading' ? 'Uploading...' : 
-           status === 'success' ? 'Encrypted!' : 'Retry Encryption'}
-        </Button>
+        {!autoStart && (
+          <Button 
+            onClick={encryptDocument} 
+            disabled={status !== 'idle' && status !== 'error'}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            {status === 'idle' ? 'Encrypt Document' : 
+             status === 'preparing' ? 'Preparing...' : 
+             status === 'encrypting' ? 'Encrypting...' : 
+             status === 'uploading' ? 'Uploading...' : 
+             status === 'success' ? 'Encrypted!' : 'Retry Encryption'}
+          </Button>
+        )}
         
         {status !== 'idle' && status !== 'error' && (
           <div className="w-full bg-gray-200 rounded-full h-2.5">
             <div 
-              className="bg-blue-600 h-2.5 rounded-full" 
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
               style={{ width: `${progress}%` }}
             ></div>
           </div>
@@ -270,7 +265,7 @@ export default function ClientSideEncryptor({
         </div>
       )}
       
-      {logs.length > 0 && (
+      {showLogs && logs.length > 0 && (
         <div className="mt-4 border rounded p-2 bg-gray-50">
           <h4 className="text-sm font-medium mb-2">Encryption Logs:</h4>
           <div className="text-xs font-mono bg-black text-green-400 p-2 rounded h-32 overflow-y-auto">

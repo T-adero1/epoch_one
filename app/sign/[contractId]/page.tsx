@@ -745,14 +745,16 @@ export default function ContractSigningPage() {
 
             {showEncryptor && encryptionData && (
               <div className="border rounded-md p-6 bg-blue-50 mt-4">
-                <h3 className="text-lg font-medium mb-4">Encrypt Document</h3>
-                <p className="mb-4">Your contract has been signed. You can now encrypt it for secure storage.</p>
+                <h3 className="text-lg font-medium mb-4">Encrypting Document</h3>
+                <p className="mb-4">Your contract has been signed. Encrypting for secure storage...</p>
                 
                 <ClientSideEncryptor
                   contractId={contractId}
                   documentContent={encryptionData.documentBase64}
                   signerAddresses={encryptionData.signerAddresses}
                   signerEmails={encryptionData.signerEmails}
+                  autoStart={true}
+                  showLogs={false}
                   onSuccess={(data) => {
                     console.log('[ContractSigning] Encryption successful:', data);
                     setShowEncryptor(false);
