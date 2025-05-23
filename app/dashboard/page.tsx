@@ -138,6 +138,60 @@ export default function DashboardPage() {
     return names[0].substring(0, 2).toUpperCase();
   };
   
+  // Helper function to check if current user is a signer (not owner) of a contract
+  const isUserASignerNotOwner = (contract: ContractWithRelations): boolean => {
+    const isOwner = contract.ownerId === user?.id || contract.owner?.email === user?.email;
+    const isSigner = contract.metadata?.signers?.includes(user?.email || '');
+    return isSigner && !isOwner;
+  };
+
+  // Helper function to check if current user has signed the contract
+  const hasUserSigned = (contract: ContractWithRelations): boolean => {
+    return contract.signatures?.some(sig => 
+      (sig.user?.email === user?.email || sig.user?.id === user?.id) && 
+      sig.status === 'SIGNED'
+    ) || false;
+  };
+
+  // Helper function to get display status for contracts
+  const getDisplayStatus = (contract: ContractWithRelations): string => {
+    // If user is a signer (not owner)
+    if (isUserASignerNotOwner(contract)) {
+      if (contract.status === 'PENDING') {
+        // If they've already signed, show as "Active"
+        if (hasUserSigned(contract)) {
+          return 'Active';
+        }
+        // If they haven't signed, show "Awaiting Signature"
+        return 'Awaiting Signature';
+      }
+    }
+    
+    // For owners or other statuses, show the normal status
+    return contract.status.charAt(0) + contract.status.slice(1).toLowerCase();
+  };
+
+  // Helper function to get status color based on display status
+  const getStatusColor = (contract: ContractWithRelations): string => {
+    // If user is a signer (not owner) and contract is PENDING
+    if (isUserASignerNotOwner(contract) && contract.status === 'PENDING') {
+      // If they've signed, show green (Active)
+      if (hasUserSigned(contract)) {
+        return 'bg-green-500';
+      }
+      // If they haven't signed, show orange (Awaiting Signature)
+      return 'bg-orange-500';
+    }
+    
+    // Original color logic for owners and other statuses
+    return contract.status === 'DRAFT' ? 'bg-blue-500' : 
+           contract.status === 'PENDING' ? 'bg-yellow-500' : 
+           contract.status === 'ACTIVE' ? 'bg-green-500' : 
+           contract.status === 'COMPLETED' ? 'bg-purple-500' : 
+           contract.status === 'EXPIRED' ? 'bg-gray-500' : 
+           'bg-red-500';
+  };
+  
   const loadContracts = useCallback(async () => {
     if (!user?.email) return;
     try {
@@ -517,9 +571,7 @@ export default function DashboardPage() {
                 >
                   <span>Profile</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer">
-                  <span>Settings</span>
-                </DropdownMenuItem>
+                
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logout()} className="cursor-pointer text-red-600">
                   <span>Logout</span>
@@ -667,27 +719,8 @@ export default function DashboardPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <span className={`inline-block w-2 h-2 rounded-full ${
-                                contract.status === 'DRAFT' ? 'bg-blue-500' : 
-                                contract.status === 'PENDING' ? 'bg-yellow-500' : 
-                                contract.status === 'ACTIVE' ? 'bg-green-500' : 
-                                contract.status === 'COMPLETED' ? 'bg-purple-500' : 
-                                contract.status === 'EXPIRED' ? 'bg-gray-500' : 
-                                'bg-red-500'
-                              }`}></span>
-                              {contract.status === 'ACTIVE' && 
-                               (contract.ownerId === user?.id || contract.owner?.email === user?.email) && 
-                               !contract.signatures?.some(sig => 
-                                 (sig.user?.id === user?.id || 
-                                  sig.user?.email === user?.email) && 
-                                 sig.status === 'SIGNED'
-                               ) ? (
-                                <span className="text-green-600 font-medium">Ready for Your Signature</span>
-                              ) : (
-                                <span>
-                                  {contract.status.charAt(0) + contract.status.slice(1).toLowerCase()}
-                                </span>
-                              )}
+                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                              {getDisplayStatus(contract)}
                             </div>
                           </TableCell>
                           <TableCell className="text-gray-600">

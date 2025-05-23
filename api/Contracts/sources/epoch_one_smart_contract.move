@@ -5,7 +5,7 @@ module epochone::epochone;
 
 // SPDX-License-Identifier: MIT
 // ──────────────────────────────────────────────────────────────
-//  EPOCH :: Smart Contract Skeleton
+//  EPOCH :: Smart Contract Skeleton (NOT PUBLISHED)
 //  Chain: Sui  •  Version: 0.1.0
 // ──────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { log } from '@/app/utils/logger';
+
 
 // This should be a secure, randomly generated value stored as an environment variable
 // CRITICAL: If this changes, all users will get new wallet addresses!

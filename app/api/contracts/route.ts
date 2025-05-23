@@ -31,21 +31,31 @@ export async function GET(request: Request) {
     }
 
     // Build the where clause to include:
-    // 1. Contracts owned by the user
-    // 2. Contracts where user is a signer
-    // 3. Completed contracts
+    // 1. Contracts owned by the user (all statuses)
+    // 2. Contracts where user is a signer and status is not DRAFT
+    // 3. Completed contracts (public visibility)
     const where = {
       OR: [
-        // User's own contracts
+        // User's own contracts (all statuses)
         { ownerId: userId },
-        // Contracts where user is a signer
+        // Contracts where user is a signer (any non-DRAFT status)
+        // This includes PENDING contracts (whether they've signed or not)
         {
-          metadata: {
-            path: ['signers'],
-            array_contains: userEmail
-          }
+          AND: [
+            {
+              metadata: {
+                path: ['signers'],
+                array_contains: userEmail
+              }
+            },
+            {
+              status: {
+                not: 'DRAFT' // Show everything except DRAFT
+              }
+            }
+          ]
         },
-        // Completed contracts
+        // Completed contracts (public visibility) - this might be redundant now
         { status: 'COMPLETED' }
       ],
       // Apply status filter if provided

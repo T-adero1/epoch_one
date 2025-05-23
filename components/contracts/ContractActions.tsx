@@ -292,10 +292,13 @@ export default function ContractActions({
         
         <DropdownMenuSeparator />
         
-        <DropdownMenuItem onClick={onDelete} className="cursor-pointer text-red-600">
-          <Trash2 className="mr-2 h-4 w-4" />
-          <span>Delete</span>
-        </DropdownMenuItem>
+        {/* Only show delete button if user is the contract owner */}
+        {(contract?.ownerId === user?.id || contract?.owner?.email === user?.email) && (
+          <DropdownMenuItem onClick={onDelete} className="cursor-pointer text-red-600">
+            <Trash2 className="mr-2 h-4 w-4" />
+            <span>Delete</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
