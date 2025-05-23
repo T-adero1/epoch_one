@@ -121,6 +121,24 @@ def process_upload(data):
     contract_id = data['contractId']
     contract_content = data['contractContent']
     
+    # NEW FLAG: Check if document is pre-encrypted by client
+    pre_encrypted = data.get('preEncrypted', False)
+    document_id_hex = data.get('documentIdHex')
+    document_salt = data.get('documentSalt')
+    # NEW: Get allowlist ID from client
+    client_allowlist_id = data.get('allowlistId')
+    # Add client_cap_id alongside client_allowlist_id
+    client_cap_id = data.get('capId')
+    
+    if pre_encrypted:
+        print(f"Document is pre-encrypted by client with ID: {document_id_hex}")
+        if client_allowlist_id:
+            print(f"Using client-provided allowlist ID: {client_allowlist_id}")
+            if client_cap_id:
+                print(f"Using client-provided capability ID: {client_cap_id}")
+            else:
+                print("WARNING: Client provided allowlist ID but no capability ID!")
+    
     # Decode the content if it's base64 encoded
     if data.get('isBase64', False):
         try:
@@ -162,7 +180,14 @@ def process_upload(data):
                 'contractId': contract_id,
                 'documentContent': base64.b64encode(contract_content).decode('utf-8') if isinstance(contract_content, bytes) else contract_content,
                 'isBase64': True if isinstance(contract_content, bytes) else False,
-                'signerAddresses': signer_addresses
+                'signerAddresses': signer_addresses,
+                # Pass pre-encrypted flag and document ID
+                'preEncrypted': pre_encrypted,
+                'documentIdHex': document_id_hex,
+                'documentSalt': document_salt,
+                # NEW: Pass allowlist ID from client
+                'allowlistId': client_allowlist_id,
+                'capId': client_cap_id
             }
             
             # Process SEAL encryption and upload
@@ -497,6 +522,35 @@ def process_upload(data):
         print(f"Error during upload process: {str(e)}")
         traceback.print_exc()
         raise
+
+# New function to handle pre-encrypted data
+def process_pre_encrypted_data(data, contract_id, encrypted_content, hash_sha256):
+    """Process pre-encrypted data from the client"""
+    print("[ClientEncryption] Processing pre-encrypted data")
+    
+    # Extract metadata from the request
+    walrus_metadata = data.get('metadata', {}).get('walrus', {})
+    encryption_metadata = walrus_metadata.get('encryption', {})
+    
+    # Create response with metadata
+    response = {
+        'contractId': contract_id,
+        'hash': hash_sha256,
+        'encrypted': True,
+        'blobId': None,  # Will be populated after Walrus upload
+        'walrusData': {
+            'documentId': encryption_metadata.get('documentId'),
+            'allowlistId': encryption_metadata.get('allowlistId'),
+            'salt': encryption_metadata.get('salt'),
+            'encryptionMethod': 'seal',
+            'authorizedWallets': data.get('signerAddresses', []),
+            'uploadedAt': datetime.datetime.now().isoformat()
+        }
+    }
+    
+    # Continue with standard Walrus upload logic, but skip the encryption step
+    # TODO: Implement Walrus upload of pre-encrypted content
+    return response
 
 # Support for direct execution from command line
 if __name__ == "__main__":

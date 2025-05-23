@@ -100,12 +100,44 @@ module.exports = async (req, res) => {
       sealPackageId: config.sealPackageId,
       allowlistPackageId: config.allowlistPackageId || config.sealPackageId,
       network: config.network || 'testnet',
-      // Add options to generate deterministic document ID
+      
+      // Pre-encrypted flags
+      preEncrypted: config.preEncrypted,
+      documentIdHex: config.documentIdHex,
+      documentSalt: config.documentSalt,
+      allowlistId: config.allowlistId,
+      
+      // CRITICAL: Move these to the top level of the object
+      skipAllowlistCreation: config.preEncrypted && config.allowlistId ? true : false,
+      skipDocumentIdGeneration: config.preEncrypted && config.documentIdHex ? true : false,
+      useExistingAllowlist: config.allowlistId || null,
+      useExistingDocumentId: config.documentIdHex || null,
+      
+      // Also include in options but with different property names for compatibility
       options: {
         publicKeys: config.signerAddresses,
-        verbose: true  // Enable verbose logging
+        verbose: true,
+        skipCreateAllowlist: config.preEncrypted && config.allowlistId ? true : false,
+        skipGenerateDocumentId: config.preEncrypted && config.documentIdHex ? true : false,
+        existingAllowlistId: config.allowlistId || null,
+        existingDocumentId: config.documentIdHex || null
       }
     };
+    
+    // Add detailed logging about the skip flags
+    if (config.preEncrypted) {
+      console.log(`[SEAL-API] Document is pre-encrypted by client with ID: ${config.documentIdHex}`);
+      if (config.allowlistId) {
+        console.log(`[SEAL-API] Using client-provided allowlist ID: ${config.allowlistId}`);
+        console.log(`[SEAL-API] CRITICAL: Set multiple skip flags to prevent allowlist creation`);
+        console.log(`[SEAL-API] skipAllowlistCreation: ${configObject.skipAllowlistCreation}`);
+        console.log(`[SEAL-API] skipDocumentIdGeneration: ${configObject.skipDocumentIdGeneration}`);
+        console.log(`[SEAL-API] useExistingAllowlist: ${configObject.useExistingAllowlist}`);
+        console.log(`[SEAL-API] useExistingDocumentId: ${configObject.useExistingDocumentId}`);
+      } else {
+        console.log(`[SEAL-API] WARNING: Pre-encrypted document without allowlist ID - WILL CAUSE ISSUES!`);
+      }
+    }
     
     try {
       // Write configuration to temporary file

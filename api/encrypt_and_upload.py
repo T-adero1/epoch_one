@@ -122,10 +122,27 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
     is_base64 = data.get('isBase64', False)
     signer_addresses = data.get('signerAddresses', [])
     
+    # NEW: Check if document is already encrypted by client
+    pre_encrypted = data.get('preEncrypted', False)
+    document_id_hex = data.get('documentIdHex')
+    document_salt = data.get('documentSalt')
+    # NEW: Get allowlist ID from client
+    client_allowlist_id = data.get('allowlistId')
+    # In process_encrypt_and_upload function, add client_cap_id
+    client_cap_id = data.get('capId')
+    
     print(f"[SEAL] Contract ID: {contract_id}")
     print(f"[SEAL] Content is base64: {is_base64}")
     print(f"[SEAL] Content length: {len(document_content) if isinstance(document_content, str) else 'binary data'}")
     print(f"[SEAL] Signer addresses: {', '.join(signer_addresses[:2]) + ('...' if len(signer_addresses) > 2 else '')}")
+    
+    if pre_encrypted:
+        print(f"[SEAL] Document is pre-encrypted by client with ID: {document_id_hex}")
+        if client_allowlist_id:
+            print(f"[SEAL] Using client-provided allowlist ID: {client_allowlist_id}")
+            print(f"[SEAL] CRITICAL: Will skip creating a new allowlist and use existing: {client_allowlist_id}")
+        else:
+            print("[SEAL] WARNING: Pre-encrypted document without allowlist ID - WILL CAUSE ISSUES!")
     
     # Check if SEAL encryption is enabled
     if not SEAL_PACKAGE_ID:
@@ -164,7 +181,17 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             "adminPrivateKey": ADMIN_PRIVATE_KEY or "admin_key_placeholder",
             "sealPackageId": SEAL_PACKAGE_ID or "seal_test_package_id",
             "allowlistPackageId": ALLOWLIST_PACKAGE_ID,
-            "network": NETWORK
+            "network": NETWORK,
+            # Pass pre-encrypted flag and document ID
+            "preEncrypted": pre_encrypted,
+            "documentIdHex": document_id_hex,
+            "documentSalt": document_salt,
+            # NEW: Pass allowlist ID from client
+            "allowlistId": client_allowlist_id,
+            # NEW: Pass capability ID from client
+            "capId": client_cap_id,
+            # NEW: Signal whether to skip allowlist creation
+            "skipAllowlistCreation": bool(pre_encrypted and client_allowlist_id)
         }
         
         # Write config to a temporary file

@@ -132,18 +132,7 @@ export async function POST(
     }
 
     // Save a debug copy for inspection (optional)
-    try {
-      const tempDir = path.join(process.cwd(), 'temp');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      
-      const debugPath = path.join(tempDir, `${blobId}.bin`);
-      fs.writeFileSync(debugPath, Buffer.from(responseData));
-      console.log(`[API] Saved debug copy to ${debugPath}`);
-    } catch (err) {
-      console.log(`[API] Could not save debug copy: ${err}`);
-    }
+    
     
     // Return the encrypted content for client-side decryption
     console.log(`[API] Successfully downloaded ${responseData.byteLength} bytes from ${successUrl}`);

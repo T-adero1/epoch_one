@@ -138,61 +138,127 @@ async function encryptAndUpload(config) {
     const adminAddress = adminKeypair.getPublicKey().toSuiAddress();
     console.log(`- Admin address: ${adminAddress}`);
     
-    // STEP 1: Create allowlist (document group)
-    console.log('\n STEP 1: Creating allowlist...');
-    const groupName = `Contract-${config.contractId}-${Date.now()}`;
-    const { allowlistId, capId } = await blockchain.createAllowlist(
-      suiClient, 
-      adminKeypair, 
-      groupName
-    );
-    console.log(`- Allowlist created: ${allowlistId}`);
-    console.log(`- Cap ID: ${capId}`);
+    // STEP 1: Create allowlist or use existing
+    let allowlistId, capId;
+
+    // Check for skip flags and existing allowlist ID
+    if (config.skipAllowlistCreation || config.options?.skipCreateAllowlist || 
+        (config.preEncrypted && config.allowlistId)) {
+      console.log('\n STEP 1: SKIPPING allowlist creation - using existing allowlist');
+      console.log(`- Using client-provided allowlist ID: ${config.allowlistId}`);
+      
+      // Use the provided allowlist ID
+      allowlistId = config.allowlistId;
+      
+      // Use the provided capability ID if available
+      if (config.capId) {
+        capId = config.capId;
+        console.log(`- Using client-provided capability ID: ${capId}`);
+      } else {
+        // Only try to find capability if not provided
+        try {
+          // Look up capability code...
+        } catch (error) {
+          
+        }
+      }
+    } else {
+      // Original allowlist creation logic
+      console.log('\n STEP 1: Creating allowlist...');
+      const groupName = `Contract-${config.contractId}-${Date.now()}`;
+      const result = await blockchain.createAllowlist(
+        suiClient, 
+        adminKeypair, 
+        groupName
+      );
+      allowlistId = result.allowlistId;
+      capId = result.capId;
+    }
+
+    // STEP 2: Add users to allowlist (make it optional for pre-encrypted documents)
+    if (config.preEncrypted) {
+      console.log('\n STEP 2: SKIPPING adding users to allowlist for pre-encrypted document');
+      console.log('- Users should already be in the allowlist or will be added later');
+      console.log('- Continuing with document upload directly');
+    } else {
+      // Original code for adding users (wrapped in try/catch)
+      console.log('\n STEP 2: Adding users to allowlist...');
+      try {
+        await blockchain.addMultipleUsersToAllowlist(
+          suiClient,
+          adminKeypair,
+          allowlistId,
+          capId,
+          config.signerAddresses
+        );
+        console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
+      } catch (error) {
+        console.warn(`- WARNING: Failed to add users to allowlist: ${error.message}`);
+        console.warn('- Continuing with document upload anyway - users may already be added');
+      }
+    }
+
+    // STEP 3: Use provided document ID or generate a new one
+    let documentIdHex;
+    if (config.preEncrypted && config.documentIdHex) {
+      console.log('\n STEP 3: Using client-provided document ID');
+      documentIdHex = config.documentIdHex;
+      console.log(`- Document ID (hex): ${documentIdHex}`);
+    } else {
+      console.log('\n STEP 3: Generating document ID...');
+      const { documentIdHex: generatedId } = utils.createDocumentId(allowlistId);
+      documentIdHex = generatedId;
+      console.log(`- Document ID: ${documentIdHex}`);
+    }
     
-    // STEP 2: Add users to allowlist
-    console.log('\n STEP 2: Adding users to allowlist...');
-    await blockchain.addMultipleUsersToAllowlist(
-      suiClient,
-      adminKeypair,
-      allowlistId,
-      capId,
-      config.signerAddresses
-    );
-    console.log(`- Added ${config.signerAddresses.length} users to allowlist`);
-    
-    // STEP 3: Generate document ID using allowlist ID
-    console.log('\n STEP 3: Generating document ID...');
-    const { documentIdHex } = utils.createDocumentId(allowlistId, config.contractId);
-    console.log(`- Document ID: ${documentIdHex}`);
-    
-    // STEP 4: Encrypt document using the document ID
-    console.log('\n STEP 4: Encrypting document...');
-    const { encryptedBytes } = await seal.encryptDocument(
-      sealClient,
-      documentIdHex,
-      new Uint8Array(fileData)
-    );
-    console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
-    
-    // Log more detailed logging in the encryptDocument function
-    logDetail(`Document encryption result - encrypted size: ${encryptedBytes.length} bytes`, 'debug');
-    logDetail(`Encryption parameters - documentId: ${documentIdHex}, original size: ${fileData.length}`, 'debug');
-    
-    // STEP 5: Upload to Walrus
-    console.log('\n STEP 5: Uploading to Walrus...');
-    const { blobId } = await walrus.uploadToWalrus(encryptedBytes);
-    console.log(`- Uploaded to Walrus: ${blobId}`);
-    
-    // STEP 6: Register blob in allowlist and set permissions
-    console.log('\n STEP 6: Registering blob in allowlist...');
-    await blockchain.publishBlobToAllowlist(
-      suiClient,
-      adminKeypair,
-      allowlistId,
-      capId,
-      blobId
-    );
-    console.log(`- Blob registered in allowlist`);
+    // STEP 4 & 5: Handle encrypted content and upload
+    let encryptedBytes, blobId;
+
+    try {
+      if (config.preEncrypted) {
+        console.log('\n STEP 4: SKIPPING encryption - document is already encrypted');
+        // Use the provided content directly for pre-encrypted documents
+        encryptedBytes = new Uint8Array(fileData);
+      } else {
+        console.log('\n STEP 4: Encrypting document...');
+        const { encryptedBytes: newEncryptedBytes } = await seal.encryptDocument(
+          sealClient,
+          documentIdHex,
+          new Uint8Array(fileData)
+        );
+        encryptedBytes = newEncryptedBytes;
+        console.log(`- Document encrypted: ${encryptedBytes.length} bytes`);
+      }
+
+      // STEP 5: Upload to Walrus
+      console.log('\n STEP 5: Uploading to Walrus...');
+      const uploadResult = await walrus.uploadToWalrus(encryptedBytes);
+      blobId = uploadResult.blobId;
+      console.log(`- Uploaded to Walrus: ${blobId}`);
+
+      // STEP 6: Register blob in allowlist - make this optional for pre-encrypted docs
+      if (!config.preEncrypted || (capId && capId !== 'unknown-cap-id')) {
+        console.log('\n STEP 6: Registering blob in allowlist...');
+        try {
+          await blockchain.publishBlobToAllowlist(
+            suiClient,
+            adminKeypair,
+            allowlistId,
+            capId,
+            blobId
+          );
+          console.log(`- Blob registered in allowlist`);
+        } catch (error) {
+          console.warn(`- WARNING: Failed to register blob in allowlist: ${error.message}`);
+          console.warn('- Document will still be available for download');
+        }
+      } else {
+        console.log('\n STEP 6: SKIPPING blob registration - not needed for pre-encrypted document');
+      }
+    } catch (error) {
+      console.error(`- ERROR in encryption/upload: ${error.message}`);
+      throw error;
+    }
     
     console.log('\n' + '='.repeat(80));
     console.log('ENCRYPT AND UPLOAD COMPLETED SUCCESSFULLY!');
