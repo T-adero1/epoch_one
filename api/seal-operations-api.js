@@ -106,6 +106,7 @@ module.exports = async (req, res) => {
       documentIdHex: config.documentIdHex,
       documentSalt: config.documentSalt,
       allowlistId: config.allowlistId,
+      capId: config.capId,
       
       // CRITICAL: Move these to the top level of the object
       skipAllowlistCreation: config.preEncrypted && config.allowlistId ? true : false,
@@ -120,7 +121,8 @@ module.exports = async (req, res) => {
         skipCreateAllowlist: config.preEncrypted && config.allowlistId ? true : false,
         skipGenerateDocumentId: config.preEncrypted && config.documentIdHex ? true : false,
         existingAllowlistId: config.allowlistId || null,
-        existingDocumentId: config.documentIdHex || null
+        existingDocumentId: config.documentIdHex || null,
+        existingCapId: config.capId || null
       }
     };
     
@@ -371,6 +373,9 @@ module.exports = async (req, res) => {
         }
         if (documentId) {
           combinedUpdate.documentId = documentId;
+        }
+        if (capId) {
+          combinedUpdate.capId = capId;
         }
         if (config.signerAddresses && config.signerAddresses.length > 0) {
           combinedUpdate.authorizedUsers = config.signerAddresses;

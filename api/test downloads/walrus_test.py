@@ -3,21 +3,25 @@
 Test script to download a blob from Walrus using the SDK manager.
 """
 
-from walrus_sdk_manager import WalrusSDKManager
+import sys
 from pathlib import Path
+
+# Add parent directory to Python path to import walrus_sdk_manager
+sys.path.append(str(Path(__file__).parent.parent))
+from walrus_sdk_manager import WalrusSDKManager
 
 def test_download_blob():
     """Test downloading a blob from Walrus."""
     
     # The blob ID to download
-    blob_id = "HRh45zk5YOAatHA2BY_gBB5R7yPI3Ljan4KHrsT4qlM"
+    blob_id = "tWGJLtqp0khtT3ZvOPPC5XGA78OE1wG3Bg8MAzBaweQ"
     
     # Initialize the Walrus SDK Manager (using testnet by default)
     print("Initializing Walrus SDK Manager...")
     manager = WalrusSDKManager(context="testnet", verbose=True)
     
-    # Set output path for the downloaded file
-    output_dir = Path("/api/test downloads")
+    # Set output path for the downloaded file (relative to current file location)
+    output_dir = Path(__file__).parent / "downloads"
     output_dir.mkdir(exist_ok=True)
     output_path = output_dir / f"{blob_id}.bin"
     
