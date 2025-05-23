@@ -216,38 +216,57 @@ module.exports = async (req, res) => {
         }
       }
       
-      // Parse the output by searching for specific lines
-      const outputLines = stdout.split('\n');
-      
-      // Extract all relevant SEAL information from output
-      let blobId = null;
-      let allowlistId = null;
-      let documentId = null;
-      let capId = null;
-      let salt = null;
-      
-      // Look for all IDs in the output lines
-      for (const line of outputLines) {
-        if (line.includes('Blob ID:')) {
-          blobId = line.split('Blob ID:')[1].trim();
-        } else if (line.includes('Allowlist ID:')) {
-          allowlistId = line.split('Allowlist ID:')[1].trim();
-        } else if (line.includes('Document ID:') || line.includes('Document ID (hex):')) {
-          documentId = line.split(':')[1].trim();
-        } else if (line.includes('Capability ID:') || line.includes('Cap ID:')) {
-          capId = line.split(':')[1].trim();
-        } else if (line.includes('Salt (hex):')) {
-          salt = line.split('Salt (hex):')[1].trim();
+      // Extract values from the parsed JSON output data first (PRIORITY)
+      let blobId = outputData?.blobId || null;
+      let allowlistId = outputData?.allowlistId || null;
+      let documentId = outputData?.documentIdHex || outputData?.documentId || null;
+      let capId = outputData?.capId || null;
+      let salt = outputData?.documentSalt || outputData?.salt || null;
+
+      // Log what we got from JSON
+      console.log(`[SEAL-API] From JSON output: blobId=${blobId}, allowlistId=${allowlistId}, documentId=${documentId}`);
+
+      // Only parse lines if JSON data is missing key values
+      if (!blobId || !allowlistId) {
+        console.log("[SEAL-API] JSON output missing critical data, trying line parsing as fallback");
+        
+        const outputLines = stdout.split('\n');
+        
+        for (const line of outputLines) {
+          if (line.includes('Blob ID:') && !blobId) {
+            blobId = line.split('Blob ID:')[1].trim();
+            console.log(`[SEAL-API] Found blob ID in line: ${blobId}`);
+          } else if (line.includes('Allowlist ID:') && !allowlistId) {
+            allowlistId = line.split('Allowlist ID:')[1].trim();
+            console.log(`[SEAL-API] Found allowlist ID in line: ${allowlistId}`);
+          } else if ((line.includes('Document ID:') || line.includes('Document ID (hex):')) && !documentId) {
+            documentId = line.split(':')[1].trim();
+            console.log(`[SEAL-API] Found document ID in line: ${documentId}`);
+          } else if ((line.includes('Capability ID:') || line.includes('Cap ID:')) && !capId) {
+            capId = line.split(':')[1].trim();
+            console.log(`[SEAL-API] Found cap ID in line: ${capId}`);
+          } else if (line.includes('Salt (hex):') && !salt) {
+            salt = line.split('Salt (hex):')[1].trim();
+            console.log(`[SEAL-API] Found salt in line: ${salt}`);
+          }
         }
       }
-      
-      // Log the same way as Python script
-      console.log(`[SEAL] Document successfully encrypted and uploaded`);
-      if (blobId) console.log(`[SEAL] Blob ID: ${blobId}`);
-      if (allowlistId) console.log(`[SEAL] Allowlist ID: ${allowlistId}`);
-      if (documentId) console.log(`[SEAL] Document ID: ${documentId}`);
-      if (capId) console.log(`[SEAL] Capability ID: ${capId}`);
-      if (salt) console.log(`[SEAL] Salt: ${salt}`);
+
+      // Extract salt from documentId if still not found
+      if (!salt && documentId && allowlistId) {
+        const cleanAllowlistId = allowlistId?.startsWith('0x') ? allowlistId.substring(2) : allowlistId;
+        if (documentId.startsWith(cleanAllowlistId)) {
+          salt = documentId.substring(cleanAllowlistId.length);
+          console.log(`[SEAL-API] Extracted salt from document ID: ${salt}`);
+        }
+      }
+
+      console.log(`[SEAL-API] Final extracted values:`);
+      console.log(`[SEAL-API] - Blob ID: ${blobId}`);
+      console.log(`[SEAL-API] - Allowlist ID: ${allowlistId}`);
+      console.log(`[SEAL-API] - Document ID: ${documentId}`);
+      console.log(`[SEAL-API] - Cap ID: ${capId}`);
+      console.log(`[SEAL-API] - Salt: ${salt}`);
       
       // Create response with all found values - IDENTICAL to Python script
       const responseData = {
