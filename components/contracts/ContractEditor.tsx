@@ -229,7 +229,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                   </div>
                 ))}
                 
-                <div className="flex items-center gap-28 mt-4">
+                <div className="flex items-center justify-between mt-4">
                   <Button
                     variant="outline"
                     onClick={handleAddSigner}

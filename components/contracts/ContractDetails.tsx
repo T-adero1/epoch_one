@@ -19,7 +19,8 @@ import {
   Edit, 
   UserCheck, 
   Send, 
-  Share2 
+  Share2,
+  Lock
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ContractStatus, SignatureStatus } from '@prisma/client'
@@ -65,9 +66,15 @@ interface ContractDetailsProps {
   contract: Contract;
   onBack: () => void;
   onUpdate: (updatedContract: Contract) => void;
+  defaultTab?: string;
 }
 
-export default function ContractDetails({ contract, onBack, onUpdate }: ContractDetailsProps) {
+export default function ContractDetails({ 
+  contract, 
+  onBack, 
+  onUpdate, 
+  defaultTab = "content"
+}: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
   const { user } = useZkLogin();
@@ -141,7 +148,7 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
         </div>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="content">
+        <Tabs defaultValue={defaultTab}>
           <TabsList className="mb-4">
             <TabsTrigger value="content">Content</TabsTrigger>
             <TabsTrigger value="signers">Signers</TabsTrigger>
@@ -152,6 +159,18 @@ export default function ContractDetails({ contract, onBack, onUpdate }: Contract
               {contract.content ? (
                 <div className="prose max-w-none">
                   <pre className="whitespace-pre-wrap font-mono text-sm">{contract.content}</pre>
+                </div>
+              ) : contract.status === 'COMPLETED' ? (
+                <div className="flex flex-col items-center justify-center h-full text-blue-600">
+                  <div className="relative mb-4">
+                    <FileText className="h-16 w-16 text-gray-300" />
+                    <Lock className="h-8 w-8 absolute -bottom-1 -right-1 bg-white rounded-full p-1 text-blue-600" />
+                  </div>
+                  <p className="text-lg font-medium text-gray-700">Content Encrypted</p>
+                  <p className="text-sm text-gray-500 mt-2 text-center max-w-md">
+                    This contract has been completed and its content is now securely encrypted. 
+                    Use the "Decrypt and Download" option to access the document.
+                  </p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">

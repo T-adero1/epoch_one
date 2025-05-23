@@ -127,6 +127,7 @@ export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [selectedContractTab, setSelectedContractTab] = useState<string>("content");
 
   // Get user initials for avatar fallback
   const getUserInitials = () => {
@@ -153,43 +154,120 @@ export default function DashboardPage() {
     ) || false;
   };
 
+  // Helper function to check if the owner has signed
+  const hasOwnerSigned = (contract: ContractWithRelations): boolean => {
+    return contract.signatures?.some(sig => 
+      (sig.user?.email === contract.owner?.email || sig.user?.id === contract.ownerId) && 
+      sig.status === 'SIGNED'
+    ) || false;
+  };
+
+  // Helper function to check if anyone (excluding owner) has signed
+  const hasAnyoneSigned = (contract: ContractWithRelations): boolean => {
+    return contract.signatures?.some(sig => 
+      sig.status === 'SIGNED' && 
+      sig.user?.email !== contract.owner?.email && 
+      sig.user?.id !== contract.ownerId
+    ) || false;
+  };
+
+  // Helper function to check if current user is the owner
+  const isUserOwner = (contract: ContractWithRelations): boolean => {
+    return contract.ownerId === user?.id || contract.owner?.email === user?.email;
+  };
+
   // Helper function to get display status for contracts
   const getDisplayStatus = (contract: ContractWithRelations): string => {
+    // Add debugging
+    console.log(`[DEBUG] getDisplayStatus for contract ${contract.id}:`, {
+      contractId: contract.id,
+      status: contract.status,
+      isUserOwner: isUserOwner(contract),
+      isUserASignerNotOwner: isUserASignerNotOwner(contract),
+      hasAnyoneSigned: hasAnyoneSigned(contract),
+      hasOwnerSigned: hasOwnerSigned(contract),
+      signatures: contract.signatures,
+      ownerId: contract.ownerId,
+      ownerEmail: contract.owner?.email,
+      currentUserEmail: user?.email,
+      currentUserId: user?.id
+    });
+
     // If user is a signer (not owner)
     if (isUserASignerNotOwner(contract)) {
       if (contract.status === 'PENDING') {
         // If they've already signed, show as "Active"
         if (hasUserSigned(contract)) {
+          console.log(`[DEBUG] Returning "Active" for signer who signed`);
           return 'Active';
         }
         // If they haven't signed, show "Awaiting Signature"
+        console.log(`[DEBUG] Returning "Awaiting Signature" for signer who hasn't signed`);
         return 'Awaiting Signature';
+      }
+      // For completed contracts, show "Completed"
+      if (contract.status === 'COMPLETED') {
+        console.log(`[DEBUG] Returning "Completed" for signer`);
+        return 'Completed';
       }
     }
     
-    // For owners or other statuses, show the normal status
-    return contract.status.charAt(0) + contract.status.slice(1).toLowerCase();
+    // For owners
+    if (isUserOwner(contract)) {
+      console.log(`[DEBUG] User is owner, checking status...`);
+      if (contract.status === 'DRAFT') {
+        console.log(`[DEBUG] Returning "Draft" for owner`);
+        return 'Draft';
+      }
+      // Handle both PENDING and ACTIVE statuses the same way
+      if (contract.status === 'PENDING' || contract.status === 'ACTIVE') {
+        console.log(`[DEBUG] Contract is PENDING or ACTIVE, checking signatures...`);
+        // If someone signed and owner hasn't signed yet
+        if (hasAnyoneSigned(contract) && !hasOwnerSigned(contract)) {
+          console.log(`[DEBUG] Someone signed and owner hasn't - returning "Ready for Your Signature"`);
+          return 'Ready for Your Signature';
+        }
+        // If owner has signed or no one has signed yet
+        console.log(`[DEBUG] Returning "Pending" for owner`);
+        return 'Pending';
+      }
+      if (contract.status === 'COMPLETED') {
+        console.log(`[DEBUG] Returning "Completed" for owner`);
+        return 'Completed';
+      }
+    }
+    
+    // Fallback: capitalize first letter
+    const fallback = contract.status.charAt(0) + contract.status.slice(1).toLowerCase();
+    console.log(`[DEBUG] Returning fallback status: ${fallback}`);
+    return fallback;
   };
 
   // Helper function to get status color based on display status
   const getStatusColor = (contract: ContractWithRelations): string => {
-    // If user is a signer (not owner) and contract is PENDING
-    if (isUserASignerNotOwner(contract) && contract.status === 'PENDING') {
-      // If they've signed, show green (Active)
-      if (hasUserSigned(contract)) {
-        return 'bg-green-500';
-      }
-      // If they haven't signed, show orange (Awaiting Signature)
-      return 'bg-orange-500';
-    }
+    const displayStatus = getDisplayStatus(contract);
     
-    // Original color logic for owners and other statuses
-    return contract.status === 'DRAFT' ? 'bg-blue-500' : 
-           contract.status === 'PENDING' ? 'bg-yellow-500' : 
-           contract.status === 'ACTIVE' ? 'bg-green-500' : 
-           contract.status === 'COMPLETED' ? 'bg-purple-500' : 
-           contract.status === 'EXPIRED' ? 'bg-gray-500' : 
-           'bg-red-500';
+    // Color mapping based on display status
+    switch (displayStatus) {
+      case 'Draft':
+        return 'bg-blue-500';
+      case 'Pending':
+        return 'bg-yellow-500';
+      case 'Ready for Your Signature':
+        return 'bg-green-500';
+      case 'Awaiting Signature':
+        return 'bg-orange-500';
+      case 'Active':
+        return 'bg-green-500';
+      case 'Completed':
+        return 'bg-purple-500';
+      case 'Expired':
+        return 'bg-gray-500';
+      case 'Cancelled':
+        return 'bg-red-500';
+      default:
+        return 'bg-gray-500';
+    }
   };
   
   const loadContracts = useCallback(async () => {
@@ -321,6 +399,7 @@ export default function DashboardPage() {
   
   const handleViewContract = (contract: ContractWithRelations) => {
     setSelectedContract(contract);
+    setSelectedContractTab("content");
     setIsViewingContract(true);
   };
   
@@ -362,8 +441,9 @@ export default function DashboardPage() {
         variant: "success",
       });
       
-      // Open the contract details to show share options
+      // Open the contract details on the SIGNERS tab
       setSelectedContract(contract);
+      setSelectedContractTab("signers");
       setIsViewingContract(true);
     } catch (error) {
       console.error('Error sending contract:', error);
@@ -502,6 +582,7 @@ export default function DashboardPage() {
           contract={selectedContract} 
           onBack={() => setIsViewingContract(false)}
           onUpdate={handleUpdateContract}
+          defaultTab={selectedContractTab}
         />
       </div>
     );
