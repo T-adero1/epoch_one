@@ -301,17 +301,17 @@ export async function POST(request: Request) {
 
 // GET /api/signatures - Get signatures for a contract
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const contractId = searchParams.get('contractId');
-  
-  if (!contractId) {
+    const { searchParams } = new URL(request.url);
+    const contractId = searchParams.get('contractId');
+    
+    if (!contractId) {
     return NextResponse.json({ error: 'Contract ID required' }, { status: 400 });
-  }
-  
-  const signatures = await prisma.signature.findMany({
-    where: { contractId },
+    }
+    
+    const signatures = await prisma.signature.findMany({
+      where: { contractId },
     include: { user: true }
-  });
-  
+    });
+    
   return NextResponse.json({ signatures });
 } 

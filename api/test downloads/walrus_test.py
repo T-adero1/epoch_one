@@ -14,7 +14,7 @@ def test_download_blob():
     """Test downloading a blob from Walrus."""
     
     # The blob ID to download
-    blob_id = "tWGJLtqp0khtT3ZvOPPC5XGA78OE1wG3Bg8MAzBaweQ"
+    blob_id = "HiYxFLF5viM6rtYxj8MK48jSVa5QkAxpc6YpeDJyt1U"
     
     # Initialize the Walrus SDK Manager (using testnet by default)
     print("Initializing Walrus SDK Manager...")

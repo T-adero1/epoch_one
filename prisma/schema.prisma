@@ -60,7 +60,8 @@ model Signature {
   signedAt      DateTime?
   status        SignatureStatus @default(PENDING)
   walletAddress String
-  signature     String?
+  signature     String?         // Base64 signature image
+  zkLoginData   Json?           // NEW: zkLogin signature data
   email         String?
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
