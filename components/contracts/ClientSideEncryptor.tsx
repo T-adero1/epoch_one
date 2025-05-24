@@ -132,16 +132,68 @@ export default function ClientSideEncryptor({
       addLog(`Generating document ID from allowlist ID: ${allowlistId}`);
       const { documentIdHex, documentSalt } = createDocumentIdFromAllowlist(allowlistId);
       
+      // NEW: Fetch zkLogin signatures and embed them
+      let enhancedDocumentContent;
+      try {
+        addLog('Fetching zkLogin signatures for embedding...');
+        const signaturesResponse = await fetch(`/api/signatures?contractId=${contractId}`);
+        if (signaturesResponse.ok) {
+          const signaturesData = await signaturesResponse.json();
+          const zkSignatures = signaturesData.signatures
+            ?.filter((sig: any) => sig.zkLoginData)
+            ?.map((sig: any) => ({
+              userEmail: sig.email,
+              userAddress: sig.zkLoginData.userAddress,
+              contentHash: sig.zkLoginData.contentHash,
+              contentSignature: sig.zkLoginData.contentSignature,
+              imageHash: sig.zkLoginData.imageHash,
+              imageSignature: sig.zkLoginData.imageSignature,
+              timestamp: sig.zkLoginData.timestamp,
+              ephemeralPublicKey: sig.zkLoginData.ephemeralPublicKey
+            })) || [];
+            
+          addLog(`Found ${zkSignatures.length} zkLogin signatures to embed`);
+          
+          if (zkSignatures.length > 0) {
+            const zkSection = `
+            
+ZKLOGIN CRYPTOGRAPHIC SIGNATURES:
+${zkSignatures.map(zk => `
+Signer: ${zk.userEmail}
+Wallet Address: ${zk.userAddress}
+Ephemeral Public Key: ${zk.ephemeralPublicKey}
+Contract Content Hash: ${zk.contentHash}
+Contract Content Signature: ${zk.contentSignature}
+Signature Image Hash: ${zk.imageHash}
+Signature Image Signature: ${zk.imageSignature}
+Timestamp: ${new Date(zk.timestamp).toISOString()}
+---`).join('\n')}`;
+            
+            enhancedDocumentContent = documentContent + zkSection;
+            addLog('Enhanced document with zkLogin cryptographic signatures');
+          } else {
+            enhancedDocumentContent = documentContent;
+            addLog('No zkLogin signatures found, using base document');
+          }
+        } else {
+          addLog(`Failed to fetch signatures (${signaturesResponse.status}), using base document`);
+          enhancedDocumentContent = documentContent;
+        }
+      } catch (fetchError) {
+        addLog(`Failed to fetch zkLogin signatures: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}, using base document`);
+        enhancedDocumentContent = documentContent;
+      }
+      
       addLog('Preparing document content');
-      const isBase64 = /^[A-Za-z0-9+/]*={0,2}$/.test(documentContent.trim());
+      const isBase64 = /^[A-Za-z0-9+/]*={0,2}$/.test(enhancedDocumentContent.trim());
       
       let documentBytes;
       if (isBase64) {
         addLog('Content is base64, decoding...');
-        documentBytes = new Uint8Array(Buffer.from(documentContent, 'base64'));
+        documentBytes = new Uint8Array(Buffer.from(enhancedDocumentContent, 'base64'));
       } else {
         addLog('Content is text, encoding to bytes...');
-        documentBytes = new TextEncoder().encode(documentContent);
+        documentBytes = new TextEncoder().encode(enhancedDocumentContent);
       }
       addLog(`Document bytes size: ${documentBytes.length}`);
       

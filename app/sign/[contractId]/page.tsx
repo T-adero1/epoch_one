@@ -13,6 +13,7 @@ import { SignZkLoginModal } from '@/components/SignZkLoginModal'
 
 import { randomBytes } from 'crypto'
 import ClientSideEncryptor from '@/components/contracts/ClientSideEncryptor'
+import { Ed25519Keypair, createSHA256Hash, signData, getSignableContractContent } from '@mysten/sui/keypairs/ed25519'
 
 // Define a proper interface for the contract object used in this component
 interface ContractDetail {
@@ -124,7 +125,7 @@ function createClientDocumentId(contractId: string): { documentIdHex: string; do
 
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
-  const { isAuthenticated, isLoading, user, userAddress } = useZkLogin()
+  const { isAuthenticated, isLoading, user, userAddress, zkLoginState } = useZkLogin()
   const router = useRouter()
   
   const [contract, setContract] = useState<ContractDetail | null>(null)
@@ -295,48 +296,66 @@ export default function ContractSigningPage() {
   const handleSignContract = async () => {
     console.log('[ContractSigning] Starting signature process for contract:', contractId);
     
-    if (!signatureData || !user?.email || !userAddress) {
-      console.log('[ContractSigning] Cannot sign contract, missing required data:', {
-        hasSignatureData: !!signatureData,
-        hasUserEmail: !!user?.email,
-        hasUserAddress: !!userAddress
-      })
+    if (!signatureData || !user?.email || !userAddress || !contract) {
       return
     }
-    
-    console.log('[ContractSigning] Signature data validation passed, proceeding with signature process');
-    console.log('[ContractSigning] User authenticated:', {
-      userEmail: user.email,
-      walletAddress: userAddress.substring(0, 10) + '...',
-    });
-    
+
     try {
       setSaving(true)
-      console.log('[ContractSigning] Setting saving state to true');
       
-      const apiUrl = '/api/signatures'
-      console.log('[ContractSigning] Preparing API call to:', apiUrl)
-      
-      // Generate document data
-      console.log('[ContractSigning] Generating document content from contract data');
-      const documentBase64 = contract ? generateContractDocument(contract) : '';
-      console.log('[ContractSigning] Document generation complete, base64 length:', documentBase64.length);
+      // NEW: Generate zkLogin signatures for content and signature image
+      let zkLoginData = null;
+      if (zkLoginState?.ephemeralKeyPair) {
+        try {
+          console.log('[ContractSigning] Generating zkLogin signatures...');
+          
+          // 1. Hash the signable contract content
+          const contractContent = getSignableContractContent(contract);
+          const contentHash = await createSHA256Hash(contractContent);
+          
+          // 2. Hash the signature image (remove data URL prefix)
+          const cleanSignature = signatureData.replace(/^data:image\/[a-z]+;base64,/, '');
+          const imageHash = await createSHA256Hash(cleanSignature);
+          
+          // 3. Sign both hashes with ephemeral key
+          const ephemeralKeyPair = Ed25519Keypair.fromSecretKey(
+            zkLoginState.ephemeralKeyPair.privateKey
+          );
+          
+          const contentSignature = await signData(contentHash, ephemeralKeyPair);
+          const imageSignature = await signData(imageHash, ephemeralKeyPair);
+          
+          zkLoginData = {
+            contentHash,
+            contentSignature,
+            imageHash,  
+            imageSignature,
+            timestamp: Date.now(),
+            userAddress,
+            ephemeralPublicKey: zkLoginState.ephemeralKeyPair.publicKey
+          };
+          
+          console.log('[ContractSigning] zkLogin signatures generated:', {
+            contentHash: contentHash.substring(0, 16) + '...',
+            imageHash: imageHash.substring(0, 16) + '...'
+          });
+          
+        } catch (zkError) {
+          console.error('[ContractSigning] Failed to generate zkLogin signatures:', zkError);
+          // Continue without zkLogin - don't block the traditional signing flow
+        }
+      }
       
       const requestData = {
         contractId,
         userEmail: user.email,
         walletAddress: userAddress,
-        signature: signatureData
+        signature: signatureData,
+        zkLoginData  // NEW: Include zkLogin signatures
       }
-      console.log('[ContractSigning] Prepared signature request payload:', {
-        contractId,
-        userEmail: user.email,
-        walletAddressLength: userAddress.length,
-        signatureLength: signatureData.length
-      });
       
       console.log('[ContractSigning] Sending POST request to signatures API');
-      const response = await fetch(apiUrl, {
+      const response = await fetch('/api/signatures', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
