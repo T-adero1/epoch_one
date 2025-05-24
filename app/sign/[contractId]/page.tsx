@@ -808,7 +808,7 @@ export default function ContractSigningPage() {
             )}
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col sm:flex-row justify-between gap-3">
+        <CardFooter className="flex flex-col-reverse sm:flex-row justify-between gap-3 px-4 sm:px-6">
           <Button variant="outline" onClick={() => router.push('/dashboard')} className="w-full sm:w-auto">
             Back to Documents
           </Button>
