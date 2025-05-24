@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -485,44 +484,287 @@ export default function DashboardPage() {
     
     return (
       <div className="container mx-auto p-6">
-        <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+        <div className="flex justify-between items-start mb-8">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 truncate">Contract Dashboard</h1>
+            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
               BETA
             </span>
           </div>
-          <div className="h-8 w-32 bg-slate-200 rounded"></div>
+          
+          {/* Profile dropdown - always on the right */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-2 px-2 hover:bg-gray-100 ml-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user?.profilePicture || ''} alt={user?.displayName || 'User'} />
+                  <AvatarFallback className="bg-blue-600 text-white">{getUserInitials()}</AvatarFallback>
+                </Avatar>
+                <div className="hidden sm:flex flex-col items-start text-sm">
+                  <span className="font-medium">{user?.displayName || 'User'}</span>
+                  <span className="text-xs text-gray-500">{user?.email}</span>
+                </div>
+                <ChevronDown className="h-4 w-4 text-gray-500 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <div className="sm:hidden px-2 py-1.5 border-b">
+                <p className="font-medium text-sm">{user?.displayName || 'User'}</p>
+                <p className="text-xs text-gray-500">{user?.email}</p>
+              </div>
+              <DropdownMenuLabel className="hidden sm:block">My Account</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="cursor-pointer"
+                onClick={() => setShowProfile(true)}
+              >
+                <span>Profile</span>
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => logout()} className="cursor-pointer text-red-600">
+                <span>Logout</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="opacity-40">
           
 
           <Card className="border-gray-100">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <CardTitle className="text-gray-900">Your Contracts</CardTitle>
                 <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
               </div>
-              <div className="h-10 w-36 bg-slate-200 rounded"></div>
+              <Dialog open={isCreatingContract} onOpenChange={setIsCreatingContract}>
+                <DialogTrigger asChild>
+                  <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Contract
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle className="text-gray-900">Create New Contract</DialogTitle>
+                    <DialogDescription className="text-gray-600">
+                      Fill in the details below to create a new contract.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <label htmlFor="title" className="text-sm font-medium text-gray-900">
+                        Title
+                      </label>
+                      <Input
+                        id="title"
+                        value={newContract.title}
+                        onChange={(e) => setNewContract({ ...newContract, title: e.target.value })}
+                        placeholder="Contract title"
+                        className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label htmlFor="description" className="text-sm font-medium text-gray-900">
+                        Description
+                      </label>
+                      <Input
+                        id="description"
+                        value={newContract.description}
+                        onChange={(e) => setNewContract({ ...newContract, description: e.target.value })}
+                        placeholder="Contract description"
+                        className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium text-gray-900">Signers</label>
+                      {newContract.signers.map((signer, index) => (
+                        <div key={index} className="flex gap-2">
+                          <Input
+                            value={signer}
+                            onChange={(e) => {
+                              const newSigners = [...newContract.signers];
+                              newSigners[index] = e.target.value;
+                              setNewContract({ ...newContract, signers: newSigners });
+                            }}
+                            placeholder="Signer email"
+                            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                          />
+                          {index === newContract.signers.length - 1 && (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setNewContract({ ...newContract, signers: [...newContract.signers, ''] })}
+                              className="border-gray-200 hover:bg-blue-50"
+                            >
+                              <Plus className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsCreatingContract(false)} className="border-gray-200 hover:bg-blue-50">
+                      Cancel
+                    </Button>
+                    <Button onClick={handleCreateContract} className="bg-blue-600 hover:bg-blue-700">
+                      Create Contract
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
                 <div className="relative flex-1">
-                  <div className="h-10 bg-slate-200 rounded w-full"></div>
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+                  <Input 
+                    placeholder="Search contracts..." 
+                    className="pl-8 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
                 </div>
-                <div className="h-10 w-[180px] bg-slate-200 rounded"></div>
+                <Select value={statusFilter || 'all'} onValueChange={(value) => setStatusFilter(value === 'all' ? null : value)}>
+                  <SelectTrigger className="w-full sm:w-[180px] border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="DRAFT">Draft</SelectItem>
+                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                    <SelectItem value="EXPIRED">Expired</SelectItem>
+                    <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="border rounded-md">
-                <div className="p-4">
-                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
-                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
-                  <div className="h-6 bg-slate-200 rounded w-3/4"></div>
-                </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-gray-50">
+                      <TableHead className="text-gray-900">Title</TableHead>
+                      <TableHead className="text-gray-900">Status</TableHead>
+                      <TableHead className="text-gray-900">Created</TableHead>
+                      <TableHead className="text-gray-900">Signers</TableHead>
+                      <TableHead className="text-right text-gray-900">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredContracts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                          No contracts found. Create your first contract by clicking the "New Contract" button.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredContracts.map((contract) => (
+                        <TableRow key={contract.id} className="hover:bg-gray-50">
+                          <TableCell className="font-medium text-gray-900">
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleViewContract(contract)}>
+                              <FileText className="h-4 w-4 text-blue-600" />
+                              {contract.title}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                              {getDisplayStatus(contract)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-gray-600">
+                            {format(new Date(contract.createdAt), 'MMM dd, yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center">
+                              {contract.metadata?.signers?.length || 0} signers
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <ContractActions 
+                              contractId={contract.id}
+                              status={contract.status}
+                              contract={contract}
+                              onView={() => handleViewContract(contract)}
+                              onEdit={() => handleEditContract(contract)}
+                              onDelete={() => handleConfirmDelete(contract.id)}
+                              onSend={() => handleSendContract(contract)}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-3">
+                {filteredContracts.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No contracts found. Create your first contract by clicking the "New Contract" button.
+                  </div>
+                ) : (
+                  filteredContracts.map((contract) => (
+                    <div key={contract.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div 
+                            className="flex items-center gap-2 cursor-pointer mb-2"
+                            onClick={() => handleViewContract(contract)}
+                          >
+                            <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                            <h3 className="font-medium text-gray-900 truncate">{contract.title}</h3>
+                          </div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                            <span className="text-sm text-gray-600">{getDisplayStatus(contract)}</span>
+                          </div>
+                        </div>
+                        <ContractActions 
+                          contractId={contract.id}
+                          status={contract.status}
+                          contract={contract}
+                          onView={() => handleViewContract(contract)}
+                          onEdit={() => handleEditContract(contract)}
+                          onDelete={() => handleConfirmDelete(contract.id)}
+                          onSend={() => handleSendContract(contract)}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</span>
+                        <span>{contract.metadata?.signers?.length || 0} signers</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
+
+        {/* Delete confirmation dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you sure you want to delete this contract?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the contract and remove it from our servers.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteContract} className="bg-red-600 hover:bg-red-700 text-white">
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
@@ -541,44 +783,287 @@ export default function DashboardPage() {
     // Return the same loading state as above to prevent flickering
     return (
       <div className="container mx-auto p-6">
-        <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+        <div className="flex justify-between items-start mb-8">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 truncate">Contract Dashboard</h1>
+            <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
               BETA
             </span>
           </div>
-          <div className="h-8 w-32 bg-slate-200 rounded"></div>
+          
+          {/* Profile dropdown - always on the right */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-2 px-2 hover:bg-gray-100 ml-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user?.profilePicture || ''} alt={user?.displayName || 'User'} />
+                  <AvatarFallback className="bg-blue-600 text-white">{getUserInitials()}</AvatarFallback>
+                </Avatar>
+                <div className="hidden sm:flex flex-col items-start text-sm">
+                  <span className="font-medium">{user?.displayName || 'User'}</span>
+                  <span className="text-xs text-gray-500">{user?.email}</span>
+                </div>
+                <ChevronDown className="h-4 w-4 text-gray-500 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <div className="sm:hidden px-2 py-1.5 border-b">
+                <p className="font-medium text-sm">{user?.displayName || 'User'}</p>
+                <p className="text-xs text-gray-500">{user?.email}</p>
+              </div>
+              <DropdownMenuLabel className="hidden sm:block">My Account</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="cursor-pointer"
+                onClick={() => setShowProfile(true)}
+              >
+                <span>Profile</span>
+              </DropdownMenuItem>
+              
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => logout()} className="cursor-pointer text-red-600">
+                <span>Logout</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="opacity-40">
           
 
           <Card className="border-gray-100">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <CardTitle className="text-gray-900">Your Contracts</CardTitle>
                 <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
               </div>
-              <div className="h-10 w-36 bg-slate-200 rounded"></div>
+              <Dialog open={isCreatingContract} onOpenChange={setIsCreatingContract}>
+                <DialogTrigger asChild>
+                  <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
+                    <Plus className="mr-2 h-4 w-4" />
+                    New Contract
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle className="text-gray-900">Create New Contract</DialogTitle>
+                    <DialogDescription className="text-gray-600">
+                      Fill in the details below to create a new contract.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <label htmlFor="title" className="text-sm font-medium text-gray-900">
+                        Title
+                      </label>
+                      <Input
+                        id="title"
+                        value={newContract.title}
+                        onChange={(e) => setNewContract({ ...newContract, title: e.target.value })}
+                        placeholder="Contract title"
+                        className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label htmlFor="description" className="text-sm font-medium text-gray-900">
+                        Description
+                      </label>
+                      <Input
+                        id="description"
+                        value={newContract.description}
+                        onChange={(e) => setNewContract({ ...newContract, description: e.target.value })}
+                        placeholder="Contract description"
+                        className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium text-gray-900">Signers</label>
+                      {newContract.signers.map((signer, index) => (
+                        <div key={index} className="flex gap-2">
+                          <Input
+                            value={signer}
+                            onChange={(e) => {
+                              const newSigners = [...newContract.signers];
+                              newSigners[index] = e.target.value;
+                              setNewContract({ ...newContract, signers: newSigners });
+                            }}
+                            placeholder="Signer email"
+                            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                          />
+                          {index === newContract.signers.length - 1 && (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setNewContract({ ...newContract, signers: [...newContract.signers, ''] })}
+                              className="border-gray-200 hover:bg-blue-50"
+                            >
+                              <Plus className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsCreatingContract(false)} className="border-gray-200 hover:bg-blue-50">
+                      Cancel
+                    </Button>
+                    <Button onClick={handleCreateContract} className="bg-blue-600 hover:bg-blue-700">
+                      Create Contract
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
                 <div className="relative flex-1">
-                  <div className="h-10 bg-slate-200 rounded w-full"></div>
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+                  <Input 
+                    placeholder="Search contracts..." 
+                    className="pl-8 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
                 </div>
-                <div className="h-10 w-[180px] bg-slate-200 rounded"></div>
+                <Select value={statusFilter || 'all'} onValueChange={(value) => setStatusFilter(value === 'all' ? null : value)}>
+                  <SelectTrigger className="w-full sm:w-[180px] border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="DRAFT">Draft</SelectItem>
+                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                    <SelectItem value="EXPIRED">Expired</SelectItem>
+                    <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="border rounded-md">
-                <div className="p-4">
-                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
-                  <div className="h-6 bg-slate-200 rounded w-full mb-4"></div>
-                  <div className="h-6 bg-slate-200 rounded w-3/4"></div>
-                </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-gray-50">
+                      <TableHead className="text-gray-900">Title</TableHead>
+                      <TableHead className="text-gray-900">Status</TableHead>
+                      <TableHead className="text-gray-900">Created</TableHead>
+                      <TableHead className="text-gray-900">Signers</TableHead>
+                      <TableHead className="text-right text-gray-900">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredContracts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                          No contracts found. Create your first contract by clicking the "New Contract" button.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredContracts.map((contract) => (
+                        <TableRow key={contract.id} className="hover:bg-gray-50">
+                          <TableCell className="font-medium text-gray-900">
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleViewContract(contract)}>
+                              <FileText className="h-4 w-4 text-blue-600" />
+                              {contract.title}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                              {getDisplayStatus(contract)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-gray-600">
+                            {format(new Date(contract.createdAt), 'MMM dd, yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center">
+                              {contract.metadata?.signers?.length || 0} signers
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <ContractActions 
+                              contractId={contract.id}
+                              status={contract.status}
+                              contract={contract}
+                              onView={() => handleViewContract(contract)}
+                              onEdit={() => handleEditContract(contract)}
+                              onDelete={() => handleConfirmDelete(contract.id)}
+                              onSend={() => handleSendContract(contract)}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-3">
+                {filteredContracts.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No contracts found. Create your first contract by clicking the "New Contract" button.
+                  </div>
+                ) : (
+                  filteredContracts.map((contract) => (
+                    <div key={contract.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div 
+                            className="flex items-center gap-2 cursor-pointer mb-2"
+                            onClick={() => handleViewContract(contract)}
+                          >
+                            <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                            <h3 className="font-medium text-gray-900 truncate">{contract.title}</h3>
+                          </div>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                            <span className="text-sm text-gray-600">{getDisplayStatus(contract)}</span>
+                          </div>
+                        </div>
+                        <ContractActions 
+                          contractId={contract.id}
+                          status={contract.status}
+                          contract={contract}
+                          onView={() => handleViewContract(contract)}
+                          onEdit={() => handleEditContract(contract)}
+                          onDelete={() => handleConfirmDelete(contract.id)}
+                          onSend={() => handleSendContract(contract)}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</span>
+                        <span>{contract.metadata?.signers?.length || 0} signers</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
+
+        {/* Delete confirmation dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you sure you want to delete this contract?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the contract and remove it from our servers.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteContract} className="bg-red-600 hover:bg-red-700 text-white">
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }
@@ -635,23 +1120,23 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          <div className="flex justify-between items-center mb-8">
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-900">Contract Dashboard</h1>
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+          <div className="flex justify-between items-start mb-8">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 truncate">Contract Dashboard</h1>
+              <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
                 BETA
               </span>
             </div>
             
-            {/* Profile dropdown */}
+            {/* Profile dropdown - always on the right */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-2 px-2 hover:bg-gray-100">
+                <Button variant="ghost" className="flex items-center gap-2 px-2 hover:bg-gray-100 ml-2">
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user?.profilePicture || ''} alt={user?.displayName || 'User'} />
                     <AvatarFallback className="bg-blue-600 text-white">{getUserInitials()}</AvatarFallback>
                   </Avatar>
-                  <div className="flex flex-col items-start text-sm">
+                  <div className="hidden sm:flex flex-col items-start text-sm">
                     <span className="font-medium">{user?.displayName || 'User'}</span>
                     <span className="text-xs text-gray-500">{user?.email}</span>
                   </div>
@@ -659,7 +1144,11 @@ export default function DashboardPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                <div className="sm:hidden px-2 py-1.5 border-b">
+                  <p className="font-medium text-sm">{user?.displayName || 'User'}</p>
+                  <p className="text-xs text-gray-500">{user?.email}</p>
+                </div>
+                <DropdownMenuLabel className="hidden sm:block">My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   className="cursor-pointer"
@@ -678,14 +1167,14 @@ export default function DashboardPage() {
 
           <div className="grid gap-6">
             <Card className="border-gray-100">
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <CardTitle className="text-gray-900">Your Contracts</CardTitle>
                   <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
                 </div>
                 <Dialog open={isCreatingContract} onOpenChange={setIsCreatingContract}>
                   <DialogTrigger asChild>
-                    <Button className="bg-blue-600 hover:bg-blue-700">
+                    <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
                       <Plus className="mr-2 h-4 w-4" />
                       New Contract
                     </Button>
@@ -762,7 +1251,7 @@ export default function DashboardPage() {
                 </Dialog>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
                   <div className="relative flex-1">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
                     <Input 
@@ -773,7 +1262,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <Select value={statusFilter || 'all'} onValueChange={(value) => setStatusFilter(value === 'all' ? null : value)}>
-                    <SelectTrigger className="w-[180px] border-gray-200 focus:border-blue-500 focus:ring-blue-500">
+                    <SelectTrigger className="w-full sm:w-[180px] border-gray-200 focus:border-blue-500 focus:ring-blue-500">
                       <SelectValue placeholder="Filter by status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -787,62 +1276,108 @@ export default function DashboardPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-gray-50">
-                      <TableHead className="text-gray-900">Title</TableHead>
-                      <TableHead className="text-gray-900">Status</TableHead>
-                      <TableHead className="text-gray-900">Created</TableHead>
-                      <TableHead className="text-gray-900">Signers</TableHead>
-                      <TableHead className="text-right text-gray-900">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredContracts.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                          No contracts found. Create your first contract by clicking the &quot;New Contract&quot; button.
-                        </TableCell>
+
+                {/* Desktop Table View */}
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-gray-50">
+                        <TableHead className="text-gray-900">Title</TableHead>
+                        <TableHead className="text-gray-900">Status</TableHead>
+                        <TableHead className="text-gray-900">Created</TableHead>
+                        <TableHead className="text-gray-900">Signers</TableHead>
+                        <TableHead className="text-right text-gray-900">Actions</TableHead>
                       </TableRow>
-                    ) : (
-                      filteredContracts.map((contract) => (
-                        <TableRow key={contract.id} className="hover:bg-gray-50">
-                          <TableCell className="font-medium text-gray-900">
-                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleViewContract(contract)}>
-                              <FileText className="h-4 w-4 text-blue-600" />
-                              {contract.title}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
-                              {getDisplayStatus(contract)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-gray-600">
-                            {format(new Date(contract.createdAt), 'MMM dd, yyyy')}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center">
-                              {contract.metadata?.signers?.length || 0} signers
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <ContractActions 
-                              contractId={contract.id}
-                              status={contract.status}
-                              contract={contract}
-                              onView={() => handleViewContract(contract)}
-                              onEdit={() => handleEditContract(contract)}
-                              onDelete={() => handleConfirmDelete(contract.id)}
-                              onSend={() => handleSendContract(contract)}
-                            />
+                    </TableHeader>
+                    <TableBody>
+                      {filteredContracts.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                            No contracts found. Create your first contract by clicking the "New Contract" button.
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      ) : (
+                        filteredContracts.map((contract) => (
+                          <TableRow key={contract.id} className="hover:bg-gray-50">
+                            <TableCell className="font-medium text-gray-900">
+                              <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleViewContract(contract)}>
+                                <FileText className="h-4 w-4 text-blue-600" />
+                                {contract.title}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                                {getDisplayStatus(contract)}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-gray-600">
+                              {format(new Date(contract.createdAt), 'MMM dd, yyyy')}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center">
+                                {contract.metadata?.signers?.length || 0} signers
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <ContractActions 
+                                contractId={contract.id}
+                                status={contract.status}
+                                contract={contract}
+                                onView={() => handleViewContract(contract)}
+                                onEdit={() => handleEditContract(contract)}
+                                onDelete={() => handleConfirmDelete(contract.id)}
+                                onSend={() => handleSendContract(contract)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Mobile Card View */}
+                <div className="md:hidden space-y-3">
+                  {filteredContracts.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No contracts found. Create your first contract by clicking the "New Contract" button.
+                    </div>
+                  ) : (
+                    filteredContracts.map((contract) => (
+                      <div key={contract.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div 
+                              className="flex items-center gap-2 cursor-pointer mb-2"
+                              onClick={() => handleViewContract(contract)}
+                            >
+                              <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                              <h3 className="font-medium text-gray-900 truncate">{contract.title}</h3>
+                            </div>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
+                              <span className="text-sm text-gray-600">{getDisplayStatus(contract)}</span>
+                            </div>
+                          </div>
+                          <ContractActions 
+                            contractId={contract.id}
+                            status={contract.status}
+                            contract={contract}
+                            onView={() => handleViewContract(contract)}
+                            onEdit={() => handleEditContract(contract)}
+                            onDelete={() => handleConfirmDelete(contract.id)}
+                            onSend={() => handleSendContract(contract)}
+                          />
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</span>
+                          <span>{contract.metadata?.signers?.length || 0} signers</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

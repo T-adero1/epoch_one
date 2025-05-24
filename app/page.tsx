@@ -428,8 +428,8 @@ function HomePageContent() {
   }, []);
   
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      <div className="w-full max-w-md px-6">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
+      <div className="w-full max-w-md">
         {statusMessage.type !== 'none' && (
           <div className={`mb-4 rounded-lg p-4 flex items-start ${
             statusMessage.type === 'timeout' || statusMessage.type === 'expired' 
@@ -451,13 +451,13 @@ function HomePageContent() {
         )}
         
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100">
-          <div className="p-8">
-            <div className="text-center mb-8">
+          <div className="p-6 sm:p-8">
+            <div className="text-center mb-6 sm:mb-8">
               <HiOutlineSparkles className="h-10 w-10 text-blue-600 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">
                 Welcome to EpochOne
               </h2>
-              <p className="text-gray-600">
+              <p className="text-gray-600 text-sm sm:text-base">
                 Sign in to access your dashboard
               </p>
             </div>
@@ -476,7 +476,7 @@ function HomePageContent() {
             </div>
           </div>
           
-          <div className="bg-gray-50 px-8 py-6 border-t border-gray-100">
+          <div className="bg-gray-50 px-6 sm:px-8 py-6 border-t border-gray-100">
             <div className="flex items-start space-x-4">
               <div className="flex-shrink-0 bg-blue-100 p-2 rounded-md">
                 <FaShieldAlt className="h-5 w-5 text-blue-600" />
@@ -501,7 +501,7 @@ function HomePageContent() {
           </div>
         </div>
         
-        <div className="mt-6 text-center text-xs text-gray-500">
+        <div className="mt-6 text-center text-xs text-gray-500 px-4">
           <p>
             By signing in, you agree to our <Link href="/terms" className="text-blue-600 hover:underline">Terms of Service</Link> and 
             <Link href="/privacy" className="text-blue-600 hover:underline"> Privacy Policy</Link>
