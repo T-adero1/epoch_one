@@ -178,8 +178,8 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             "documentContentBase64": base64.b64encode(content_bytes).decode('utf-8'),
             "contractId": contract_id,
             "signerAddresses": signer_addresses,
-            "adminPrivateKey": ADMIN_PRIVATE_KEY or "admin_key_placeholder",
-            "sealPackageId": SEAL_PACKAGE_ID or "seal_test_package_id",
+            "adminPrivateKey": ADMIN_PRIVATE_KEY,
+            "sealPackageId": SEAL_PACKAGE_ID,
             "allowlistPackageId": ALLOWLIST_PACKAGE_ID,
             "network": NETWORK,
             # Pass pre-encrypted flag and document ID

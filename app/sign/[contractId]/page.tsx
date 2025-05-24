@@ -13,6 +13,13 @@ import { SignZkLoginModal } from '@/components/SignZkLoginModal'
 
 import { randomBytes } from 'crypto'
 import ClientSideEncryptor from '@/components/contracts/ClientSideEncryptor'
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
+import { 
+  createSHA256Hash, 
+  signData, 
+  getSignableContractContent,
+  type ZkSignatureData 
+} from '@/app/utils/zkSignatures'
 
 // Define a proper interface for the contract object used in this component
 interface ContractDetail {
@@ -50,81 +57,49 @@ interface ContractDetail {
 function generateContractDocument(contractData: ContractDetail): string {
   console.log('[ContractDocument] Starting document generation for contract:', contractData.id);
   
-  // Simple PDF-like content in base64
-  // In a real app, this would create a proper PDF with signatures, etc.
   const contractText = contractData.content || '';
   const title = contractData.title || 'Untitled Contract';
-  const signers = contractData.metadata?.signers?.join(', ') || 'No signers';
+  const signers = contractData.metadata?.signers || [];
+  
+  // Get creator information
+  const creatorEmail = contractData.owner?.email || contractData.owner?.name || 'Unknown Creator';
+  
+  // Format signers list
+  const signersText = signers.length > 0 ? signers.join(', ') : 'No signers';
   
   console.log('[ContractDocument] Document details:', {
     title,
     status: contractData.status,
     contentLength: contractText.length,
-    signerCount: contractData.metadata?.signers?.length || 0,
+    creatorEmail,
+    signerCount: signers.length,
     signatureCount: contractData.signatures?.length || 0
   });
   
-  // Create a simple text representation
+  // Create a simple text representation with Party A and Party B
   const documentContent = `
     TITLE: ${title}
     STATUS: ${contractData.status}
     CREATED: ${new Date(contractData.createdAt).toISOString()}
-    SIGNERS: ${signers}
     
-    CONTENT:
+    CONTRACT CREATOR (PARTY A): ${creatorEmail}
+    SIGNERS (PARTY B): ${signersText}
+    
+    CONTRACT DETAILS:
     ${contractText}
     
-    SIGNATURES:
-    ${contractData.signatures?.map(sig => 
-      `${sig.user.email} - ${sig.signedAt ? new Date(sig.signedAt).toISOString() : 'Pending'}`
-    ).join('\n') || 'No signatures'}
+    
   `;
   
-  // Convert to base64
-  const base64Content = Buffer.from(documentContent).toString('base64');
-  console.log('[ContractDocument] Document generated successfully. Base64 length:', base64Content.length);
-  return base64Content;
+  console.log('[ContractDocument] Document generated successfully. Plain text length:', documentContent.length);
+  return documentContent;
 }
 
 
-// Add this helper function somewhere before your component or in a utils file
-function createClientDocumentId(contractId: string): { documentIdHex: string; documentSalt: string } {
-  console.log('[ContractSigning] Generating secure document ID');
-  
-  try {
-    // Generate a random salt (5 bytes, same as server implementation)
-    const salt = randomBytes(5);
-    console.log(`[ContractSigning] Generated salt: ${Buffer.from(salt).toString('hex')}`);
-    
-    // Create a deterministic base from contractId
-    const contractIdBytes = Buffer.from(contractId);
-    console.log(`[ContractSigning] Contract ID bytes length: ${contractIdBytes.length}`);
-    
-    // Combine into a single ID (contractIdBytes + salt)
-    const fullIdBytes = Buffer.concat([contractIdBytes, salt]);
-    console.log(`[ContractSigning] Combined ID length: ${fullIdBytes.length} bytes`);
-    
-    // Convert to hex representation for use with SEAL
-    const documentIdHex = Buffer.from(fullIdBytes).toString('hex');
-    const saltHex = Buffer.from(salt).toString('hex');
-    
-    console.log(`[ContractSigning] Document ID generated successfully`);
-    console.log(`[ContractSigning] Document ID (hex): ${documentIdHex}`);
-    console.log(`[ContractSigning] Salt (hex): ${saltHex}`);
-    
-    return { documentIdHex, documentSalt: saltHex };
-  } catch (err) {
-    console.error('[ContractSigning] Error generating document ID:', err);
-    // Fallback to simple hex encoding of contractId
-    const fallbackId = Buffer.from(contractId).toString('hex');
-    console.log('[ContractSigning] Using fallback document ID:', fallbackId);
-    return { documentIdHex: fallbackId, documentSalt: fallbackId };
-  }
-}
 
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
-  const { isAuthenticated, isLoading, user, userAddress } = useZkLogin()
+  const { isAuthenticated, isLoading, user, userAddress, zkLoginState } = useZkLogin()
   const router = useRouter()
   
   const [contract, setContract] = useState<ContractDetail | null>(null)
@@ -295,7 +270,7 @@ export default function ContractSigningPage() {
   const handleSignContract = async () => {
     console.log('[ContractSigning] Starting signature process for contract:', contractId);
     
-    if (!signatureData || !user?.email || !userAddress) {
+    if (!signatureData || !user?.email || !userAddress || !contract) {
       console.log('[ContractSigning] Cannot sign contract, missing required data:', {
         hasSignatureData: !!signatureData,
         hasUserEmail: !!user?.email,
@@ -303,36 +278,102 @@ export default function ContractSigningPage() {
       })
       return
     }
-    
+
     console.log('[ContractSigning] Signature data validation passed, proceeding with signature process');
     console.log('[ContractSigning] User authenticated:', {
       userEmail: user.email,
       walletAddress: userAddress.substring(0, 10) + '...',
     });
-    
+
     try {
       setSaving(true)
       console.log('[ContractSigning] Setting saving state to true');
       
+      // NEW: Generate zkLogin signatures following DecryptButton.tsx pattern
+      let zkLoginData: ZkSignatureData | null = null;
+      if (zkLoginState?.ephemeralKeyPair) {
+        try {
+          console.log('[ContractSigning] Generating zkLogin signatures...');
+          
+          // Get session data from localStorage (like DecryptButton does)
+          const sessionData = localStorage.getItem('epochone_session');
+          if (!sessionData) {
+            throw new Error("No session data found in localStorage");
+          }
+          
+          const sessionObj = JSON.parse(sessionData);
+          const zkLoginStateFromSession = sessionObj.zkLoginState || sessionObj.user?.zkLoginState;
+          
+          if (!zkLoginStateFromSession?.ephemeralKeyPair?.privateKey) {
+            throw new Error("No ephemeral key private key found in session data");
+          }
+          
+          console.log('[ContractSigning] Found private key in session, creating keypair...');
+          
+          // Create ephemeral keypair exactly like DecryptButton.tsx
+          const ephemeralKeyPair = Ed25519Keypair.fromSecretKey(
+            zkLoginStateFromSession.ephemeralKeyPair.privateKey
+          );
+          
+          // 1. Hash the signable contract content
+          const contractContent = getSignableContractContent(contract);
+          const contentHash = await createSHA256Hash(contractContent);
+          
+          // 2. Hash the signature image (remove data URL prefix)
+          const cleanSignature = signatureData.replace(/^data:image\/[a-z]+;base64,/, '');
+          const imageHash = await createSHA256Hash(cleanSignature);
+          
+          // 3. Sign both hashes using the same method as DecryptButton
+          console.log('[ContractSigning] Signing content hash...');
+          const contentSignature = await signData(contentHash, ephemeralKeyPair);
+          
+          console.log('[ContractSigning] Signing image hash...');
+          const imageSignature = await signData(imageHash, ephemeralKeyPair);
+          
+          zkLoginData = {
+            contentHash,
+            contentSignature,
+            imageHash,  
+            imageSignature,
+            timestamp: Date.now(),
+            userAddress,
+            ephemeralPublicKey: zkLoginStateFromSession.ephemeralKeyPair.publicKey
+          };
+          
+          console.log('[ContractSigning] zkLogin signatures generated successfully:', {
+            contentHash: contentHash.substring(0, 16) + '...',
+            imageHash: imageHash.substring(0, 16) + '...',
+            contentSig: contentSignature.substring(0, 16) + '...',
+            imageSig: imageSignature.substring(0, 16) + '...'
+          });
+          
+        } catch (zkError) {
+          console.error('[ContractSigning] Failed to generate zkLogin signatures:', zkError);
+          // Continue without zkLogin - don't block the traditional signing flow
+        }
+      }
+
       const apiUrl = '/api/signatures'
       console.log('[ContractSigning] Preparing API call to:', apiUrl)
       
       // Generate document data
       console.log('[ContractSigning] Generating document content from contract data');
-      const documentBase64 = contract ? generateContractDocument(contract) : '';
-      console.log('[ContractSigning] Document generation complete, base64 length:', documentBase64.length);
+      const documentContent = contract ? generateContractDocument(contract) : '';
+      console.log('[ContractSigning] Document generation complete, plain text length:', documentContent.length);
       
       const requestData = {
         contractId,
         userEmail: user.email,
         walletAddress: userAddress,
-        signature: signatureData
+        signature: signatureData,
+        zkLoginData  // Include zkLogin signatures
       }
       console.log('[ContractSigning] Prepared signature request payload:', {
         contractId,
         userEmail: user.email,
         walletAddressLength: userAddress.length,
-        signatureLength: signatureData.length
+        signatureLength: signatureData.length,
+        hasZkLoginData: !!zkLoginData
       });
       
       console.log('[ContractSigning] Sending POST request to signatures API');
@@ -399,10 +440,10 @@ export default function ContractSigningPage() {
         try {
           // Prepare document data
           console.log('[ContractSigning] Preparing document for client-side encryption');
-          const documentBase64 = generateContractDocument(updatedContract);
+          const documentContent = generateContractDocument(updatedContract);
           console.log('[ContractSigning] Document generated:', {
-            base64Length: documentBase64.length,
-            firstBytes: documentBase64.substring(0, 50) + '...',
+            plainTextLength: documentContent.length,
+            firstBytes: documentContent.substring(0, 50) + '...',
             contractId: updatedContract.id
           });
           
@@ -457,14 +498,14 @@ export default function ContractSigningPage() {
           
           if (signerAddresses.length > 0) {
             console.log('[ContractSigning] Setting encryption data with:', {
-              documentBase64Length: documentBase64.length,
+              documentPlainTextLength: documentContent.length,
               signerAddressCount: signerAddresses.length,
               signerEmailCount: signerEmails.length
             });
             
             // Set the encryption data state
             setEncryptionData({
-              documentBase64,
+              documentBase64: documentContent,
               signerAddresses,
               signerEmails
             });

@@ -624,15 +624,15 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       try {
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Contract-${contractId}.txt`;
+        a.download = `Contract-${contractId}.pdf`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        console.log("[DecryptButton] Download triggered");
+        console.log("[DecryptButton] PDF download triggered");
         toast({
-          title: "Contract downloaded successfully",
+          title: "Contract PDF downloaded successfully",
           variant: "success"
         });
         

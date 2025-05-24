@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation'
 import DecryptButton from '@/components/contracts/DecryptButton'
 import { useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
+import { downloadRecoveryData, extractRecoveryData } from '@/app/utils/recoveryData'
 
 interface ContractActionsProps {
   contractId: string
@@ -214,6 +215,74 @@ export default function ContractActions({
     }
   };
 
+  const handleDownloadRecoveryData = async () => {
+    try {
+      console.log('Download Recovery Data - Contract object:', contract);
+      
+      toast({
+        title: "Preparing Recovery Data",
+        description: "Extracting recovery information...",
+      });
+      
+      if (!contract) {
+        console.warn('Contract object not provided, attempting to fetch from API...');
+        
+        try {
+          const response = await fetch(`/api/contracts/${contractId}`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch contract: ${response.status}`);
+          }
+          
+          const contractData = await response.json();
+          console.log('Fetched contract data for recovery:', contractData);
+          
+          const recoveryData = extractRecoveryData(contractData);
+          if (recoveryData) {
+            downloadRecoveryData(recoveryData);
+            toast({
+              title: "Recovery Data Downloaded",
+              description: "Your contract recovery file has been saved. Store it securely!",
+              variant: "success",
+            });
+          } else {
+            throw new Error('No recovery data available for this contract');
+          }
+        } catch (fetchError) {
+          console.error('Error fetching contract data for recovery:', fetchError);
+          toast({
+            title: "Download Failed",
+            description: "Could not retrieve contract recovery data. Please try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+      } else {
+        const recoveryData = extractRecoveryData(contract);
+        if (recoveryData) {
+          downloadRecoveryData(recoveryData);
+          toast({
+            title: "Recovery Data Downloaded",
+            description: "Your contract recovery file has been saved. Store it securely!",
+            variant: "success",
+          });
+        } else {
+          toast({
+            title: "Download Failed",
+            description: "No recovery data available for this contract.",
+            variant: "destructive",
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error downloading recovery data:', error);
+      toast({
+        title: "Download Failed",
+        description: "There was a problem generating the recovery file. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -289,6 +358,13 @@ export default function ContractActions({
             </span>
           </DropdownMenuItem>
         ) : null}
+        
+        {status === ContractStatus.COMPLETED && (
+          <DropdownMenuItem onClick={handleDownloadRecoveryData} className="cursor-pointer">
+            <FileDown className="mr-2 h-4 w-4" />
+            <span>Download Recovery Data</span>
+          </DropdownMenuItem>
+        )}
         
         <DropdownMenuSeparator />
         

@@ -30,7 +30,13 @@ interface SignatureWithUser {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { contractId, userEmail, walletAddress, signature } = body;
+    const { 
+      contractId, 
+      userEmail, 
+      walletAddress, 
+      signature,
+      zkLoginData  // NEW: zkLogin signature data
+    } = body;
 
     log.info('Creating signature', { 
       contractId, 
@@ -188,6 +194,7 @@ export async function POST(request: Request) {
         userId: user.id,
         walletAddress,
         signature,
+        zkLoginData,  // NEW: Store zkLogin signatures
         status: 'SIGNED',
         signedAt: new Date(),
         email: userEmail,
@@ -294,53 +301,17 @@ export async function POST(request: Request) {
 
 // GET /api/signatures - Get signatures for a contract
 export async function GET(request: Request) {
-  try {
     const { searchParams } = new URL(request.url);
     const contractId = searchParams.get('contractId');
     
     if (!contractId) {
-      log.warn('Missing contractId parameter for GET signatures', {
-        url: request.url,
-        parameters: Object.fromEntries(searchParams.entries())
-      });
-      return NextResponse.json(
-        { error: 'Contract ID is required' },
-        { status: 400 }
-      );
+    return NextResponse.json({ error: 'Contract ID required' }, { status: 400 });
     }
-    
-    log.info('Fetching signatures for contract', { 
-      contractId,
-      requestUrl: request.url,
-      method: request.method
-    });
     
     const signatures = await prisma.signature.findMany({
       where: { contractId },
-      include: {
-        user: true
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
+    include: { user: true }
     });
     
-    log.info('Successfully fetched signatures', { 
-      contractId, 
-      count: signatures.length,
-      signerEmails: signatures.map((sig: SignatureWithUser) => sig.user.email)
-    });
-    
-    return NextResponse.json(signatures);
-  } catch (error) {
-    log.error('Error fetching signatures', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      contractId: new URL(request.url).searchParams.get('contractId')
-    });
-    return NextResponse.json(
-      { error: 'Failed to fetch signatures' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({ signatures });
 } 

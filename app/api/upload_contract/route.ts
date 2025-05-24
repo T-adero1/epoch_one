@@ -265,8 +265,8 @@ export async function POST(request: NextRequest) {
       contractId: data.contractId,
       documentContentBase64: contentBuffer.toString('base64'),
       signerAddresses: signerAddresses,
-      adminPrivateKey: process.env.ADMIN_PRIVATE_KEY || "admin_key_placeholder",
-      sealPackageId: process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || "seal_package_id",
+      adminPrivateKey: process.env.ADMIN_PRIVATE_KEY,
+      sealPackageId: process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID,
       allowlistPackageId: process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID,
       network: process.env.NETWORK || "testnet",
       
