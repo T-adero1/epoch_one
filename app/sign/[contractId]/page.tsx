@@ -707,18 +707,18 @@ export default function ContractSigningPage() {
   }
   
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
+    <div className="container mx-auto p-4 sm:p-6 max-w-4xl">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>{contract?.title || 'Contract'}</CardTitle>
-              <CardDescription>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
+              <CardTitle className="text-lg sm:text-xl">{contract?.title || 'Contract'}</CardTitle>
+              <CardDescription className="text-sm">
                 {contract?.description || ''}
               </CardDescription>
             </div>
             {signatureStatus === 'SIGNED' && (
-              <div className="flex items-center bg-green-50 text-green-700 px-3 py-1 rounded-full">
+              <div className="flex items-center bg-green-50 text-green-700 px-3 py-1 rounded-full self-start sm:self-auto">
                 <CheckCircle2 className="h-4 w-4 mr-2" />
                 <span className="text-sm font-medium">Signed</span>
               </div>
@@ -727,16 +727,16 @@ export default function ContractSigningPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            <div className="border rounded-md p-6 bg-gray-50">
+            <div className="border rounded-md p-4 sm:p-6 bg-gray-50">
               <div className="flex items-center gap-2 mb-4">
                 <FileText className="h-5 w-5 text-blue-600" />
                 <h3 className="text-lg font-medium">Contract Details</h3>
               </div>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="font-medium text-gray-500">Created By:</span>
-                    <p>{contract?.owner?.name || contract?.owner?.email || 'Unknown'}</p>
+                    <p className="break-words">{contract?.owner?.name || contract?.owner?.email || 'Unknown'}</p>
                   </div>
                   <div>
                     <span className="font-medium text-gray-500">Created On:</span>
@@ -754,11 +754,11 @@ export default function ContractSigningPage() {
               </div>
             </div>
             
-            <div className="border rounded-md p-6">
+            <div className="border rounded-md p-4 sm:p-6">
               <div className="prose max-w-none">
                 <h3 className="text-lg font-medium mb-4">Contract Content</h3>
                 {contract?.content ? (
-                  <pre className="whitespace-pre-wrap text-sm p-4 border rounded-md bg-gray-50">{contract.content}</pre>
+                  <pre className="whitespace-pre-wrap text-xs sm:text-sm p-4 border rounded-md bg-gray-50 overflow-x-auto">{contract.content}</pre>
                 ) : (
                   <p className="text-gray-500 italic">No content available</p>
                 )}
@@ -773,11 +773,11 @@ export default function ContractSigningPage() {
             )}
             
             {signatureStatus === 'SIGNED' && (
-              <div className="border rounded-md p-6 bg-green-50">
+              <div className="border rounded-md p-4 sm:p-6 bg-green-50">
                 <div className="flex items-center justify-center flex-col">
                   <CheckCircle2 className="h-12 w-12 text-green-600 mb-4" />
                   <h3 className="text-lg font-medium text-green-700">Contract Successfully Signed</h3>
-                  <p className="text-sm text-green-600 mt-2">
+                  <p className="text-sm text-green-600 mt-2 text-center">
                     You have successfully signed this contract.
                   </p>
                 </div>
@@ -808,8 +808,8 @@ export default function ContractSigningPage() {
             )}
           </div>
         </CardContent>
-        <CardFooter className="flex justify-between">
-          <Button variant="outline" onClick={() => router.push('/dashboard')}>
+        <CardFooter className="flex flex-col sm:flex-row justify-between gap-3">
+          <Button variant="outline" onClick={() => router.push('/dashboard')} className="w-full sm:w-auto">
             Back to Documents
           </Button>
           
@@ -817,7 +817,7 @@ export default function ContractSigningPage() {
             <Button 
               onClick={handleSignContract} 
               disabled={!signatureData || saving}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
             >
               {saving ? 'Saving...' : 'Sign Contract'}
             </Button>

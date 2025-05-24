@@ -120,3 +120,26 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Improve touch targets for mobile */
+@media (max-width: 640px) {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better text wrapping on mobile */
+  .text-wrap-mobile {
+    word-break: break-word;
+    hyphens: auto;
+  }
+  
+  /* Prevent zoom on inputs */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
