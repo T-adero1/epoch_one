@@ -831,11 +831,11 @@ export default function DashboardPage() {
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-gray-50">
-                        <TableHead className="text-gray-900">Title</TableHead>
-                        <TableHead className="text-gray-900">Status</TableHead>
-                        <TableHead className="text-gray-900">Created</TableHead>
-                        <TableHead className="text-gray-900">Signers</TableHead>
-                        <TableHead className="text-right text-gray-900">Actions</TableHead>
+                        <TableHead className="text-gray-900 w-[25%]">Title</TableHead>
+                        <TableHead className="text-gray-900 w-[25%] min-w-[180px]">Status</TableHead>
+                        <TableHead className="text-gray-900 w-[20%]">Created</TableHead>
+                        <TableHead className="text-gray-900 w-[15%]">Signers</TableHead>
+                        <TableHead className="text-right text-gray-900 w-[15%]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -848,27 +848,27 @@ export default function DashboardPage() {
                       ) : (
                         filteredContracts.map((contract) => (
                           <TableRow key={contract.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium text-gray-900">
+                            <TableCell className="font-medium text-gray-900 w-[25%]">
                               <div className="flex items-center gap-2 cursor-pointer" onClick={() => handleViewContract(contract)}>
-                                <FileText className="h-4 w-4 text-blue-600" />
-                                {contract.title}
+                                <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                                <span className="truncate">{contract.title}</span>
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="w-[25%] min-w-[180px]">
                               <div className="flex items-center gap-2">
-                                <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
-                                {getDisplayStatus(contract)}
+                                <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(contract)}`}></span>
+                                <span className="text-sm font-medium truncate">{getDisplayStatus(contract)}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-gray-600">
-                              {format(new Date(contract.createdAt), 'MMM dd, yyyy')}
+                            <TableCell className="text-gray-600 w-[20%]">
+                              <span className="text-sm">{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</span>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="w-[15%]">
                               <div className="flex items-center">
-                                {contract.metadata?.signers?.length || 0} signers
+                                <span className="text-sm">{contract.metadata?.signers?.length || 0} signers</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right w-[15%]">
                               <ContractActions 
                                 contractId={contract.id}
                                 status={contract.status}
@@ -886,7 +886,7 @@ export default function DashboardPage() {
                   </Table>
                 </div>
 
-                {/* Mobile Card View */}
+                {/* Mobile Card View - Enhanced for consistency */}
                 <div className="md:hidden space-y-3">
                   {filteredContracts.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
@@ -894,21 +894,22 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     filteredContracts.map((contract) => (
-                      <div key={contract.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors">
+                      <div key={contract.id} className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors min-h-[120px]">
                         <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 pr-3">
                             <div 
                               className="flex items-center gap-2 cursor-pointer mb-2"
                               onClick={() => handleViewContract(contract)}
                             >
                               <FileText className="h-4 w-4 text-blue-600 flex-shrink-0" />
-                              <h3 className="font-medium text-gray-900 truncate">{contract.title}</h3>
+                              <h3 className="font-medium text-gray-900 truncate text-sm">{contract.title}</h3>
                             </div>
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className={`inline-block w-2 h-2 rounded-full ${getStatusColor(contract)}`}></span>
-                              <span className="text-sm text-gray-600">{getDisplayStatus(contract)}</span>
+                            <div className="flex items-center gap-2 mb-2 min-h-[20px]">
+                              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${getStatusColor(contract)}`}></span>
+                              <span className="text-sm text-gray-600 font-medium">{getDisplayStatus(contract)}</span>
                             </div>
                           </div>
+                          <div className="flex-shrink-0">
                           <ContractActions 
                             contractId={contract.id}
                             status={contract.status}
@@ -919,7 +920,8 @@ export default function DashboardPage() {
                             onSend={() => handleSendContract(contract)}
                           />
                         </div>
-                        <div className="flex justify-between text-xs text-gray-500">
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500 pt-1 border-t border-gray-100">
                           <span>{format(new Date(contract.createdAt), 'MMM dd, yyyy')}</span>
                           <span>{contract.metadata?.signers?.length || 0} signers</span>
                         </div>
