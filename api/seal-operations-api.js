@@ -10,8 +10,7 @@ const axios = require('axios');
 // Convert exec to promise-based
 const execAsync = promisify(exec);
 
-// Near the beginning of the file add:
-const ENHANCED_LOGGING = process.env.ENHANCED_LOGGING === 'true' || false;
+
 
 // Add this function early in the file
 function extractSaltFromDocumentId(documentId, allowlistId) {

@@ -11,7 +11,7 @@ import { canUserSignContract, getUserSignatureStatus } from '@/app/utils/signatu
 import { format } from 'date-fns'
 import { SignZkLoginModal } from '@/components/SignZkLoginModal'
 
-import { randomBytes } from 'crypto'
+
 import ClientSideEncryptor from '@/components/contracts/ClientSideEncryptor'
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 import { 
@@ -141,15 +141,15 @@ export default function ContractSigningPage() {
       console.log('[ContractSigning] Public contract data received:', data)
       
       if (data.signers && data.signers.length > 0) {
-        console.log('[ContractSigning] Setting required email to first signer:', data.signers[0])
-        setRequiredEmail(data.signers[0])
+        console.log('[ContractSigning] Contract has signers:', data.signers)
+        // Don't set requiredEmail - allow any signer to authenticate
       } else {
         console.log('[ContractSigning] No signers found in contract metadata')
       }
     } catch (err) {
       console.error('[ContractSigning] Error fetching basic contract info:', err)
     }
-  }, [contractId, setError, setRequiredEmail])
+  }, [contractId, setError])
   
   // Fetch full contract details when authenticated
   const fetchContract = useCallback(async () => {
@@ -447,20 +447,18 @@ export default function ContractSigningPage() {
             contractId: updatedContract.id
           });
           
-          // Extract the signer email (other than current user)
+          // Extract the signer emails (other than current user)
           const signerEmails = updatedContract?.metadata?.signers || [];
           console.log('[ContractSigning] Found signer emails:', signerEmails);
-          const signerEmail = signerEmails.find((email: string) => email !== user.email) || '';
-          console.log('[ContractSigning] Selected signer email:', signerEmail);
+          const otherSignerEmails = signerEmails.filter((email: string) => email !== user.email);
+          console.log('[ContractSigning] Found other signer emails:', otherSignerEmails);
           
-          // Initialize signerWalletAddress
-          let signerWalletAddress = null;
-          
-          // Fetch signer wallet address
-          if (signerEmail) {
+          // Fetch wallet addresses for all other signers
+          const signerWalletAddresses = [];
+          for (const email of otherSignerEmails) {
             try {
-              console.log('[ContractSigning] Fetching wallet address for signer:', signerEmail);
-              const userApiUrl = `/api/users?email=${encodeURIComponent(signerEmail)}`;
+              console.log('[ContractSigning] Fetching wallet address for signer:', email);
+              const userApiUrl = `/api/users?email=${encodeURIComponent(email)}`;
               console.log('[ContractSigning] User API URL:', userApiUrl);
               const userResponse = await fetch(userApiUrl);
               console.log('[ContractSigning] User API response:', {
@@ -474,7 +472,7 @@ export default function ContractSigningPage() {
                   hasWalletAddress: !!userData.walletAddress,
                   walletAddressPrefix: userData.walletAddress ? userData.walletAddress.substring(0, 10) : 'none'
                 });
-                signerWalletAddress = userData.walletAddress || null;
+                signerWalletAddresses.push(userData.walletAddress || null);
               } else {
                 console.error('[ContractSigning] Failed to fetch signer user data:', {
                   status: userResponse.status,
@@ -489,8 +487,8 @@ export default function ContractSigningPage() {
             }
           }
           
-          // Now you can safely create the signerAddresses array
-          const signerAddresses = [userAddress, signerWalletAddress].filter(Boolean);
+          // Create final array with ALL addresses
+          const signerAddresses = [userAddress, ...signerWalletAddresses].filter(Boolean);
           console.log('[ContractSigning] Prepared signer addresses:', {
             count: signerAddresses.length,
             addresses: signerAddresses.map(addr => addr?.substring(0, 10) + '...')
