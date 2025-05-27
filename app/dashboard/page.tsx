@@ -251,6 +251,9 @@ export default function DashboardPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [selectedContractTab, setSelectedContractTab] = useState<string>("content");
 
+  // Add state to track if we're creating a contract
+  const [isCreatingInProgress, setIsCreatingInProgress] = useState(false);
+
   // Get user initials for avatar fallback
   const getUserInitials = () => {
     if (!user?.displayName) return 'U';
@@ -458,10 +461,42 @@ export default function DashboardPage() {
   }, [isAuthenticated, user?.email, loadContracts, isLoading, isAuthStateResolved]);
   
   const handleCreateContract = async () => {
-    if (!newContract.title || !newContract.description || !user?.email) return;
-
+    // Prevent spam clicking
+    if (isCreatingInProgress || !newContract.title || !newContract.description || !user?.email) return;
+    
     try {
-      const contract = await createContract({
+      setIsCreatingInProgress(true);
+      
+      // Create a temporary contract object for optimistic UI
+      const tempContract: ContractWithRelations = {
+        id: 'temp-' + Date.now(), // Temporary ID
+        title: newContract.title,
+        description: newContract.description,
+        content: newContract.content || '',
+        status: 'DRAFT',
+        ownerId: user.email,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        expiresAt: null,
+        metadata: {
+          signers: newContract.signers.filter(s => s.trim() !== ''),
+        },
+        owner: {
+          id: user.id || user.email,
+          name: user.displayName || null,
+          email: user.email,
+        },
+        signatures: [],
+      };
+
+      // Immediately close the creation modal and open editor optimistically
+      setIsCreatingContract(false);
+      setNewContract({ title: '', description: '', content: '', signers: [''] });
+      setSelectedContract(tempContract);
+      setIsEditingContract(true);
+      
+      // Create the actual contract in the background
+      const actualContract = await createContract({
         title: newContract.title,
         description: newContract.description,
         content: newContract.content || '',
@@ -471,27 +506,25 @@ export default function DashboardPage() {
         },
       });
 
-      // Add the new contract to the list
-      setContracts([contract as unknown as ContractWithRelations, ...contracts]);
-      
-      // Close the creation modal
-      setIsCreatingContract(false);
-      
-      // Reset the new contract form
-      setNewContract({ title: '', description: '', content: '', signers: [''] });
-      
-      // Set the selected contract and open the editor
-      setSelectedContract(contract as unknown as ContractWithRelations);
-      setIsEditingContract(true);
-      
+      // Update with the real contract data
+      setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
+      setSelectedContract(actualContract as unknown as ContractWithRelations);
     
     } catch (error) {
       console.error('Error creating contract:', error);
+      
+      // Revert optimistic changes on error
+      setIsEditingContract(false);
+      setSelectedContract(null);
+      setIsCreatingContract(true); // Reopen the creation dialog
+      
       toast({
         title: "Error",
         description: "Failed to create contract. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsCreatingInProgress(false);
     }
   };
   
@@ -502,13 +535,49 @@ export default function DashboardPage() {
   
   const handleDeleteContract = async () => {
     if (!contractToDelete) return;
+    
+    // Store the contract to delete for potential restoration
+    const contractToDeleteData = contracts.find(c => c.id === contractToDelete);
+    if (!contractToDeleteData) return;
+    
     try {
-      await deleteContract(contractToDelete);
+      // Optimistically remove the contract from UI immediately
       setContracts(contracts.filter(c => c.id !== contractToDelete));
-      setContractToDelete(null);
       setDeleteDialogOpen(false);
+      setContractToDelete(null);
+      
+      // Show optimistic feedback
+      toast({
+        title: "Contract deleted",
+        description: `"${contractToDeleteData.title}" has been deleted.`,
+        variant: "success",
+      });
+      
+      // Perform the actual deletion in the background
+      await deleteContract(contractToDelete);
+      
     } catch (error) {
       console.error('Error deleting contract:', error);
+      
+      // Revert optimistic changes on error
+      setContracts(prevContracts => {
+        // Find the position where the contract should be restored
+        // We'll add it back to maintain chronological order
+        const sortedContracts = [...prevContracts, contractToDeleteData].sort((a, b) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        return sortedContracts;
+      });
+      
+      // Show error message
+      toast({
+        title: "Error",
+        description: "Failed to delete contract. Please try again.",
+        variant: "destructive",
+      });
+      
+      // Reset the delete state in case user wants to try again
+      setContractToDelete(contractToDelete);
     }
   };
   
@@ -727,7 +796,7 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 truncate">Contract Dashboard</h1>
               <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                BETA
+              BETA ✨
               </span>
             </div>
             
@@ -846,7 +915,11 @@ export default function DashboardPage() {
                       <Button variant="outline" onClick={() => setIsCreatingContract(false)} className="border-gray-200 hover:bg-blue-50">
                         Cancel
                       </Button>
-                      <Button onClick={handleCreateContract} className="bg-blue-600 hover:bg-blue-700">
+                      <Button 
+                        onClick={handleCreateContract} 
+                        className="bg-blue-600 hover:bg-blue-700"
+                        disabled={isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim()}
+                      >
                         Create Contract
                       </Button>
                     </DialogFooter>
