@@ -303,12 +303,12 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           </TabsList>
           <TabsContent value="edit" className="min-h-[500px] relative">
             <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
-              {/* Header - Simplified */}
-              <div className="p-4 border-b flex justify-between items-center">
+              {/* Header - Mobile Responsive */}
+              <div className="p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
                 <div className="text-sm text-gray-500">
                   {showDiffMode ? (
-                    <div className="flex items-center gap-2">
-                      <span>AI Suggestions</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs sm:text-sm">AI Suggestions</span>
                       <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
                         {acceptedGroups.length} accepted
                       </span>
@@ -327,18 +327,18 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                   <Button
                     variant="outline"
                     size="sm"
-                    className="gap-2"
+                    className="gap-2 w-full sm:w-auto"
                     onClick={() => setShowAIPanel(!showAIPanel)}
                     disabled={isAIProcessing}
                   >
                     <Sparkles className="h-4 w-4" />
-                    Edit with AI
+                    <span className="sm:inline">Edit with AI</span>
                   </Button>
                 )}
               </div>
 
-              {/* Main Content Area */}
-              <div className={`relative ${showDiffMode ? 'h-[420px]' : 'h-[500px]'}`}>
+              {/* Main Content Area - Mobile Responsive Height */}
+              <div className={`relative ${showDiffMode ? 'h-[350px] sm:h-[420px]' : 'h-[400px] sm:h-[500px]'}`}>
                 {/* Contract Editor with Diff Overlay */}
                 <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
                   showAIPanel && !showDiffMode
@@ -357,7 +357,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                   />
                 </div>
 
-                {/* AI Panel */}
+                {/* AI Panel - Mobile Optimized */}
                 {!showDiffMode && (
                   <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
                     showAIPanel 
@@ -365,21 +365,21 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                       : 'translate-x-full opacity-0'
                   }`}>
                     <div className="h-full bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex flex-col">
-                      {/* Compact Fixed AI Header */}
+                      {/* Compact Fixed AI Header - Mobile Optimized */}
                       <div className="flex-shrink-0 text-center p-3 pb-2">
                         <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full mb-2">
                           <Brain className="h-4 w-4 text-white" />
                         </div>
                         <h3 className="text-sm font-semibold text-gray-800 mb-1">AI Assistant</h3>
-                        <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight">
+                        <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight px-2">
                           Describe how you'd like to improve your contract
                         </p>
                       </div>
 
-                      {/* Scrollable Content Area */}
-                      <div className="flex-1 overflow-y-auto px-4 pb-2">
-                        <div className="max-w-xl mx-auto space-y-4">
-                          {/* AI Input */}
+                      {/* Scrollable Content Area - Mobile Optimized */}
+                      <div className="flex-1 overflow-y-auto px-3 sm:px-4 pb-2">
+                        <div className="max-w-xl mx-auto space-y-3 sm:space-y-4">
+                          {/* AI Input - Mobile Optimized */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               What would you like me to help you with?
@@ -388,7 +388,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                               value={aiQuery}
                               onChange={(e) => setAiQuery(e.target.value)}
                               placeholder="For example: 'Add a confidentiality clause' or 'Make the language more formal'..."
-                              className="min-h-[80px] resize-none border-2 border-purple-200 focus:border-purple-400 focus:ring-purple-400 rounded-lg text-sm"
+                              className="min-h-[70px] sm:min-h-[80px] resize-none border-2 border-purple-200 focus:border-purple-400 focus:ring-purple-400 rounded-lg text-sm"
                               disabled={isAIProcessing}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -399,7 +399,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                             />
                           </div>
 
-                          {/* Quick Suggestions */}
+                          {/* Quick Suggestions - Mobile Grid */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                               <Lightbulb className="h-4 w-4" />
@@ -411,7 +411,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                                   key={index}
                                   onClick={() => setAiQuery(suggestion)}
                                   disabled={isAIProcessing}
-                                  className="text-left p-2.5 text-xs bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="text-left p-3 sm:p-2.5 text-xs bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-target"
                                 >
                                   {suggestion}
                                 </button>
@@ -421,12 +421,13 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                         </div>
                       </div>
 
-                      {/* Fixed Action Buttons Footer */}
-                      <div className="flex-shrink-0 p-4 pt-2 border-t border-purple-200 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
+                      {/* Fixed Action Buttons Footer - Mobile Optimized */}
+                      <div className="flex-shrink-0 p-3 sm:p-4 pt-2 border-t border-purple-200 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
                         <div className="max-w-xl mx-auto">
-                          <div className="flex items-center justify-between">
-                            <div className="text-xs text-gray-500">
-                              Press Ctrl+Enter to submit
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-0">
+                            <div className="text-xs text-gray-500 text-center sm:text-left">
+                              <span className="hidden sm:inline">Press Ctrl+Enter to submit</span>
+                              <span className="sm:hidden">Tap Enhance to continue</span>
                             </div>
                             <div className="flex gap-2">
                               <Button
@@ -437,7 +438,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                                   setAiQuery('')
                                 }}
                                 disabled={isAIProcessing}
-                                className="border-gray-300"
+                                className="border-gray-300 flex-1 sm:flex-none"
                               >
                                 Cancel
                               </Button>
@@ -445,12 +446,13 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                                 size="sm"
                                 onClick={handleAIEdit}
                                 disabled={!aiQuery.trim() || isAIProcessing}
-                                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white min-w-[100px]"
+                                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white min-w-[100px] flex-1 sm:flex-none"
                               >
                                 {isAIProcessing ? (
                                   <>
                                     <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                    Processing...
+                                    <span className="hidden sm:inline">Processing...</span>
+                                    <span className="sm:hidden">...</span>
                                   </>
                                 ) : (
                                   <>
@@ -468,69 +470,73 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                 )}
               </div>
 
-              {/* Diff Mode Action Bar - Only shown when in diff mode */}
+              {/* Diff Mode Action Bar - Mobile Optimized */}
               {showDiffMode && (
-                <div className="border-t bg-gradient-to-r from-gray-50 to-gray-100 p-4">
-                  <div className="flex items-center justify-between">
-                    {/* Left side - Bulk actions */}
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium text-gray-700">Quick Actions:</span>
+                <div className="border-t bg-gradient-to-r from-gray-50 to-gray-100 p-3 sm:p-4">
+                  <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 lg:gap-0">
+                    {/* Left side - Bulk actions - Mobile Stack */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                      <span className="text-sm font-medium text-gray-700 text-center sm:text-left">Quick Actions:</span>
                       <div className="flex gap-2">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={handleAcceptAllChanges}
-                          className="text-green-700 border-green-200 hover:bg-green-50 hover:border-green-300"
+                          className="text-green-700 border-green-200 hover:bg-green-50 hover:border-green-300 flex-1 sm:flex-none"
                           disabled={pendingChangesCount === 0}
                         >
                           <Check className="h-3 w-3 mr-1" />
-                          Accept All
+                          <span className="hidden sm:inline">Accept All</span>
+                          <span className="sm:hidden">Accept</span>
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={handleRejectAllChanges}
-                          className="text-red-700 border-red-200 hover:bg-red-50 hover:border-red-300"
+                          className="text-red-700 border-red-200 hover:bg-red-50 hover:border-red-300 flex-1 sm:flex-none"
                           disabled={pendingChangesCount === 0}
                         >
                           <X className="h-3 w-3 mr-1" />
-                          Reject All
+                          <span className="hidden sm:inline">Reject All</span>
+                          <span className="sm:hidden">Reject</span>
                         </Button>
                       </div>
                     </div>
                     
-                    {/* Right side - Primary actions */}
-                    <div className="flex items-center gap-3">
+                    {/* Right side - Primary actions - Mobile Stack */}
+                    <div className="flex items-center gap-2 sm:gap-3">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={handleDiscardChanges}
-                        className="border-gray-300 hover:bg-gray-50"
+                        className="border-gray-300 hover:bg-gray-50 flex-1 sm:flex-none"
                       >
                         <X className="h-3 w-3 mr-1" />
-                        Discard All Changes
+                        <span className="hidden sm:inline">Discard All Changes</span>
+                        <span className="sm:hidden">Discard</span>
                       </Button>
                       <Button
                         size="sm"
                         onClick={handleApplyChanges}
                         disabled={acceptedGroups.length === 0}
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md min-w-[140px]"
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md min-w-[100px] sm:min-w-[140px] flex-1 sm:flex-none"
                       >
                         <Check className="h-3 w-3 mr-1" />
-                        Apply {acceptedGroups.length} Change{acceptedGroups.length !== 1 ? 's' : ''}
+                        <span className="hidden sm:inline">Apply {acceptedGroups.length} Change{acceptedGroups.length !== 1 ? 's' : ''}</span>
+                        <span className="sm:hidden">Apply ({acceptedGroups.length})</span>
                       </Button>
                     </div>
                   </div>
                   
-                  {/* Progress indicator */}
+                  {/* Progress indicator - Mobile Optimized */}
                   {(acceptedGroups.length > 0 || pendingChangesCount > 0) && (
                     <div className="mt-3 pt-3 border-t border-gray-200">
-                      <div className="flex items-center justify-between text-xs text-gray-600">
-                        <span>
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-600">
+                        <span className="text-center sm:text-left">
                           Progress: {acceptedGroups.length} accepted, {pendingChangesCount} pending
                         </span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-32 bg-gray-200 rounded-full h-1.5">
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <div className="w-full sm:w-32 bg-gray-200 rounded-full h-1.5">
                             <div 
                               className="bg-gradient-to-r from-blue-500 to-purple-500 h-1.5 rounded-full transition-all duration-300"
                               style={{ 
@@ -538,7 +544,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                               }}
                             ></div>
                           </div>
-                          <span className="text-xs font-medium">
+                          <span className="text-xs font-medium whitespace-nowrap">
                             {Math.round((acceptedGroups.length / (acceptedGroups.length + pendingChangesCount)) * 100)}%
                           </span>
                         </div>
