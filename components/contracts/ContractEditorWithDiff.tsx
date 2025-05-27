@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Check, X, ChevronDown, ChevronRight, Plus, Minus, Edit3 } from 'lucide-react'
+import { Check, X, ChevronDown, ChevronRight, Plus, Minus, Edit3, Undo2 } from 'lucide-react'
 import { ChangeGroup } from '@/app/utils/textDiff'
 
 interface ContractEditorWithDiffProps {
@@ -87,6 +87,11 @@ export default function ContractEditorWithDiff({
   showDiff
 }: ContractEditorWithDiffProps) {
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+  const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
+  const [isSelected, setIsSelected] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [actionHistory, setActionHistory] = useState<{ groupId: string; action: 'accept' | 'reject' }[]>([]);
 
   const toggleExpanded = (groupId: string) => {
     setExpandedGroups(prev => 
@@ -211,53 +216,108 @@ export default function ContractEditorWithDiff({
     const groupSummary = getGroupSummary(group);
 
     return (
-      <div key={group.id} className={`group ${getGroupStyle(group)} mb-1`}>
-        {/* Group header */}
-        <div className="flex items-center justify-between p-2 bg-white bg-opacity-50">
-          <div className="flex items-center gap-2">
+      <div 
+        key={group.id} 
+        className={`group ${getGroupStyle(group)} mb-1`}
+        onMouseEnter={() => setHoveredGroup(group.id)}
+        onMouseLeave={() => setHoveredGroup(null)}
+        onClick={(e) => showControls && handleGroupClick(group.id, e)}
+        onContextMenu={(e) => showControls && handleGroupRightClick(group.id, e)}
+        onTouchStart={(e) => {
+          if (!showControls) return;
+          // Handle long press for mobile reject
+          const touchTimer = setTimeout(() => {
+            handleRejectGroup(group.id);
+          }, 500);
+          
+          const cleanup = () => {
+            clearTimeout(touchTimer);
+            e.target.removeEventListener('touchend', cleanup);
+            e.target.removeEventListener('touchcancel', cleanup);
+          };
+          
+          e.target.addEventListener('touchend', cleanup);
+          e.target.addEventListener('touchcancel', cleanup);
+        }}
+        onFocus={() => setFocusedGroup(group.id)}
+        tabIndex={showControls ? 0 : -1}
+      >
+        {/* Group header - Mobile Optimized */}
+        <div className="flex items-center justify-between p-2 sm:p-3 bg-white bg-opacity-50">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            {/* Selection checkbox for multi-select */}
+            {showControls && isSelected && (
+              <div className="w-4 h-4 bg-purple-500 rounded border-2 border-purple-500 flex items-center justify-center flex-shrink-0">
+                <Check className="h-2 w-2 text-white" />
+              </div>
+            )}
+            
             <button
-              onClick={() => toggleExpanded(group.id)}
-              className="flex items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpandedGroups(prev => 
+                  prev.includes(group.id) 
+                    ? prev.filter(id => id !== group.id)
+                    : [...prev, group.id]
+                );
+              }}
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 min-w-0 flex-1"
             >
               {isExpanded ? (
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-3 w-3 flex-shrink-0" />
               ) : (
-                <ChevronRight className="h-3 w-3" />
+                <ChevronRight className="h-3 w-3 flex-shrink-0" />
               )}
               {getGroupIcon(group.type)}
-              {groupSummary}
+              <span className="truncate">{groupSummary}</span>
             </button>
-            {status === 'accepted' && (
-              <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">
-                Accepted
-              </span>
-            )}
-            {status === 'rejected' && (
-              <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">
-                Rejected
-              </span>
-            )}
-            {isSpacingOnly && (
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                Auto-applied
-              </span>
-            )}
+            
+            {/* Status badges - Mobile Responsive */}
+            <div className="flex gap-1 flex-shrink-0">
+              {status === 'accepted' && (
+                <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded flex items-center gap-1">
+                  <Check className="h-3 w-3" />
+                  <span className="hidden sm:inline">Accepted</span>
+                </span>
+              )}
+              {status === 'rejected' && (
+                <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded flex items-center gap-1">
+                  <X className="h-3 w-3" />
+                  <span className="hidden sm:inline">Rejected</span>
+                </span>
+              )}
+              {isSpacingOnly && (
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                  <span className="hidden sm:inline">Auto-applied</span>
+                  <span className="sm:hidden">Auto</span>
+                </span>
+              )}
+            </div>
           </div>
           
-          {showControls && (
-            <div className="flex gap-1">
+          {/* Quick action buttons - Always visible on mobile for pending items */}
+          {showControls && status === 'pending' && (
+            <div className={`flex gap-1 ${isHovered || isFocused ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'} transition-opacity duration-200`}>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onRejectGroup(group.id)}
-                className="h-6 w-6 p-0 text-red-600 border-red-200 hover:bg-red-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRejectGroup(group.id);
+                }}
+                className="h-8 w-8 sm:h-7 sm:w-7 p-0 text-red-600 border-red-200 hover:bg-red-50 touch-target"
+                title="Reject"
               >
                 <X className="h-3 w-3" />
               </Button>
               <Button
                 size="sm"
-                onClick={() => onAcceptGroup(group.id)}
-                className="h-6 w-6 p-0 bg-green-600 hover:bg-green-700 text-white"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAcceptGroup(group.id);
+                }}
+                className="h-8 w-8 sm:h-7 sm:w-7 p-0 bg-green-600 hover:bg-green-700 text-white touch-target"
+                title="Accept"
               >
                 <Check className="h-3 w-3" />
               </Button>
@@ -301,32 +361,41 @@ export default function ContractEditorWithDiff({
           </div>
         )}
         
-        {/* Collapsed preview */}
+        {/* Collapsed preview with mobile-friendly hints */}
         {!isExpanded && group.type !== 'unchanged' && (
           <div className="p-2 bg-white bg-opacity-30 border-t border-gray-200">
-            <div className="text-xs text-gray-600">
-              {group.type === 'addition' && (
-                <div>
-                  {renderLinesWithoutBlanks(group.newLines.slice(0, 1), '+ ', 'truncate')}
-                  {group.newLines.length > 1 && <span className="text-gray-500"> ...</span>}
-                </div>
-              )}
-              {group.type === 'deletion' && (
-                <div>
-                  {renderLinesWithoutBlanks(group.originalLines.slice(0, 1), '- ', 'truncate line-through')}
-                  {group.originalLines.length > 1 && <span className="text-gray-500"> ...</span>}
-                </div>
-              )}
-              {group.type === 'modification' && (
-                <div>
-                  {renderLinesWithoutBlanks(
-                    (group.newLines.length > 0 ? group.newLines : group.originalLines).slice(0, 1), 
-                    '~ ', 
-                    'truncate'
-                  )}
-                  {(group.originalLines.length > 1 || group.newLines.length > 1) && 
-                    <span className="text-gray-500"> ...</span>
-                  }
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-gray-600 flex-1 min-w-0">
+                {group.type === 'addition' && (
+                  <div>
+                    {renderLinesWithoutBlanks(group.newLines.slice(0, 1), '+ ', 'truncate')}
+                    {group.newLines.length > 1 && <span className="text-gray-500"> ...</span>}
+                  </div>
+                )}
+                {group.type === 'deletion' && (
+                  <div>
+                    {renderLinesWithoutBlanks(group.originalLines.slice(0, 1), '- ', 'truncate line-through')}
+                    {group.originalLines.length > 1 && <span className="text-gray-500"> ...</span>}
+                  </div>
+                )}
+                {group.type === 'modification' && (
+                  <div>
+                    {renderLinesWithoutBlanks(
+                      (group.newLines.length > 0 ? group.newLines : group.originalLines).slice(0, 1), 
+                      '~ ', 
+                      'truncate'
+                    )}
+                    {(group.originalLines.length > 1 || group.newLines.length > 1) && 
+                      <span className="text-gray-500"> ...</span>
+                    }
+                  </div>
+                )}
+              </div>
+              
+              {showControls && status === 'pending' && (
+                <div className="text-xs text-gray-400 ml-2 flex-shrink-0">
+                  <span className="hidden sm:inline">Click to accept • Right-click to reject</span>
+                  <span className="sm:hidden">Tap to accept</span>
                 </div>
               )}
             </div>
@@ -351,6 +420,28 @@ export default function ContractEditorWithDiff({
     <div className="h-full overflow-y-auto bg-white">
       <div className="min-h-full">
         {changeGroups.map((group, index) => renderGroup(group, index))}
+      </div>
+
+      {/* Keyboard shortcuts help - Mobile Optimized */}
+      <div className="sticky top-0 bg-blue-50 border-b border-blue-200 px-3 sm:px-4 py-2 text-xs text-blue-700 z-10">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span className="text-center sm:text-left">
+            💡 <strong className="hidden sm:inline">Quick actions:</strong>
+            <span className="sm:hidden"><strong>Tap</strong> to accept • <strong>Long press</strong> to reject</span>
+            <span className="hidden sm:inline">Click to accept • Right-click to reject • ↑↓ to navigate • Enter to accept • Delete to reject</span>
+          </span>
+          {actionHistory.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleUndoLastAction}
+              className="h-6 text-xs border-blue-300 hover:bg-blue-100 w-full sm:w-auto"
+            >
+              <Undo2 className="h-3 w-3 mr-1" />
+              Undo
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
