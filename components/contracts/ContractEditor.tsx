@@ -365,20 +365,20 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                       : 'translate-x-full opacity-0'
                   }`}>
                     <div className="h-full bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex flex-col">
-                      {/* Compact Fixed AI Header - Mobile Optimized */}
-                      <div className="flex-shrink-0 text-center p-3 pb-2">
-                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full mb-2">
-                          <Brain className="h-4 w-4 text-white" />
-                        </div>
-                        <h3 className="text-sm font-semibold text-gray-800 mb-1">AI Assistant</h3>
-                        <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight px-2">
-                          Describe how you'd like to improve your contract
-                        </p>
-                      </div>
-
-                      {/* Scrollable Content Area - Mobile Optimized */}
+                      {/* Scrollable Content Area - Now includes everything scrollable */}
                       <div className="flex-1 overflow-y-auto px-3 sm:px-4 pb-2">
                         <div className="max-w-xl mx-auto space-y-3 sm:space-y-4">
+                          {/* AI Header - Now scrollable */}
+                          <div className="text-center pt-3 pb-2">
+                            <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full mb-2">
+                              <Brain className="h-4 w-4 text-white" />
+                            </div>
+                            <h3 className="text-sm font-semibold text-gray-800 mb-1">AI Assistant</h3>
+                            <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight px-2">
+                              Describe how you'd like to improve your contract
+                            </p>
+                          </div>
+
                           {/* AI Input - Mobile Optimized */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -421,7 +421,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                         </div>
                       </div>
 
-                      {/* Fixed Action Buttons Footer - Mobile Optimized */}
+                      {/* Fixed Action Buttons Footer - Only this stays fixed */}
                       <div className="flex-shrink-0 p-3 sm:p-4 pt-2 border-t border-purple-200 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
                         <div className="max-w-xl mx-auto">
                           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-0">
