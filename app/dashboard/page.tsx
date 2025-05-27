@@ -553,15 +553,69 @@ export default function DashboardPage() {
         throw new Error('Failed to update contract status');
       }
       
-      // Refresh contracts list
-      loadContracts();
+      // Send emails to signers
+      const metadata = contract.metadata as { signers?: string[] } | null;
+      const signerEmails = metadata?.signers || [];
       
-      // Show success message
+      if (signerEmails.length > 0) {
+        try {
+          const emailResponse = await fetch('/api/email/send-contract', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contractId: contract.id,
+              contractTitle: contract.title,
+              ownerName: contract.owner.name || contract.owner.email,
+              signerEmails,
+            }),
+          });
+          
+          const emailResult = await emailResponse.json();
+          
+          if (!emailResponse.ok) {
+            console.error('Email sending failed:', emailResult);
+            // Don't fail the entire operation if email fails
       toast({
-        title: "Contract sent",
-        description: "Contract is now ready for signatures.",
+              title: "Contract sent with warning",
+              description: "Contract status updated but some emails may not have been sent.",
+              variant: "destructive",
+            });
+          } else {
+            // Check for partial failures
+            if (emailResult.partialFailure && emailResult.partialFailure.length > 0) {
+              toast({
+                title: "Contract sent with warnings",
+                description: `Contract sent, but ${emailResult.partialFailure.length} email(s) failed to send.`,
+                variant: "destructive",
+              });
+            } else {
+              toast({
+                title: "Contract sent successfully",
+                description: `Signing invitations sent to ${signerEmails.length} recipient(s).`,
         variant: "success",
       });
+            }
+          }
+        } catch (emailError) {
+          console.error('Email service error:', emailError);
+          toast({
+            title: "Contract sent with warning",
+            description: "Contract status updated but email notifications failed.",
+            variant: "destructive",
+          });
+        }
+      } else {
+        toast({
+          title: "Contract status updated",
+          description: "No signers specified for email notifications.",
+          variant: "success",
+        });
+      }
+      
+      // Refresh contracts list
+      loadContracts();
       
       // Open the contract details on the SIGNERS tab
       setSelectedContract(contract);
