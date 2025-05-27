@@ -13,8 +13,11 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles } from 'lucide-react'
+import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
+import { detectGroupedChanges, applyGroupedChanges, ChangeGroup } from '@/app/utils/textDiff'
+import AIChangesReview from './AIChangesReview'
+import ContractEditorWithDiff from './ContractEditorWithDiff'
 
 
 interface ContractEditorProps {
@@ -29,6 +32,13 @@ interface OriginalValues {
   title: string;
   description: string;
   signers: string[];
+}
+
+// Add this helper function at the top of the component
+function isSpacingOnlyChange(group: ChangeGroup): boolean {
+  const filteredOriginal = group.originalLines.filter(line => line.trim() !== '');
+  const filteredNew = group.newLines.filter(line => line.trim() !== '');
+  return filteredOriginal.length === 0 && filteredNew.length === 0;
 }
 
 export default function ContractEditor({ contract, onSave, onCancel }: ContractEditorProps) {
@@ -47,6 +57,24 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
   
   // State to track if any changes have been made
   const [hasChanges, setHasChanges] = useState(false)
+  
+  // AI functionality state
+  const [showAIPanel, setShowAIPanel] = useState(false)
+  const [aiQuery, setAiQuery] = useState('')
+  const [isAIProcessing, setIsAIProcessing] = useState(false)
+  const [aiSuggestions] = useState([
+    "Make this contract more professional and formal",
+    "Add a confidentiality clause",
+    "Include payment terms and conditions", 
+    "Add termination and cancellation clauses",
+    "Simplify the language for easier understanding",
+    "Add liability and insurance provisions"
+  ])
+  const [aiSuggestion, setAiSuggestion] = useState<string>('')
+  const [detectedChangeGroups, setDetectedChangeGroups] = useState<ChangeGroup[]>([])
+  const [acceptedGroups, setAcceptedGroups] = useState<string[]>([])
+  const [rejectedGroups, setRejectedGroups] = useState<string[]>([])
+  const [showDiffMode, setShowDiffMode] = useState(false)
   
   // Initialize values when contract changes
   useEffect(() => {
@@ -104,14 +132,14 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
   
   const handleSignerChange = (index: number, value: string) => {
     const newSigners = [...signers]
-    newSigners[index] = value
+    newSigners[index] = value.toLowerCase()
     setSigners(newSigners)
   }
 
   const handleSave = async () => {
     try {
-      // Filter out empty signers
-      const filteredSigners = signers.filter(s => s.trim() !== '')
+      // Filter out empty signers and convert to lowercase
+      const filteredSigners = signers.filter(s => s.trim() !== '').map(s => s.toLowerCase())
       
       const updatedContract = await updateContract(contract.id, {
         title,
@@ -137,6 +165,105 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
       console.error('Error updating contract:', error)
     }
   }
+
+  const handleAIEdit = async () => {
+    if (!aiQuery.trim()) return
+    
+    setIsAIProcessing(true)
+    try {
+      const response = await fetch('/api/ai/edit-contract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentContent: content,
+          query: aiQuery,
+          contractTitle: title,
+          contractDescription: description
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error('AI editing failed')
+      }
+      
+      const data = await response.json()
+      setAiSuggestion(data.editedContent)
+      
+      // Detect grouped changes
+      const diffResult = detectGroupedChanges(content, data.editedContent)
+      setDetectedChangeGroups(diffResult.changeGroups)
+      
+      // Automatically accept spacing-only changes
+      const spacingOnlyGroups = diffResult.changeGroups
+        .filter(group => group.type !== 'unchanged' && isSpacingOnlyChange(group))
+        .map(group => group.id);
+      
+      setAcceptedGroups(spacingOnlyGroups)
+      setRejectedGroups([])
+      setShowDiffMode(true)
+      setShowAIPanel(false)
+      setAiQuery('')
+      
+    } catch (error) {
+      console.error('AI editing error:', error)
+    } finally {
+      setIsAIProcessing(false)
+    }
+  }
+
+  const handleAcceptGroup = (groupId: string) => {
+    setAcceptedGroups(prev => [...prev, groupId])
+    setRejectedGroups(prev => prev.filter(id => id !== groupId))
+  }
+
+  const handleRejectGroup = (groupId: string) => {
+    setRejectedGroups(prev => [...prev, groupId])
+    setAcceptedGroups(prev => prev.filter(id => id !== groupId))
+  }
+
+  const handleAcceptAllChanges = () => {
+    const changeableIds = detectedChangeGroups
+      .filter(group => group.type !== 'unchanged')
+      .map(group => group.id)
+    setAcceptedGroups(changeableIds)
+    setRejectedGroups([])
+  }
+
+  const handleRejectAllChanges = () => {
+    const changeableIds = detectedChangeGroups
+      .filter(group => group.type !== 'unchanged')
+      .map(group => group.id)
+    setRejectedGroups(changeableIds)
+    setAcceptedGroups([])
+  }
+
+  const handleApplyChanges = () => {
+    const updatedContent = applyGroupedChanges(content, detectedChangeGroups, acceptedGroups)
+    setContent(updatedContent)
+    setShowDiffMode(false)
+    setDetectedChangeGroups([])
+    setAcceptedGroups([])
+    setRejectedGroups([])
+    setAiSuggestion('')
+  }
+
+  const handleDiscardChanges = () => {
+    setShowDiffMode(false)
+    setDetectedChangeGroups([])
+    setAcceptedGroups([])
+    setRejectedGroups([])
+    setAiSuggestion('')
+  }
+
+  // Update the pending changes count to exclude spacing-only changes
+  const pendingChangesCount = detectedChangeGroups.filter(group => 
+    group.type !== 'unchanged' && 
+    !acceptedGroups.includes(group.id) && 
+    !rejectedGroups.includes(group.id) &&
+    !isSpacingOnlyChange(group)
+  ).length
 
   return (
     <Card className="w-full h-full border-none shadow-none">
@@ -174,28 +301,252 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
             <TabsTrigger value="signers">Signers</TabsTrigger>
             
           </TabsList>
-          <TabsContent value="edit" className="min-h-[500px]">
-            <div className="border rounded-md min-h-[500px] bg-white">
-              <div className="p-4 border-b flex justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => {
-                    // TODO: Implement AI editing functionality
-                    console.log('AI edit clicked')
-                  }}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Edit with AI
-                </Button>
+          <TabsContent value="edit" className="min-h-[500px] relative">
+            <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
+              {/* Header - Simplified */}
+              <div className="p-4 border-b flex justify-between items-center">
+                <div className="text-sm text-gray-500">
+                  {showDiffMode ? (
+                    <div className="flex items-center gap-2">
+                      <span>AI Suggestions</span>
+                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                        {acceptedGroups.length} accepted
+                      </span>
+                      {pendingChangesCount > 0 && (
+                        <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+                          {pendingChangesCount} pending
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    'Contract Editor'
+                  )}
+                </div>
+                
+                {!showDiffMode && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setShowAIPanel(!showAIPanel)}
+                    disabled={isAIProcessing}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Edit with AI
+                  </Button>
+                )}
               </div>
-              <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="min-h-[500px] resize-none p-6 font-mono text-sm w-full border-none focus-visible:ring-0 focus:outline-none"
-                placeholder="Write your contract content here..."
-              />
+
+              {/* Main Content Area */}
+              <div className={`relative ${showDiffMode ? 'h-[420px]' : 'h-[500px]'}`}>
+                {/* Contract Editor with Diff Overlay */}
+                <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
+                  showAIPanel && !showDiffMode
+                    ? '-translate-x-full opacity-0' 
+                    : 'translate-x-0 opacity-100'
+                }`}>
+                  <ContractEditorWithDiff
+                    content={content}
+                    changeGroups={detectedChangeGroups}
+                    acceptedGroups={acceptedGroups}
+                    rejectedGroups={rejectedGroups}
+                    onAcceptGroup={handleAcceptGroup}
+                    onRejectGroup={handleRejectGroup}
+                    onContentChange={setContent}
+                    showDiff={showDiffMode}
+                  />
+                </div>
+
+                {/* AI Panel */}
+                {!showDiffMode && (
+                  <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
+                    showAIPanel 
+                      ? 'translate-x-0 opacity-100' 
+                      : 'translate-x-full opacity-0'
+                  }`}>
+                    <div className="h-full bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex flex-col">
+                      {/* Compact Fixed AI Header */}
+                      <div className="flex-shrink-0 text-center p-3 pb-2">
+                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full mb-2">
+                          <Brain className="h-4 w-4 text-white" />
+                        </div>
+                        <h3 className="text-sm font-semibold text-gray-800 mb-1">AI Assistant</h3>
+                        <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight">
+                          Describe how you'd like to improve your contract
+                        </p>
+                      </div>
+
+                      {/* Scrollable Content Area */}
+                      <div className="flex-1 overflow-y-auto px-4 pb-2">
+                        <div className="max-w-xl mx-auto space-y-4">
+                          {/* AI Input */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              What would you like me to help you with?
+                            </label>
+                            <Textarea
+                              value={aiQuery}
+                              onChange={(e) => setAiQuery(e.target.value)}
+                              placeholder="For example: 'Add a confidentiality clause' or 'Make the language more formal'..."
+                              className="min-h-[80px] resize-none border-2 border-purple-200 focus:border-purple-400 focus:ring-purple-400 rounded-lg text-sm"
+                              disabled={isAIProcessing}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                  e.preventDefault()
+                                  handleAIEdit()
+                                }
+                              }}
+                            />
+                          </div>
+
+                          {/* Quick Suggestions */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                              <Lightbulb className="h-4 w-4" />
+                              Quick Suggestions
+                            </label>
+                            <div className="grid grid-cols-1 gap-2">
+                              {aiSuggestions.map((suggestion, index) => (
+                                <button
+                                  key={index}
+                                  onClick={() => setAiQuery(suggestion)}
+                                  disabled={isAIProcessing}
+                                  className="text-left p-2.5 text-xs bg-white border border-purple-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {suggestion}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Fixed Action Buttons Footer */}
+                      <div className="flex-shrink-0 p-4 pt-2 border-t border-purple-200 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
+                        <div className="max-w-xl mx-auto">
+                          <div className="flex items-center justify-between">
+                            <div className="text-xs text-gray-500">
+                              Press Ctrl+Enter to submit
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setShowAIPanel(false)
+                                  setAiQuery('')
+                                }}
+                                disabled={isAIProcessing}
+                                className="border-gray-300"
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={handleAIEdit}
+                                disabled={!aiQuery.trim() || isAIProcessing}
+                                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white min-w-[100px]"
+                              >
+                                {isAIProcessing ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    Processing...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Wand2 className="h-3 w-3 mr-1" />
+                                    Enhance
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Diff Mode Action Bar - Only shown when in diff mode */}
+              {showDiffMode && (
+                <div className="border-t bg-gradient-to-r from-gray-50 to-gray-100 p-4">
+                  <div className="flex items-center justify-between">
+                    {/* Left side - Bulk actions */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-gray-700">Quick Actions:</span>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleAcceptAllChanges}
+                          className="text-green-700 border-green-200 hover:bg-green-50 hover:border-green-300"
+                          disabled={pendingChangesCount === 0}
+                        >
+                          <Check className="h-3 w-3 mr-1" />
+                          Accept All
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleRejectAllChanges}
+                          className="text-red-700 border-red-200 hover:bg-red-50 hover:border-red-300"
+                          disabled={pendingChangesCount === 0}
+                        >
+                          <X className="h-3 w-3 mr-1" />
+                          Reject All
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    {/* Right side - Primary actions */}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDiscardChanges}
+                        className="border-gray-300 hover:bg-gray-50"
+                      >
+                        <X className="h-3 w-3 mr-1" />
+                        Discard All Changes
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleApplyChanges}
+                        disabled={acceptedGroups.length === 0}
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-md min-w-[140px]"
+                      >
+                        <Check className="h-3 w-3 mr-1" />
+                        Apply {acceptedGroups.length} Change{acceptedGroups.length !== 1 ? 's' : ''}
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {/* Progress indicator */}
+                  {(acceptedGroups.length > 0 || pendingChangesCount > 0) && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <div className="flex items-center justify-between text-xs text-gray-600">
+                        <span>
+                          Progress: {acceptedGroups.length} accepted, {pendingChangesCount} pending
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-32 bg-gray-200 rounded-full h-1.5">
+                            <div 
+                              className="bg-gradient-to-r from-blue-500 to-purple-500 h-1.5 rounded-full transition-all duration-300"
+                              style={{ 
+                                width: `${(acceptedGroups.length / (acceptedGroups.length + pendingChangesCount)) * 100}%` 
+                              }}
+                            ></div>
+                          </div>
+                          <span className="text-xs font-medium">
+                            {Math.round((acceptedGroups.length / (acceptedGroups.length + pendingChangesCount)) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </TabsContent>
           <TabsContent value="signers" className="min-h-[500px]">

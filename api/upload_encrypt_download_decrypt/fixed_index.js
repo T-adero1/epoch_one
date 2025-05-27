@@ -197,7 +197,7 @@ async function runCompleteWorkflow(options = {}) {
     }
     // Create session key for user to decrypt
     console.log('\n Creating session key for user to decrypt...');
-    const sessionKey = await seal.createSessionKey(userKeypair, config.ALLOWLIST_PACKAGE_ID);
+    const sessionKey = await seal.createSessionKey(userKeypair, config.ALLOWLIST_PACKAGE_ID, suiClient);
     
     // Approve and fetch keys
     const { txKindBytes } = await seal.approveAndFetchKeys(

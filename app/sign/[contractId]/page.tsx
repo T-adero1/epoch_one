@@ -99,7 +99,7 @@ function generateContractDocument(contractData: ContractDetail): string {
 
 export default function ContractSigningPage() {
   const { contractId } = useParams() as { contractId: string }
-  const { isAuthenticated, isLoading, user, userAddress, zkLoginState } = useZkLogin()
+  const { isAuthenticated, isLoading, user, userAddress, zkLoginState, logout } = useZkLogin()
   const router = useRouter()
   
   const [contract, setContract] = useState<ContractDetail | null>(null)
@@ -685,7 +685,7 @@ export default function ContractSigningPage() {
                 Back to Documents
               </Button>
               {requiredEmail && (
-                <Button onClick={() => setShowLoginModal(true)}>
+                <Button onClick={logout}>
                   Sign in with {requiredEmail}
                 </Button>
               )}

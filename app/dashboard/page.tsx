@@ -891,7 +891,7 @@ export default function DashboardPage() {
                               value={signer}
                               onChange={(e) => {
                                 const newSigners = [...newContract.signers];
-                                newSigners[index] = e.target.value;
+                                newSigners[index] = e.target.value.toLowerCase();
                                 setNewContract({ ...newContract, signers: newSigners });
                               }}
                               placeholder="Signer email"
