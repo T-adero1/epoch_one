@@ -1,7 +1,7 @@
 const { suiPrivkeyToKeypair } = require('./sui_key_utils');
 
 // Replace this with your test key
-const testPrivateKey = "suiprivkey1qpu557wvvw66r32k8gv98chm36l9yrmuufl8fhfcekk82h3839s4qdc5nxc";
+const testPrivateKey = "";
 
 console.log('\n Testing suiPrivkeyToKeypair...');
 try {
