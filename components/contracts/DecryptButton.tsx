@@ -9,9 +9,9 @@ import { toast } from '@/components/ui/use-toast';
 import { SealClient, SessionKey, getAllowlistedKeyServers } from '@mysten/seal';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromB64, toHEX, fromHEX, toB64 } from '@mysten/sui/utils';
+import { fromB64, fromHEX, } from '@mysten/sui/utils';
 import { bech32 } from 'bech32';
-import { genAddressSeed, getZkLoginSignature, jwtToAddress } from '@mysten/sui/zklogin';
+import { genAddressSeed, getZkLoginSignature} from '@mysten/sui/zklogin';
 
 // Utility function to decode a Sui bech32 private key
 function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
