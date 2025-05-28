@@ -41,8 +41,10 @@ yarn-error.log*
 next-env.d.ts
 .env*.local
 
-# pnpm
+# lock files
+package-lock.json
 pnpm-lock.yaml
+yarn.lock
 
 # api
 api/seal_how_to/build
