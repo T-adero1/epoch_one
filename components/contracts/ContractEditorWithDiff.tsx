@@ -93,6 +93,40 @@ export default function ContractEditorWithDiff({
   const [isHovered, setIsHovered] = useState(false);
   const [actionHistory, setActionHistory] = useState<{ groupId: string; action: 'accept' | 'reject' }[]>([]);
 
+  const handleAcceptGroup = (groupId: string) => {
+    setActionHistory(prev => [...prev, { groupId, action: 'accept' }]);
+    onAcceptGroup(groupId);
+  };
+
+  const handleRejectGroup = (groupId: string) => {
+    setActionHistory(prev => [...prev, { groupId, action: 'reject' }]);
+    onRejectGroup(groupId);
+  };
+
+  const handleGroupClick = (groupId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    handleAcceptGroup(groupId);
+  };
+
+  const handleGroupRightClick = (groupId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    handleRejectGroup(groupId);
+  };
+
+  const handleUndoLastAction = () => {
+    if (actionHistory.length === 0) return;
+    
+    const lastAction = actionHistory[actionHistory.length - 1];
+    setActionHistory(prev => prev.slice(0, -1));
+    
+    // Reverse the last action
+    if (lastAction.action === 'accept') {
+      onRejectGroup(lastAction.groupId);
+    } else {
+      onAcceptGroup(lastAction.groupId);
+    }
+  };
+
   const toggleExpanded = (groupId: string) => {
     setExpandedGroups(prev => 
       prev.includes(groupId) 
@@ -194,6 +228,7 @@ export default function ContractEditorWithDiff({
     const isSpacingOnly = isSpacingOnlyChange(group);
     const showControls = group.type !== 'unchanged' && status === 'pending' && !isSpacingOnly;
     const isExpanded = expandedGroups.includes(group.id);
+    const isFocused = focusedGroup === group.id;
     
     if (group.type === 'unchanged') {
       // Render unchanged lines normally
