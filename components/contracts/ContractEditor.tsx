@@ -441,16 +441,19 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                 </div>
                 
                 {!showDiffMode && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 w-full sm:w-auto"
-                    onClick={() => setShowAIPanel(!showAIPanel)}
-                    disabled={isAIProcessing}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    <span className="sm:inline">Edit with AI</span>
-                  </Button>
+                  <div className="relative group">
+                    <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-200"></div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="relative gap-2 w-full sm:w-auto bg-white"
+                      onClick={() => setShowAIPanel(!showAIPanel)}
+                      disabled={isAIProcessing}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      <span className="sm:inline">Edit with AI</span>
+                    </Button>
+                  </div>
                 )}
               </div>
 
