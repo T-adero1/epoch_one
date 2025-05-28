@@ -28,6 +28,7 @@ import ContractEditor from './ContractEditor'
 import { Avatar, AvatarFallback} from '@/components/ui/avatar'
 import { generateSigningLink, areAllSignaturesDone } from '@/app/utils/signatures'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
+import { toast } from '@/components/ui/use-toast'
 
 // Define interface for the contract used in this component
 interface ContractSignature {
@@ -67,13 +68,15 @@ interface ContractDetailsProps {
   onBack: () => void;
   onUpdate: (updatedContract: Contract) => void;
   defaultTab?: string;
+  onSend?: () => void;
 }
 
 export default function ContractDetails({ 
   contract, 
   onBack, 
   onUpdate, 
-  defaultTab = "content"
+  defaultTab = "content",
+  onSend
 }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
@@ -90,6 +93,84 @@ export default function ContractDetails({
     setCopySuccess(`Link for ${email} copied!`)
     setTimeout(() => setCopySuccess(''), 3000)
   }
+  
+  const handleSendContract = async () => {
+    try {
+      toast({
+        title: "Sending contract...",
+        description: "Preparing signing invitations.",
+      });
+
+      const response = await fetch(`/api/contracts/${contract.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'PENDING' }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update contract status');
+      }
+
+      const updatedContract = await response.json();
+
+      const signerEmails = contract.metadata?.signers || [];
+      
+      if (signerEmails.length > 0) {
+        const emailResponse = await fetch('/api/email/send-contract', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contractId: contract.id,
+            contractTitle: contract.title,
+            ownerName: contract.owner?.name || contract.owner?.email,
+            signerEmails,
+          }),
+        });
+
+        const emailResult = await emailResponse.json();
+
+        if (emailResponse.ok) {
+          if (emailResult.partialFailure && emailResult.partialFailure.length > 0) {
+            toast({
+              title: "Contract sent with warnings",
+              description: `Contract sent, but ${emailResult.partialFailure.length} email(s) failed to send.`,
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Contract sent successfully",
+              description: `Signing invitations sent to ${signerEmails.length} recipient(s).`,
+              variant: "success",
+            });
+          }
+        } else {
+          toast({
+            title: "Contract sent with warning",
+            description: "Contract status updated but emails may not have been sent.",
+            variant: "destructive",
+          });
+        }
+      }
+
+      onUpdate(updatedContract);
+      
+      if (onSend) {
+        onSend();
+      }
+
+    } catch (error) {
+      console.error('Error sending contract:', error);
+      toast({
+        title: "Error",
+        description: "Failed to send contract. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
   
   if (isEditing) {
     return (
@@ -310,7 +391,11 @@ export default function ContractDetails({
               <Edit className="h-4 w-4 mr-2" />
               Edit
             </Button>
-            <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
+            <Button 
+              onClick={handleSendContract}
+              className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+              disabled={!contract.metadata?.signers?.length}
+            >
               <Send className="h-4 w-4 mr-2" />
               Send for Signature
             </Button>
