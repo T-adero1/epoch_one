@@ -54,14 +54,14 @@ async function encryptAndUpload(config) {
   
   // Set required environment variables from config
   process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.sealPackageId;
-  process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
+  process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
   process.env.ADMIN_PRIVATE_KEY = config.adminPrivateKey;
   process.env.NETWORK = config.network || 'testnet';
   
   console.log('\n Configuration:');
   console.log(`- Network: ${process.env.NETWORK}`);
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
-  console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
+  console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   
   // NEW: Check for base64 content as an alternative to file path
   if (config.documentContentBase64) {
@@ -309,14 +309,14 @@ async function downloadAndDecrypt(config) {
   
   // Set required environment variables from config
   process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.sealPackageId;
-  process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
+  process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID = config.allowlistPackageId || config.sealPackageId;
   process.env.USER_PRIVATE_KEY = config.userPrivateKey;
   process.env.NETWORK = config.network || 'testnet';
   
   console.log('\n Configuration:');
   console.log(`- Network: ${process.env.NETWORK}`);
   console.log(`- Seal Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
-  console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID}`);
+  console.log(`- Allowlist Package ID: ${process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID}`);
   console.log(`- Blob ID: ${config.blobId}`);
   console.log(`- Allowlist ID: ${config.allowlistId}`);
   console.log(`- Document ID: ${config.documentIdHex}`);

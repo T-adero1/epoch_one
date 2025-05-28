@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get package ID from environment
-    const packageId = process.env.ALLOWLIST_PACKAGE_ID || process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID;
+    const packageId = process.env.SEAL_PACKAGE_ID || process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID;
     if (!packageId) {
       console.error('[API][sponsor] Allowlist package ID not configured');
       return NextResponse.json(

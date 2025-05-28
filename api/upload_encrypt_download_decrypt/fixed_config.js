@@ -9,8 +9,7 @@ const NETWORK = 'testnet';
 const RPC_URL = 'https://fullnode.testnet.sui.io:443';
 
 // Package IDs
-const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-const ALLOWLIST_PACKAGE_ID = process.env.ALLOWLIST_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || 'b5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
 
 // Walrus configuration for blob storage
 const WALRUS_ENDPOINTS = [
@@ -27,16 +26,15 @@ const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY; // Admin who creates do
 const USER_PRIVATE_KEY = process.env.USER_PRIVATE_KEY;   // User who will access documents
 
 // Other configuration
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB max file size
+const MAX_FILE_SIZE = 10 * 1024 * 1024; 
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : './temp';
-const DEFAULT_TTL_MINUTES = 30; 
+const DEFAULT_TTL_MINUTES = 15; 
 const EPHEMERAL_KEY_VALIDITY_MS = 30 * 60 * 1000; // 30 minutes
 
 module.exports = {
   NETWORK,
   RPC_URL,
   SEAL_PACKAGE_ID,
-  ALLOWLIST_PACKAGE_ID,
   WALRUS_ENDPOINTS,
   WALRUS_EPOCHS_TO_STORE,
   ADMIN_PRIVATE_KEY,

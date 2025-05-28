@@ -22,7 +22,7 @@ async function createAllowlist(client, adminKeypair, name) {
     
     // Add the create_allowlist_entry call
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::create_allowlist_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::create_allowlist_entry`,
       arguments: [tx.pure.string(name)]
     });
     
@@ -89,7 +89,7 @@ async function createAllowlist(client, adminKeypair, name) {
 
 // Add a user to an allowlist
 async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, userAddress) {
-  console.log('\n👥 STEP 2: Adding user to allowlist...');
+  console.log('\n STEP 2: Adding user to allowlist...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Cap ID: ${capId}`);
   console.log(`- User Address: ${userAddress}`);
@@ -99,7 +99,7 @@ async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, user
     // Log all input values
     console.log('Creating transaction with values:');
     console.log('- Admin public key:', adminKeypair.getPublicKey().toSuiAddress());
-    console.log('- Allowlist package ID:', config.ALLOWLIST_PACKAGE_ID);
+    console.log('- Allowlist package ID:', config.SEAL_PACKAGE_ID);
     console.log('- Allowlist ID:', allowlistId);
     console.log('- Cap ID:', capId); 
     console.log('- User address:', userAddress);
@@ -112,7 +112,7 @@ async function addUserToAllowlist(client, adminKeypair, allowlistId, capId, user
     
     // Add the add_user_entry call
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::add_users_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::add_users_entry`,
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
@@ -175,7 +175,7 @@ async function addMultipleUsersToAllowlist(client, adminKeypair, allowlistId, ca
     
     // Add the add_users_entry call (our batch operation)
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::add_users_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::add_users_entry`,
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
@@ -239,7 +239,7 @@ async function registerBlobAndSetPermissions(client, adminKeypair, allowlistId, 
     
     // Add the add_users_and_publish_entry call (our batch operation)
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::add_users_and_publish_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::add_users_and_publish_entry`,
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
@@ -302,7 +302,7 @@ async function publishBlobToAllowlist(client, adminKeypair, allowlistId, capId, 
     // Use add_users_and_publish_entry with empty users vector
     // since we've already added users in a previous step
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::add_users_and_publish_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::add_users_and_publish_entry`,
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),
@@ -368,7 +368,7 @@ async function updateDocumentAccess(client, adminKeypair, allowlistId, capId, bl
     
     // Add the add_users_entry call
     tx.moveCall({
-      target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::add_users_entry`,
+      target: `${config.SEAL_PACKAGE_ID}::allowlist::add_users_entry`,
       arguments: [
         tx.object(allowlistId),
         tx.object(capId),

@@ -50,7 +50,7 @@ async function runCompleteWorkflow(options = {}) {
   console.log('\n Configuration:');
   console.log(`- Network: ${config.NETWORK}`);
   console.log(`- Seal Package ID: ${config.SEAL_PACKAGE_ID}`);
-  console.log(`- Allowlist Package ID: ${config.ALLOWLIST_PACKAGE_ID}`);
+  console.log(`- Allowlist Package ID: ${config.SEAL_PACKAGE_ID}`);
   console.log(`- Using batch operations: ${options.useBatch !== false ? 'YES' : 'NO'}`);
   console.log(`- Using PDF file: ${PDF_FILE_PATH}`);
   
@@ -197,7 +197,7 @@ async function runCompleteWorkflow(options = {}) {
     }
     // Create session key for user to decrypt
     console.log('\n Creating session key for user to decrypt...');
-    const sessionKey = await seal.createSessionKey(userKeypair, config.ALLOWLIST_PACKAGE_ID, suiClient);
+    const sessionKey = await seal.createSessionKey(userKeypair, config.SEAL_PACKAGE_ID, suiClient);
     
     // Approve and fetch keys
     const { txKindBytes } = await seal.approveAndFetchKeys(

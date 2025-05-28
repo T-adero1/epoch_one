@@ -17,8 +17,7 @@ function suiPrivkeyToKeypair(suiPrivateKey) {
     if (suiPrivateKey.startsWith('suiprivkey1')) {
       console.log(' Detected bech32 format private key');
       console.log('- Converting bech32 private key to Sui keypair...');
-      //console.log(suiPrivateKey);
-      // Decode the bech32 string
+
       const decoded = bech32.decode(suiPrivateKey);
       console.log(' Bech32 decoded successfully');
       console.log('- Prefix:', decoded.prefix);

@@ -466,7 +466,7 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
         effectiveDocumentId.substring(2) : effectiveDocumentId;
       console.log("[DecryptButton] docId:", docId);
       
-      const packageId = process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID || '';
+      const packageId = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || '';
       console.log("[DecryptButton] packageId:", packageId);
       
       // Authorize ephemeral key

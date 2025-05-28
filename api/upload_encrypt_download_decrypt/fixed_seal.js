@@ -7,58 +7,30 @@ const { Transaction } = require('@mysten/sui/transactions');
 const { fromHEX } = require('@mysten/sui/utils');
 const crypto = require('crypto');
 const config = require('./fixed_config');
-const { P } = require('pino');
+const { SuiGraphQLClient } = require('@mysten/sui/graphql');
 
 // Initialize SEAL client
 async function initSealClient(suiClient) {
   console.log('\n Initializing SEAL client...');
-  console.log(`- Network: ${config.NETWORK}`);
   
   try {
-    // Get allowlisted key servers
-    console.log('- Fetching allowlisted key servers...');
-    let keyServerString = await getAllowlistedKeyServers(config.NETWORK);
-    console.log(`- Key server IDs (raw): ${keyServerString}`);
+    // Get allowlisted key servers - this should return an array
+    const keyServers = await getAllowlistedKeyServers(config.NETWORK);
+    console.log(`- Key servers:`, keyServers);
     
-    // Parse the key server string properly
-    let formattedServerIds = [];
+    // Format as [id, weight] pairs
+    const serverObjectIds = keyServers.map(serverId => [serverId, 1]);
     
-    // If it's a string, parse it
-    if (typeof keyServerString === 'string') {
-      // Split by comma to get individual server entries
-      const serverEntries = keyServerString.split(',').map(e => e.trim());
-      console.log(`- Split server entries: ${JSON.stringify(serverEntries)}`);
-      
-      // Convert to proper [id, weight] format
-      formattedServerIds = serverEntries.map(entry => {
-        return [entry, 1]; // Use weight 1 for each server
-      });
-    } 
-    // If it's already an array
-    else if (Array.isArray(keyServerString)) {
-      formattedServerIds = keyServerString.map(entry => {
-        return [entry, 1]; // Use weight 1 for each server
-      });
-    }
-    
-    console.log(`- Formatted server IDs: ${JSON.stringify(formattedServerIds)}`);
-    
-    // Create client with correctly formatted server IDs
     const client = new SealClient({
       suiClient,
-      serverObjectIds: formattedServerIds,
+      serverObjectIds,
       verifyKeyServers: true
     });
     
-    console.log(' SEAL client initialized successfully');
-    
-    return {
-      client,
-      keyServerIds: formattedServerIds.map(pair => pair[0]) // Just the IDs
-    };
+    console.log('SEAL client initialized successfully');
+    return { client, keyServerIds: keyServers };
   } catch (error) {
-    console.error(` Failed to initialize SEAL client: ${error.message}`);
-    console.error(error.stack);
+    console.error(`Failed to initialize SEAL client: ${error.message}`);
     throw error;
   }
 }
@@ -77,11 +49,20 @@ async function createSessionKey(keypair, packageId) {
     console.log('- Initializing session key...');
     const sessionKey = new SessionKey({
       address: userAddress,
-      packageId,
-      ttlMin: config.DEFAULT_TTL_MINUTES
+      packageId: packageId,
+      ttlMin: config.DEFAULT_TTL_MINUTES,
+      signer: keypair,
+      //client: new SuiGraphQLClient({ url: 'https://sui-testnet.mystenlabs.com/graphql', }),
     });
     
-    console.log('sessionKey', sessionKey);
+    // Log raw session key details
+    console.log('- Raw session key details:');
+    console.log(`  Address: ${sessionKey.getAddress()}`);
+    console.log(`  Package ID: ${sessionKey.getPackageId()}`);
+    console.log(`  Creation Time: ${new Date(sessionKey.export().creationTimeMs).toISOString()}`);
+    console.log(`  TTL (minutes): ${sessionKey.export().ttlMin}`);
+    console.log(`  Session Key: ${sessionKey.export().sessionKey}`);
+    console.log(`  Is Expired: ${sessionKey.isExpired()}`);
     
     // Get personal message to sign
     const personalMessage = sessionKey.getPersonalMessage();
@@ -96,37 +77,30 @@ async function createSessionKey(keypair, packageId) {
     // Set the signature on the session key
     console.log('- Setting signature on session key...');
     
-    try {
-      // First try with full signature object
-      await sessionKey.setPersonalMessageSignature(signature);
-      console.log(' Session key initialized with signature');
-    } catch (error) {
-      console.log(` First signature attempt failed: ${error.message}`);
+    // try {
+    //   // First try with full signature object
+    //   await sessionKey.setPersonalMessageSignature(signature);
+    //   console.log(' Session key initialized with signature');
+    // } catch (error) {
+    //   console.log(` First signature attempt failed: ${error.message}`);
       
-      // If full signature object fails, try with signature.signature (common format)
-      if (typeof signature === 'object' && signature.signature) {
-        try {
-          await sessionKey.setPersonalMessageSignature(signature.signature);
-          console.log(' Session key initialized with inner signature');
-        } catch (innerError) {
-          console.error(` Second signature attempt failed: ${innerError.message}`);
-          console.error(innerError.stack);
-          throw innerError;
-        }
-      } else {
-        console.error(error.stack);
-        throw error;
-      }
-    }
+    //   // If full signature object fails, try with signature.signature (common format)
+    //   if (typeof signature === 'object' && signature.signature) {
+    //     try {
+    //       await sessionKey.setPersonalMessageSignature(signature.signature);
+    //       console.log(' Session key initialized with inner signature');
+    //     } catch (innerError) {
+    //       console.error(` Second signature attempt failed: ${innerError.message}`);
+    //       console.error(innerError.stack);
+    //       throw innerError;
+    //     }
+    //   } else {
+    //     console.error(error.stack);
+    //     throw error;
+    //   }
+    // }
     
-    // Store user address manually on session key for backup
-    sessionKey._userAddress = userAddress;
-    
-    // Check if session key properties are accessible after signature setting
-    console.log('- SESSION KEY AFTER SIGNATURE:');
-    console.log(`  - Address property: ${sessionKey.address || 'undefined'}`);
-    console.log(`  - Stored address: ${sessionKey._userAddress}`);
-    console.log(`  - Keys:`, Object.keys(sessionKey));
+
     
     console.log(' Session key created successfully - valid for fetching keys');
     return sessionKey;
@@ -149,7 +123,7 @@ async function encryptDocument(sealClient, documentIdHex, data) {
     // Encrypt the document
     console.log('- Performing encryption with SEAL...');
     const { encryptedObject: encryptedBytes, key: backupKey } = await sealClient.encrypt({
-      threshold: 2,
+      threshold: 1,
       packageId: config.SEAL_PACKAGE_ID,
       id: documentIdHex,
       data
@@ -178,14 +152,7 @@ async function approveAndFetchKeys(suiClient, sealClient, sessionKey, allowlistI
   console.log('\n Generating approval transaction for decryption...');
   console.log(`- Allowlist ID: ${allowlistId}`);
   console.log(`- Document ID: ${documentIdHex}`);
-  
-  // Detailed session key debugging
-  console.log('- SESSION KEY DEBUG:');
-  console.log(`  - Address property: ${sessionKey.address || 'undefined'}`);
-  console.log(`  - Package ID: ${sessionKey.packageId || 'undefined'}`);
-  console.log(`  - Has signature: ${!!sessionKey.signature}`);
-  console.log(`  - Direct keys:`, Object.keys(sessionKey));
-  console.log(`  - Type: ${typeof sessionKey}`);
+
   
   try {
     // Create a transaction for approval
@@ -198,21 +165,21 @@ async function approveAndFetchKeys(suiClient, sealClient, sessionKey, allowlistI
     const documentId = fromHEX(documentIdHex);
     console.log(`- Document ID bytes length: ${documentId.length}`);
     
-    // Check if we need to add Clock parameter based on packageId
-    if (config.ALLOWLIST_PACKAGE_ID === '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429') {
+    
+    if (config.SEAL_PACKAGE_ID === '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429') {
       // New version with Clock parameter
       tx.moveCall({
-        target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::seal_approve`,
+        target: `${config.SEAL_PACKAGE_ID}::allowlist::seal_approve`,
         arguments: [
           tx.pure.vector('u8', Array.from(documentId)),
           tx.object(allowlistId),
-          tx.object('0x6') // Standard Clock object ID
+          tx.object('0x6') 
         ]
       });
     } else {
       // Original version without Clock parameter
       tx.moveCall({
-        target: `${config.ALLOWLIST_PACKAGE_ID}::allowlist::seal_approve`,
+        target: `${config.SEAL_PACKAGE_ID}::allowlist::seal_approve`,
         arguments: [
           tx.pure.vector('u8', Array.from(documentId)),
           tx.object(allowlistId)
@@ -238,19 +205,19 @@ async function approveAndFetchKeys(suiClient, sealClient, sessionKey, allowlistI
     console.log('  - Fetch keys parameters:');
     console.log(`    - ID: ${rawId}`);
     console.log(`    - txBytes length: ${txKindBytes.length}`);
-    console.log(`    - Using threshold: 2`);
+
     
     try {
       await sealClient.fetchKeys({
         ids: [rawId],
         txBytes: txKindBytes,
         sessionKey,
-        threshold: 2  // Only require 1 key server response
+        threshold: 1  
       });
       
       console.log(' Keys fetched successfully from key servers');
       console.log('- These keys will be used to decrypt the document');
-      console.log('sessionKey', sessionKey);
+      
       
       return {
         txKindBytes,

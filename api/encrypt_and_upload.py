@@ -24,7 +24,7 @@ load_dotenv()
 
 # Constants
 SEAL_PACKAGE_ID = os.environ.get('NEXT_PUBLIC_SEAL_PACKAGE_ID')
-ALLOWLIST_PACKAGE_ID = os.environ.get('NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID', SEAL_PACKAGE_ID)
+SEAL_PACKAGE_ID = os.environ.get('NEXT_PUBLIC_SEAL_PACKAGE_ID', SEAL_PACKAGE_ID)
 ADMIN_PRIVATE_KEY = os.environ.get('ADMIN_PRIVATE_KEY')
 NETWORK = os.environ.get('NETWORK', 'testnet')
 MODULE_NAME = os.environ.get('MODULE_NAME', 'allowlist')
@@ -180,7 +180,7 @@ def process_encrypt_and_upload(data: Dict[str, Any]) -> Dict[str, Any]:
             "signerAddresses": signer_addresses,
             "adminPrivateKey": ADMIN_PRIVATE_KEY,
             "sealPackageId": SEAL_PACKAGE_ID,
-            "allowlistPackageId": ALLOWLIST_PACKAGE_ID,
+            "allowlistPackageId": SEAL_PACKAGE_ID,
             "network": NETWORK,
             # Pass pre-encrypted flag and document ID
             "preEncrypted": pre_encrypted,

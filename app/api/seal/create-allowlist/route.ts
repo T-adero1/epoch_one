@@ -7,7 +7,7 @@ import { bech32 } from 'bech32';
 
 // Constants
 const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-const ALLOWLIST_PACKAGE_ID = process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID || SEAL_PACKAGE_ID;
+const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || SEAL_PACKAGE_ID;
 const MODULE_NAME = 'allowlist';
 const NETWORK = 'testnet';
 
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     
     // CRITICAL CHANGE: Use create_allowlist_entry instead of create_allowlist
     tx.moveCall({
-      target: `${ALLOWLIST_PACKAGE_ID}::${MODULE_NAME}::create_allowlist_entry`,
+      target: `${SEAL_PACKAGE_ID}::${MODULE_NAME}::create_allowlist_entry`,
       arguments: [tx.pure.string(allowlistName)]
     });
     
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
       
       // CRITICAL CHANGE: Use add_users_entry and include clock object
       addSignersTx.moveCall({
-        target: `${ALLOWLIST_PACKAGE_ID}::${MODULE_NAME}::add_users_entry`,
+        target: `${SEAL_PACKAGE_ID}::${MODULE_NAME}::add_users_entry`,
         arguments: [
           addSignersTx.object(allowlistId),
           addSignersTx.object(capId),

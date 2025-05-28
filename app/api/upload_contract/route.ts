@@ -267,7 +267,7 @@ export async function POST(request: NextRequest) {
       signerAddresses: signerAddresses,
       adminPrivateKey: process.env.ADMIN_PRIVATE_KEY,
       sealPackageId: process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID,
-      allowlistPackageId: process.env.NEXT_PUBLIC_ALLOWLIST_PACKAGE_ID,
+      allowlistPackageId: process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID,
       network: process.env.NETWORK || "testnet",
       
       // NEW: Forward pre-encrypted flags from client

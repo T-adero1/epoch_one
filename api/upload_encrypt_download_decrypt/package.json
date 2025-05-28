@@ -10,9 +10,8 @@
     },
     "dependencies": {
         "@mysten/bcs": "^1.6.0",
-        "@mysten/dapp-kit": "^0.16.2",
         "@mysten/seal": "^0.4.5",
-        "@mysten/sui": "^1.29.1",
+        "@mysten/sui": "^1.30.1",
         "axios": "^1.9.0",
         "bech32": "^2.0.0",
         "body-parser": "^1.20.2",
