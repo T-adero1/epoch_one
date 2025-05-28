@@ -18,6 +18,7 @@ import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 import { detectGroupedChanges, applyGroupedChanges, ChangeGroup } from '@/app/utils/textDiff'
 import AIChangesReview from './AIChangesReview'
 import ContractEditorWithDiff from './ContractEditorWithDiff'
+import { toast } from '@/components/ui/use-toast'
 
 
 interface ContractEditorProps {
@@ -457,7 +458,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                                 ) : (
                                   <>
                                     <Wand2 className="h-3 w-3 mr-1" />
-                                    Enhance
+                                    Submit
                                   </>
                                 )}
                               </Button>
@@ -598,17 +599,83 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                   {contract.status === 'DRAFT' && (
                     <Button 
                       onClick={async () => {
-                        // First save any changes
-                        if (hasChanges) {
-                          await handleSave();
+                        try {
+                          // First save any changes
+                          if (hasChanges) {
+                            await handleSave();
+                          }
+                          
+                          // Then update status to PENDING
+                          const updatedContract = await updateContract(contract.id, {
+                            status: 'PENDING'
+                          });
+                          
+                          // Optimistically close the editor immediately to prevent double-clicking
+                          onSave(updatedContract);
+                          
+                          // Send emails to signers in the background
+                          const signerEmails = signers.filter(s => s.trim() !== '');
+                          
+                          if (signerEmails.length > 0) {
+                            // Show immediate feedback
+                            toast({
+                              title: "Sending contract...",
+                              description: "Preparing signing invitations.",
+                            });
+                            
+                            const emailResponse = await fetch('/api/email/send-contract', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                contractId: contract.id,
+                                contractTitle: title,
+                                ownerName: contract.owner.name || contract.owner.email,
+                                signerEmails,
+                              }),
+                            });
+                            
+                            const emailResult = await emailResponse.json();
+                            
+                            if (emailResponse.ok) {
+                              // Check for partial failures
+                              if (emailResult.partialFailure && emailResult.partialFailure.length > 0) {
+                                toast({
+                                  title: "Contract sent with warnings",
+                                  description: `Contract sent, but ${emailResult.partialFailure.length} email(s) failed to send.`,
+                                  variant: "destructive",
+                                });
+                              } else {
+                                toast({
+                                  title: "Contract sent successfully",
+                                  description: `Signing invitations sent to ${signerEmails.length} recipient(s).`,
+                                  variant: "success",
+                                });
+                              }
+                            } else {
+                              toast({
+                                title: "Contract sent with warning",
+                                description: "Contract status updated but emails may not have been sent.",
+                                variant: "destructive",
+                              });
+                            }
+                          } else {
+                            toast({
+                              title: "Contract status updated",
+                              description: "No signers specified for email notifications.",
+                              variant: "success",
+                            });
+                          }
+                          
+                        } catch (error) {
+                          console.error('Error sending contract:', error);
+                          toast({
+                            title: "Error",
+                            description: "Failed to send contract. Please try again.",
+                            variant: "destructive",
+                          });
                         }
-                        
-                        // Then update status to PENDING
-                        const updatedContract = await updateContract(contract.id, {
-                          status: 'PENDING'
-                        });
-                        
-                        onSave(updatedContract);
                       }}
                       className="bg-blue-600 hover:bg-blue-700"
                       disabled={signers.filter(s => s.trim() !== '').length === 0}
