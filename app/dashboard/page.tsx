@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Plus, Search, ChevronDown, ArrowLeft } from 'lucide-react';
+import { FileText, Plus, Search, ChevronDown, ArrowLeft, AlertCircle, Info, Check, Loader2, Trash2, User } from 'lucide-react';
 import { getContracts, createContract, deleteContract } from '@/app/utils/contracts';
 import { format } from 'date-fns';
 import {
@@ -31,6 +31,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/components/ui/use-toast";
+import { validateSignerEmail } from '@/app/utils/email';
 
 // Import our contract components
 import ContractActions from '@/components/contracts/ContractActions';
@@ -254,6 +255,10 @@ export default function DashboardPage() {
   // Add state to track if we're creating a contract
   const [isCreatingInProgress, setIsCreatingInProgress] = useState(false);
 
+  // Add validation states for contract creation
+  const [newContractSignerErrors, setNewContractSignerErrors] = useState<string[]>(['']);
+  const [isValidatingNewContractEmails, setIsValidatingNewContractEmails] = useState<boolean[]>([false]);
+
   // Get user initials for avatar fallback
   const getUserInitials = () => {
     if (!user?.displayName) return 'U';
@@ -460,12 +465,122 @@ export default function DashboardPage() {
     };
   }, [isAuthenticated, user?.email, loadContracts, isLoading, isAuthStateResolved]);
   
+  // Enhanced signer change handler for contract creation
+  const handleNewContractSignerChange = (index: number, value: string) => {
+    const newSigners = [...newContract.signers];
+    const newErrors = [...newContractSignerErrors];
+    const newValidating = [...isValidatingNewContractEmails];
+    
+    newSigners[index] = value; // Keep original case for display
+    newValidating[index] = true;
+    
+    // Clear previous error
+    newErrors[index] = '';
+    
+    setNewContract({ ...newContract, signers: newSigners });
+    setNewContractSignerErrors(newErrors);
+    setIsValidatingNewContractEmails(newValidating);
+    
+    // Debounced validation
+    setTimeout(() => {
+      const trimmedValue = value.trim();
+      const updatedErrors = [...newContractSignerErrors];
+      const updatedValidating = [...isValidatingNewContractEmails];
+      
+      if (trimmedValue) {
+        // Validate the email
+        const validation = validateSignerEmail(trimmedValue, user?.email);
+        
+        if (!validation.isValid) {
+          updatedErrors[index] = validation.error || 'Invalid email';
+        } else {
+          // Check for duplicates in current signers list
+          const lowerValue = trimmedValue.toLowerCase();
+          const duplicateIndex = newSigners.findIndex((s, i) => 
+            i !== index && s.trim().toLowerCase() === lowerValue
+          );
+          
+          if (duplicateIndex !== -1) {
+            updatedErrors[index] = 'This email is already added';
+          }
+        }
+      }
+      
+      updatedValidating[index] = false;
+      setNewContractSignerErrors(updatedErrors);
+      setIsValidatingNewContractEmails(updatedValidating);
+    }, 500); // 500ms debounce
+  };
+
+  // Helper to add new signer for contract creation
+  const handleAddNewContractSigner = () => {
+    setNewContract({ 
+      ...newContract, 
+      signers: [...newContract.signers, ''] 
+    });
+    setNewContractSignerErrors([...newContractSignerErrors, '']);
+    setIsValidatingNewContractEmails([...isValidatingNewContractEmails, false]);
+  };
+
+  // Helper to remove signer for contract creation
+  const handleRemoveNewContractSigner = (index: number) => {
+    const newSigners = [...newContract.signers];
+    const newErrors = [...newContractSignerErrors];
+    const newValidating = [...isValidatingNewContractEmails];
+    
+    newSigners.splice(index, 1);
+    newErrors.splice(index, 1);
+    newValidating.splice(index, 1);
+    
+    // Ensure at least one empty signer field
+    if (newSigners.length === 0) {
+      newSigners.push('');
+      newErrors.push('');
+      newValidating.push(false);
+    }
+    
+    setNewContract({ ...newContract, signers: newSigners });
+    setNewContractSignerErrors(newErrors);
+    setIsValidatingNewContractEmails(newValidating);
+  };
+
+  // Helper to get valid signers count for contract creation
+  const getNewContractValidSignersCount = () => {
+    return newContract.signers.filter((s, index) => 
+      s.trim() !== '' && !newContractSignerErrors[index]
+    ).length;
+  };
+
+  // Helper to check if all new contract signers are valid
+  const areNewContractSignersValid = () => {
+    const nonEmptySigners = newContract.signers.filter(s => s.trim() !== '');
+    return newContractSignerErrors.every(error => error === '') &&
+           !isValidatingNewContractEmails.some(validating => validating);
+  };
+
+  // Enhanced handleCreateContract with validation
   const handleCreateContract = async () => {
     // Prevent spam clicking
-    if (isCreatingInProgress || !newContract.title || !newContract.description || !user?.email) return;
+    if (isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim() || !user?.email) return;
+    
+    // Validate signers before creating
+    const hasValidationErrors = newContractSignerErrors.some(error => error !== '');
+    if (hasValidationErrors) {
+      toast({
+        title: "Validation Error",
+        description: "Please fix all email validation errors before creating the contract.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     try {
       setIsCreatingInProgress(true);
+      
+      // Filter and validate signers
+      const validSigners = newContract.signers
+        .filter((s, index) => s.trim() !== '' && !newContractSignerErrors[index])
+        .map(s => s.trim().toLowerCase());
       
       // Create a temporary contract object for optimistic UI
       const tempContract: ContractWithRelations = {
@@ -479,7 +594,7 @@ export default function DashboardPage() {
         updatedAt: new Date(),
         expiresAt: null,
         metadata: {
-          signers: newContract.signers.filter(s => s.trim() !== ''),
+          signers: validSigners,
         },
         owner: {
           id: user.id || user.email,
@@ -489,9 +604,16 @@ export default function DashboardPage() {
         signatures: [],
       };
 
+      // Reset the form
+      const resetForm = () => {
+        setNewContract({ title: '', description: '', content: '', signers: [''] });
+        setNewContractSignerErrors(['']);
+        setIsValidatingNewContractEmails([false]);
+      };
+
       // Immediately close the creation modal and open editor optimistically
       setIsCreatingContract(false);
-      setNewContract({ title: '', description: '', content: '', signers: [''] });
+      resetForm();
       setSelectedContract(tempContract);
       setIsEditingContract(true);
       
@@ -502,13 +624,19 @@ export default function DashboardPage() {
         content: newContract.content || '',
         ownerId: user.email,
         metadata: {
-          signers: newContract.signers.filter(s => s.trim() !== ''),
+          signers: validSigners,
         },
       });
 
       // Update with the real contract data
       setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
       setSelectedContract(actualContract as unknown as ContractWithRelations);
+      
+      toast({
+        title: "Contract Created",
+        description: `Contract created with ${validSigners.length} signer(s).`,
+        variant: "success",
+      });
     
     } catch (error) {
       console.error('Error creating contract:', error);
@@ -519,7 +647,7 @@ export default function DashboardPage() {
       setIsCreatingContract(true); // Reopen the creation dialog
       
       toast({
-        title: "Error",
+        title: "Creation Failed",
         description: "Failed to create contract. Please try again.",
         variant: "destructive",
       });
@@ -844,21 +972,29 @@ export default function DashboardPage() {
                   <CardTitle className="text-gray-900">Your Contracts</CardTitle>
                   <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
                 </div>
-                <Dialog open={isCreatingContract} onOpenChange={setIsCreatingContract}>
+                <Dialog open={isCreatingContract} onOpenChange={(open) => {
+                  setIsCreatingContract(open);
+                  if (!open) {
+                    // Reset form when dialog closes
+                    setNewContract({ title: '', description: '', content: '', signers: [''] });
+                    setNewContractSignerErrors(['']);
+                    setIsValidatingNewContractEmails([false]);
+                  }
+                }}>
                   <DialogTrigger asChild>
                     <Button className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto">
                       <Plus className="mr-2 h-4 w-4" />
                       New Contract
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-gray-900">Create New Contract</DialogTitle>
                       <DialogDescription className="text-gray-600">
                         Fill in the details below to create a new contract.
                       </DialogDescription>
                     </DialogHeader>
-                    <div className="grid gap-4 py-4">
+                    <div className="grid gap-6 py-4">
                       <div className="grid gap-2">
                         <label htmlFor="title" className="text-sm font-medium text-gray-900">
                           Title
@@ -883,44 +1019,129 @@ export default function DashboardPage() {
                           className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
                         />
                       </div>
-                      <div className="grid gap-2">
-                        <label className="text-sm font-medium text-gray-900">Signers</label>
-                        {newContract.signers.map((signer, index) => (
-                          <div key={index} className="flex gap-2">
-                            <Input
-                              value={signer}
-                              onChange={(e) => {
-                                const newSigners = [...newContract.signers];
-                                newSigners[index] = e.target.value.toLowerCase();
-                                setNewContract({ ...newContract, signers: newSigners });
-                              }}
-                              placeholder="Signer email"
-                              className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                            />
-                            {index === newContract.signers.length - 1 && (
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={() => setNewContract({ ...newContract, signers: [...newContract.signers, ''] })}
-                                className="border-gray-200 hover:bg-blue-50"
-                              >
-                                <Plus className="h-4 w-4 text-blue-600" />
-                              </Button>
-                            )}
+                      
+                      {/* Enhanced Signers Section */}
+                      <div className="grid gap-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-gray-900">Signers</label>
+                          <span className="text-xs text-gray-500">
+                            Valid: {getNewContractValidSignersCount()}
+                          </span>
+                        </div>
+                        
+                        {/* Info panel */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <div className="flex items-start gap-2">
+                            <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                            <div className="text-xs text-blue-800">
+                              <p className="font-medium mb-1">Email Requirements:</p>
+                              <ul className="list-disc list-inside space-y-0.5 text-blue-700">
+                                <li>Valid email format (e.g., user@example.com)</li>
+                                <li>Cannot add your own email address</li>
+                                <li>Each email can only be added once</li>
+                              </ul>
+                            </div>
                           </div>
-                        ))}
+                        </div>
+                        
+                        {/* Signers list */}
+                        <div className="space-y-3">
+                          {newContract.signers.map((signer, index) => (
+                            <div key={index} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 bg-blue-50 rounded-full">
+                                  <User className="h-3 w-3 text-blue-500" />
+                                </div>
+                                <div className="flex-1 relative">
+                                  <Input
+                                    value={signer}
+                                    onChange={(e) => handleNewContractSignerChange(index, e.target.value)}
+                                    placeholder="Enter signer email (e.g., john@company.com)"
+                                    className={`text-sm ${
+                                      newContractSignerErrors[index] 
+                                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                                        : signer.trim() && !newContractSignerErrors[index] && !isValidatingNewContractEmails[index]
+                                        ? 'border-green-500 focus:border-green-500 focus:ring-green-500'
+                                        : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
+                                    }`}
+                                  />
+                                  {isValidatingNewContractEmails[index] && (
+                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                                      <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                {/* Add/Remove buttons */}
+                                {index === newContract.signers.length - 1 ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleAddNewContractSigner}
+                                    className="border-gray-200 hover:bg-blue-50 px-2 py-1 h-8"
+                                  >
+                                    <Plus className="h-3 w-3 text-blue-600" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveNewContractSigner(index)}
+                                    className="px-2 py-1 h-8"
+                                  >
+                                    <Trash2 className="h-3 w-3 text-gray-400" />
+                                  </Button>
+                                )}
+                              </div>
+                              
+                              {/* Fixed height validation message area */}
+                              <div className="h-8 ml-6"> {/* Fixed height container */}
+                                {newContractSignerErrors[index] ? (
+                                  <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 p-2 rounded-md h-full">
+                                    <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                    <span className="truncate">{newContractSignerErrors[index]}</span>
+                                  </div>
+                                ) : signer.trim() && !isValidatingNewContractEmails[index] ? (
+                                  <div className="flex items-center gap-2 text-xs text-green-600 h-full">
+                                    <Check className="h-3 w-3 flex-shrink-0" />
+                                    <span>Valid email address</span>
+                                  </div>
+                                ) : (
+                                  <div className="h-full"></div> /* Empty spacer to maintain height */
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsCreatingContract(false)} className="border-gray-200 hover:bg-blue-50">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setIsCreatingContract(false)} 
+                        className="border-gray-200 hover:bg-blue-50"
+                      >
                         Cancel
                       </Button>
                       <Button 
                         onClick={handleCreateContract} 
                         className="bg-blue-600 hover:bg-blue-700"
-                        disabled={isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim()}
+                        disabled={
+                          isCreatingInProgress || 
+                          !newContract.title.trim() || 
+                          !newContract.description.trim() ||
+                          !areNewContractSignersValid() ||
+                          newContractSignerErrors.some(error => error !== '')
+                        }
                       >
-                        Create Contract
+                        {isCreatingInProgress ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Creating...
+                          </>
+                        ) : (
+                          <>Create Contract ({getNewContractValidSignersCount()} signers)</>
+                        )}
                       </Button>
                     </DialogFooter>
                   </DialogContent>

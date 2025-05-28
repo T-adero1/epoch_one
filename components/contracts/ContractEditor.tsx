@@ -13,12 +13,14 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check } from 'lucide-react'
+import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check, AlertCircle, Info } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 import { detectGroupedChanges, applyGroupedChanges, ChangeGroup } from '@/app/utils/textDiff'
 import AIChangesReview from './AIChangesReview'
 import ContractEditorWithDiff from './ContractEditorWithDiff'
 import { toast } from '@/components/ui/use-toast'
+import { useZkLogin } from '@/app/contexts/ZkLoginContext'
+import { validateSignerEmail } from '@/app/utils/email'
 
 
 interface ContractEditorProps {
@@ -43,6 +45,7 @@ function isSpacingOnlyChange(group: ChangeGroup): boolean {
 }
 
 export default function ContractEditor({ contract, onSave, onCancel }: ContractEditorProps) {
+  const { user } = useZkLogin();
   const [content, setContent] = useState(contract.content || '')
   const [title, setTitle] = useState(contract.title || '')
   const [description, setDescription] = useState(contract.description || '')
@@ -76,6 +79,10 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
   const [acceptedGroups, setAcceptedGroups] = useState<string[]>([])
   const [rejectedGroups, setRejectedGroups] = useState<string[]>([])
   const [showDiffMode, setShowDiffMode] = useState(false)
+  
+  // Enhanced state for validation errors with more detailed tracking
+  const [signerErrors, setSignerErrors] = useState<string[]>([]);
+  const [isValidatingEmail, setIsValidatingEmail] = useState<boolean[]>([]);
   
   // Initialize values when contract changes
   useEffect(() => {
@@ -131,16 +138,99 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
     setSigners(newSigners.length ? newSigners : [''])
   }
   
+  // Enhanced handleSignerChange with comprehensive validation
   const handleSignerChange = (index: number, value: string) => {
-    const newSigners = [...signers]
-    newSigners[index] = value.toLowerCase()
-    setSigners(newSigners)
-  }
+    const newSigners = [...signers];
+    const newErrors = [...signerErrors];
+    const newValidating = [...isValidatingEmail];
+    
+    newSigners[index] = value; // Keep original case for display
+    newValidating[index] = true;
+    
+    // Clear previous error
+    newErrors[index] = '';
+    
+    setSigners(newSigners);
+    setSignerErrors(newErrors);
+    setIsValidatingEmail(newValidating);
+    
+    // Debounced validation
+    setTimeout(() => {
+      const trimmedValue = value.trim();
+      const updatedErrors = [...signerErrors];
+      const updatedValidating = [...isValidatingEmail];
+      
+      if (trimmedValue) {
+        // Validate the email
+        const validation = validateSignerEmail(trimmedValue, user?.email);
+        
+        if (!validation.isValid) {
+          updatedErrors[index] = validation.error || 'Invalid email';
+        } else {
+          // Check for duplicates in current signers list
+          const lowerValue = trimmedValue.toLowerCase();
+          const duplicateIndex = newSigners.findIndex((s, i) => 
+            i !== index && s.trim().toLowerCase() === lowerValue
+          );
+          
+          if (duplicateIndex !== -1) {
+            updatedErrors[index] = 'This email is already added';
+          }
+        }
+      }
+      
+      updatedValidating[index] = false;
+      setSignerErrors(updatedErrors);
+      setIsValidatingEmail(updatedValidating);
+    }, 500); // 500ms debounce
+  };
 
   const handleSave = async () => {
     try {
-      // Filter out empty signers and convert to lowercase
-      const filteredSigners = signers.filter(s => s.trim() !== '').map(s => s.toLowerCase())
+      // Get all non-empty signers
+      const nonEmptySigners = signers.filter(s => s.trim() !== '');
+      
+      // Validate all signers
+      const validationResults = nonEmptySigners.map(signer => 
+        validateSignerEmail(signer.trim(), user?.email)
+      );
+      
+      // Check for validation errors
+      const hasValidationErrors = validationResults.some(result => !result.isValid);
+      const hasUIErrors = signerErrors.some(error => error !== '');
+      
+      if (hasValidationErrors || hasUIErrors) {
+        toast({
+          title: "Validation Error",
+          description: "Please fix all email validation errors before saving.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Check for duplicates
+      const emailSet = new Set();
+      const duplicates = [];
+      
+      for (const signer of nonEmptySigners) {
+        const lowerEmail = signer.trim().toLowerCase();
+        if (emailSet.has(lowerEmail)) {
+          duplicates.push(signer);
+        } else {
+          emailSet.add(lowerEmail);
+        }
+      }
+      
+      if (duplicates.length > 0) {
+        toast({
+          title: "Duplicate Emails",
+          description: `Please remove duplicate email addresses: ${duplicates.join(', ')}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const filteredSigners = Array.from(emailSet) as string[];
       
       const updatedContract = await updateContract(contract.id, {
         title,
@@ -150,7 +240,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           ...contract.metadata,
           signers: filteredSigners
         }
-      })
+      });
       
       // Update original values after successful save
       setOriginalValues({
@@ -158,14 +248,40 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
         title,
         description,
         signers: filteredSigners
-      })
+      });
       
-      setHasChanges(false)
-      onSave(updatedContract)
+      setHasChanges(false);
+      onSave(updatedContract);
+      
+      toast({
+        title: "Contract Saved",
+        description: `Contract saved with ${filteredSigners.length} signer(s).`,
+        variant: "success",
+      });
     } catch (error) {
-      console.error('Error updating contract:', error)
+      console.error('Error updating contract:', error);
+      toast({
+        title: "Save Error",
+        description: "Failed to save contract. Please try again.",
+        variant: "destructive",
+      });
     }
-  }
+  };
+
+  // Helper function to get valid signers count
+  const getValidSignersCount = () => {
+    return signers.filter((s, index) => 
+      s.trim() !== '' && !signerErrors[index]
+    ).length;
+  };
+
+  // Helper function to check if all signers are valid
+  const areAllSignersValid = () => {
+    const nonEmptySigners = signers.filter(s => s.trim() !== '');
+    return nonEmptySigners.length > 0 && 
+           signerErrors.every(error => error === '') &&
+           !isValidatingEmail.some(validating => validating);
+  };
 
   const handleAIEdit = async () => {
     if (!aiQuery.trim()) return
@@ -558,39 +674,111 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
           </TabsContent>
           <TabsContent value="signers" className="min-h-[500px]">
             <div className="border rounded-md p-6 min-h-[500px] bg-white">
-              <h3 className="text-lg font-medium mb-4">Contract Signers</h3>
-              <p className="text-sm text-gray-500 mb-6">
-                Add email addresses of people who need to sign this contract.
-              </p>
+              <div className="mb-6">
+                <h3 className="text-lg font-medium mb-2">Contract Signers</h3>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">Email Requirements:</p>
+                      <ul className="list-disc list-inside space-y-1 text-blue-700">
+                        <li>Must be a valid email format (e.g., user@example.com)</li>
+                        <li>Must contain an @ symbol and domain (.com, .org, etc.)</li>
+                        <li>Cannot add your own email address</li>
+                        <li>Each email can only be added once</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
               
               <div className="space-y-4">
                 {signers.map((signer, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-50 rounded-full">
-                      <User className="h-4 w-4 text-blue-500" />
+                  <div key={index} className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-blue-50 rounded-full">
+                        <User className="h-4 w-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1 relative">
+                        <Input
+                          value={signer}
+                          onChange={(e) => handleSignerChange(index, e.target.value)}
+                          placeholder="Enter signer email (e.g., john@company.com)"
+                          className={`${
+                            signerErrors[index] 
+                              ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                              : signer.trim() && !signerErrors[index] && !isValidatingEmail[index]
+                              ? 'border-green-500 focus:border-green-500 focus:ring-green-500'
+                              : ''
+                          }`}
+                        />
+                        {isValidatingEmail[index] && (
+                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          handleRemoveSigner(index);
+                          // Remove corresponding error and validation state
+                          const newErrors = [...signerErrors];
+                          const newValidating = [...isValidatingEmail];
+                          newErrors.splice(index, 1);
+                          newValidating.splice(index, 1);
+                          setSignerErrors(newErrors);
+                          setIsValidatingEmail(newValidating);
+                        }}
+                        disabled={signers.length === 1 && !signer.trim()}
+                        className={signers.length === 1 && !signer.trim() ? 'opacity-50 cursor-not-allowed' : ''}
+                      >
+                        <Trash2 className="h-4 w-4 text-gray-400" />
+                      </Button>
                     </div>
-                    <Input
-                      value={signer}
-                      onChange={(e) => handleSignerChange(index, e.target.value)}
-                      placeholder="Enter signer email"
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleRemoveSigner(index)}
-                      disabled={signers.length === 1 && !signer.trim()}
-                      className={signers.length === 1 && !signer.trim() ? 'opacity-50 cursor-not-allowed' : ''}
-                    >
-                      <Trash2 className="h-4 w-4 text-gray-400" />
-                    </Button>
+                    
+                    {/* Fixed height validation message area */}
+                    <div className="min-h-[2.5rem] ml-11"> {/* Fixed minimum height container */}
+                      {signerErrors[index] ? (
+                        <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 p-2 rounded-md">
+                          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                          <span className="leading-relaxed">{signerErrors[index]}</span>
+                        </div>
+                      ) : signer.trim() && !isValidatingEmail[index] ? (
+                        <div className="flex items-center gap-2 text-sm text-green-600 py-2">
+                          <Check className="h-4 w-4 flex-shrink-0" />
+                          <span>Valid email address</span>
+                        </div>
+                      ) : null /* No spacer needed due to min-height */}
+                    </div>
                   </div>
                 ))}
                 
-                <div className="flex items-center justify-between mt-4">
+                {/* Summary */}
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">
+                      Valid signers: <span className="font-medium text-gray-900">{getValidSignersCount()}</span>
+                    </span>
+                    {getValidSignersCount() === 0 && (
+                      <span className="text-amber-600 flex items-center gap-1">
+                        <AlertCircle className="h-4 w-4" />
+                        At least one signer required
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between mt-6">
                   <Button
                     variant="outline"
-                    onClick={handleAddSigner}
+                    onClick={() => {
+                      handleAddSigner();
+                      // Add empty error and validation state for new signer
+                      setSignerErrors([...signerErrors, '']);
+                      setIsValidatingEmail([...isValidatingEmail, false]);
+                    }}
                   >
                     <Plus className="h-4 w-4 mr-2" />
                     Add Another Signer
@@ -600,6 +788,26 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                     <Button 
                       onClick={async () => {
                         try {
+                          // Final validation before sending
+                          if (!areAllSignersValid()) {
+                            toast({
+                              title: "Validation Required",
+                              description: "Please ensure all signer emails are valid before sending.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          
+                          const validSignersCount = getValidSignersCount();
+                          if (validSignersCount === 0) {
+                            toast({
+                              title: "No Signers Added",
+                              description: "Please add at least one valid signer email address.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          
                           // First save any changes
                           if (hasChanges) {
                             await handleSave();
@@ -614,13 +822,15 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                           onSave(updatedContract);
                           
                           // Send emails to signers in the background
-                          const signerEmails = signers.filter(s => s.trim() !== '');
+                          const validSigners = signers
+                            .filter((s, index) => s.trim() !== '' && !signerErrors[index])
+                            .map(s => s.trim().toLowerCase());
                           
-                          if (signerEmails.length > 0) {
+                          if (validSigners.length > 0) {
                             // Show immediate feedback
                             toast({
-                              title: "Sending contract...",
-                              description: "Preparing signing invitations.",
+                              title: "Sending Contract",
+                              description: `Preparing signing invitations for ${validSigners.length} recipient(s)...`,
                             });
                             
                             const emailResponse = await fetch('/api/email/send-contract', {
@@ -632,7 +842,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                                 contractId: contract.id,
                                 contractTitle: title,
                                 ownerName: contract.owner.name || contract.owner.email,
-                                signerEmails,
+                                signerEmails: validSigners,
                               }),
                             });
                             
@@ -642,46 +852,40 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                               // Check for partial failures
                               if (emailResult.partialFailure && emailResult.partialFailure.length > 0) {
                                 toast({
-                                  title: "Contract sent with warnings",
-                                  description: `Contract sent, but ${emailResult.partialFailure.length} email(s) failed to send.`,
+                                  title: "Partially Sent",
+                                  description: `Contract sent to ${validSigners.length - emailResult.partialFailure.length}/${validSigners.length} recipients. ${emailResult.partialFailure.length} email(s) failed.`,
                                   variant: "destructive",
                                 });
                               } else {
                                 toast({
-                                  title: "Contract sent successfully",
-                                  description: `Signing invitations sent to ${signerEmails.length} recipient(s).`,
+                                  title: "Contract Sent Successfully",
+                                  description: `Signing invitations sent to all ${validSigners.length} recipient(s).`,
                                   variant: "success",
                                 });
                               }
                             } else {
                               toast({
-                                title: "Contract sent with warning",
-                                description: "Contract status updated but emails may not have been sent.",
+                                title: "Email Warning",
+                                description: "Contract status updated but some emails may not have been sent.",
                                 variant: "destructive",
                               });
                             }
-                          } else {
-                            toast({
-                              title: "Contract status updated",
-                              description: "No signers specified for email notifications.",
-                              variant: "success",
-                            });
                           }
                           
                         } catch (error) {
                           console.error('Error sending contract:', error);
                           toast({
-                            title: "Error",
+                            title: "Send Failed",
                             description: "Failed to send contract. Please try again.",
                             variant: "destructive",
                           });
                         }
                       }}
                       className="bg-blue-600 hover:bg-blue-700"
-                      disabled={signers.filter(s => s.trim() !== '').length === 0}
+                      disabled={!areAllSignersValid() || getValidSignersCount() === 0}
                     >
                       <Send className="h-4 w-4 mr-2" />
-                      Send for Signatures
+                      Send for Signatures ({getValidSignersCount()})
                     </Button>
                   )}
                 </div>
