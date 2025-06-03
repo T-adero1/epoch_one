@@ -120,6 +120,7 @@ export default function ClientSideEncryptor({
       addLog('Initializing Sui client');
       const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
       
+      
       setStatus('encrypting');
       addLog('Initializing SEAL client');
       const keyServerIds = await getAllowlistedKeyServers(NETWORK);
@@ -127,7 +128,10 @@ export default function ClientSideEncryptor({
       
       const sealClient = new SealClient({
         suiClient: suiClient as any,
-        serverObjectIds: keyServerIds.map(id => [id, 1]),
+        serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
+          objectId: id,
+          weight: 1,
+        })),
         verifyKeyServers: true
       });
       

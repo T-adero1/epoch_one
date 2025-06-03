@@ -12,8 +12,8 @@
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
     "@mysten/dapp-kit": "^0.16.2",
-    "@mysten/seal": "^0.4.5",
-    "@mysten/sui": "^1.30.1",
+    "@mysten/seal": "^0.4.6",
+    "@mysten/sui": "^1.30.2",
     "@prisma/client": "^6.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.11",
     "@radix-ui/react-avatar": "^1.1.7",

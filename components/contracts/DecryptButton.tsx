@@ -13,6 +13,7 @@ import { fromB64, fromHEX, } from '@mysten/sui/utils';
 import { bech32 } from 'bech32';
 import { genAddressSeed, getZkLoginSignature} from '@mysten/sui/zklogin';
 
+
 // Utility function to decode a Sui bech32 private key
 function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
   console.log('[DecryptButton] Decoding bech32 private key...');
@@ -444,19 +445,15 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       console.log("[DecryptButton] Initializing Sui client");
       const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 
-      // Get key servers and format them correctly with weights
-      const keyServerIds = await getAllowlistedKeyServers('testnet');
-      console.log("[DecryptButton] Raw keyServerIds:", keyServerIds);
-
-      // Remove duplicates and format as [id, weight] tuples
-      const uniqueKeyServerIds = [...new Set(keyServerIds)];
-      const formattedServerIds = uniqueKeyServerIds.map(id => [id, 1] as [string, number]);
-      console.log("[DecryptButton] Formatted server IDs:", formattedServerIds);
+      
 
       // Create SealClient with properly formatted parameters
       const sealClient = new SealClient({
-        suiClient: suiClient as any, // Type cast to bypass version mismatch
-        serverObjectIds: formattedServerIds,
+        suiClient: suiClient as any,
+        serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
+          objectId: id,
+          weight: 1,
+        })),
         verifyKeyServers: true
       });
       console.log("[DecryptButton] sealClient:", sealClient);
@@ -474,10 +471,13 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       
       // Create a SessionKey with the ephemeral address
       console.log("[DecryptButton] Creating session key with ephemeral address:", ephemeralAddress);
+      
       const sessionKey = new SessionKey({
         address: ephemeralAddress,
-        packageId,
-        ttlMin: TTL_MIN
+        packageId: packageId,
+        ttlMin: TTL_MIN,
+        signer: ephemeralKeypair,
+        suiClient: suiClient as any
       });
       console.log("[DecryptButton] sessionKey:", sessionKey);
       

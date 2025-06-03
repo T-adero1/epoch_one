@@ -7,7 +7,7 @@ const { Transaction } = require('@mysten/sui/transactions');
 const { fromHEX } = require('@mysten/sui/utils');
 const crypto = require('crypto');
 const config = require('./fixed_config');
-const { SuiGraphQLClient } = require('@mysten/sui/graphql');
+const { getFullnodeUrl, SuiClient } = require('@mysten/sui/client');
 
 // Initialize SEAL client
 async function initSealClient(suiClient) {
@@ -18,12 +18,14 @@ async function initSealClient(suiClient) {
     const keyServers = await getAllowlistedKeyServers(config.NETWORK);
     console.log(`- Key servers:`, keyServers);
     
-    // Format as [id, weight] pairs
-    const serverObjectIds = keyServers.map(serverId => [serverId, 1]);
+    
     
     const client = new SealClient({
       suiClient,
-      serverObjectIds,
+      serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
+        objectId: id,
+        weight: 1,
+      })),
       verifyKeyServers: true
     });
     
@@ -52,7 +54,7 @@ async function createSessionKey(keypair, packageId) {
       packageId: packageId,
       ttlMin: config.DEFAULT_TTL_MINUTES,
       signer: keypair,
-      //client: new SuiGraphQLClient({ url: 'https://sui-testnet.mystenlabs.com/graphql', }),
+      suiClient: new SuiClient({ url: getFullnodeUrl('testnet') })
     });
     
     // Log raw session key details
@@ -77,28 +79,28 @@ async function createSessionKey(keypair, packageId) {
     // Set the signature on the session key
     console.log('- Setting signature on session key...');
     
-    // try {
-    //   // First try with full signature object
-    //   await sessionKey.setPersonalMessageSignature(signature);
-    //   console.log(' Session key initialized with signature');
-    // } catch (error) {
-    //   console.log(` First signature attempt failed: ${error.message}`);
+    try {
+      // First try with full signature object
+      await sessionKey.setPersonalMessageSignature(signature);
+      console.log(' Session key initialized with signature');
+    } catch (error) {
+      console.log(` First signature attempt failed: ${error.message}`);
       
-    //   // If full signature object fails, try with signature.signature (common format)
-    //   if (typeof signature === 'object' && signature.signature) {
-    //     try {
-    //       await sessionKey.setPersonalMessageSignature(signature.signature);
-    //       console.log(' Session key initialized with inner signature');
-    //     } catch (innerError) {
-    //       console.error(` Second signature attempt failed: ${innerError.message}`);
-    //       console.error(innerError.stack);
-    //       throw innerError;
-    //     }
-    //   } else {
-    //     console.error(error.stack);
-    //     throw error;
-    //   }
-    // }
+      // If full signature object fails, try with signature.signature (common format)
+      if (typeof signature === 'object' && signature.signature) {
+        try {
+          await sessionKey.setPersonalMessageSignature(signature.signature);
+          console.log(' Session key initialized with inner signature');
+        } catch (innerError) {
+          console.error(` Second signature attempt failed: ${innerError.message}`);
+          console.error(innerError.stack);
+          throw innerError;
+        }
+      } else {
+        console.error(error.stack);
+        throw error;
+      }
+    }
     
 
     

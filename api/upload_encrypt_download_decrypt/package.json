@@ -10,8 +10,8 @@
     },
     "dependencies": {
         "@mysten/bcs": "^1.6.0",
-        "@mysten/seal": "^0.4.5",
-        "@mysten/sui": "^1.30.1",
+        "@mysten/seal": "^0.4.6",
+        "@mysten/sui": "^1.30.2",
         "axios": "^1.9.0",
         "bech32": "^2.0.0",
         "body-parser": "^1.20.2",

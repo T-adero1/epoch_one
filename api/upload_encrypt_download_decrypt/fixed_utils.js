@@ -6,17 +6,18 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { SuiClient } = require('@mysten/sui/client');
-const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
+
 const { fromHEX, toHex } = require('@mysten/sui/utils');
-const { bech32 } = require('bech32');
+
 const config = require('./fixed_config');
-const { Transaction } = require('@mysten/sui/transactions');
+
 const { suiPrivkeyToKeypair } = require('./sui_key_utils');
+const { getFullnodeUrl } = require('@mysten/sui/client');
 
 // Initialize SUI client
 async function initSuiClient() {
   console.log('\n Initializing Sui client...');
-  const client = new SuiClient({ url: config.RPC_URL });
+  const client = new SuiClient({ url: getFullnodeUrl('testnet') });
   
   // Validate the client is working
   try {
