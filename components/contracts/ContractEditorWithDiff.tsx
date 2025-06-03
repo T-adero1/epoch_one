@@ -447,6 +447,20 @@ export default function ContractEditorWithDiff({
         onChange={(e) => onContentChange(e.target.value)}
         className="h-full w-full resize-none p-6 font-mono text-sm border-none focus:outline-none"
         placeholder="Write your contract content here..."
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = e.target.selectionStart;
+            const end = e.target.selectionEnd;
+            const newContent = content.substring(0, start) + '\t' + content.substring(end);
+            onContentChange(newContent);
+            
+            // Restore cursor position after the inserted tab
+            setTimeout(() => {
+              e.target.selectionStart = e.target.selectionEnd = start + 1;
+            }, 0);
+          }
+        }}
       />
     );
   }
