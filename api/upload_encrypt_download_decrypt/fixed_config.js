@@ -28,7 +28,7 @@ const USER_PRIVATE_KEY = process.env.USER_PRIVATE_KEY;   // User who will access
 // Other configuration
 const MAX_FILE_SIZE = 10 * 1024 * 1024; 
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : './temp';
-const DEFAULT_TTL_MINUTES = 15; 
+const DEFAULT_TTL_MINUTES = 30; 
 const EPHEMERAL_KEY_VALIDITY_MS = 30 * 60 * 1000; // 30 minutes
 
 module.exports = {
