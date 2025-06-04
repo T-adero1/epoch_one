@@ -33,7 +33,6 @@ export async function GET(request: Request) {
     // Build the where clause to include:
     // 1. Contracts owned by the user (all statuses)
     // 2. Contracts where user is a signer and status is not DRAFT
-    // 3. Completed contracts (public visibility)
     const where = {
       OR: [
         // User's own contracts (all statuses)
@@ -54,9 +53,7 @@ export async function GET(request: Request) {
               }
             }
           ]
-        },
-        // Completed contracts (public visibility) - this might be redundant now
-        { status: 'COMPLETED' }
+        }
       ],
       // Apply status filter if provided
       ...(status && { status: status })
