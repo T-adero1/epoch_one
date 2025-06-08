@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Plus, Search, ChevronDown, ArrowLeft, AlertCircle, Info, Check, Loader2, Trash2, User } from 'lucide-react';
+import { FileText, Plus, Search, ChevronDown, ArrowLeft, AlertCircle, Info, Check, Loader2, Trash2, User, Shield, ExternalLink, Download, UserCheck, Database, Copy, FileDown, Activity, Clock, FileEdit } from 'lucide-react';
 import { getContracts, createContract, deleteContract } from '@/app/utils/contracts';
 import { format } from 'date-fns';
 import {
@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/components/ui/use-toast";
 import { validateSignerEmail } from '@/app/utils/email';
+import { downloadRecoveryData, extractRecoveryData } from '@/app/utils/recoveryData'
+import DecryptButton from '@/components/contracts/DecryptButton'
 
 // Import our contract components
 import ContractActions from '@/components/contracts/ContractActions';
@@ -208,6 +210,67 @@ interface ContractWithRelations {
   }[];
 }
 
+// Add this component near the top of your file (after imports):
+const BlockchainAddress = ({ 
+  label, 
+  address, 
+  showFullOnHover = false,
+  copyable = true,
+  externalLink
+}: {
+  label: string;
+  address: string;
+  showFullOnHover?: boolean;
+  copyable?: boolean;
+  externalLink?: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const shortenAddress = (addr: string, start = 8, end = 8) => {
+    if (addr.length <= start + end) return addr;
+    return `${addr.slice(0, start)}...${addr.slice(-end)}`;
+  };
+
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-sm text-gray-600 min-w-[60px]">{label}:</span>
+      <div className="flex items-center gap-2 flex-1 justify-end">
+        <span 
+          className="text-sm font-medium text-gray-900 bg-white px-3 py-1 rounded border font-mono"
+          title={showFullOnHover ? address : undefined}
+        >
+          {shortenAddress(address)}
+        </span>
+        {copyable && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleCopy}
+            className="h-8 w-8 p-0"
+            title="Copy address"
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-green-600" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function DashboardPage() {
   const startTime = performance.now();
   console.log(`[DASHBOARD:TIMING] Component function executing at ${Math.round(startTime)}ms`);
@@ -258,6 +321,18 @@ export default function DashboardPage() {
   // Add validation states for contract creation
   const [newContractSignerErrors, setNewContractSignerErrors] = useState<string[]>(['']);
   const [isValidatingNewContractEmails, setIsValidatingNewContractEmails] = useState<boolean[]>([false]);
+
+  // Add a new state for the blockchain details modal (around line 240):
+  const [blockchainDetailsContract, setBlockchainDetailsContract] = useState<ContractWithRelations | null>(null);
+
+  // Add this near your other state declarations (around line 220):
+  const validationTimeoutRefs = useRef<(NodeJS.Timeout | null)[]>([]);
+
+  // Add a new state to track if this is a newly created contract (around line 220):
+  const [isNewlyCreatedContract, setIsNewlyCreatedContract] = useState(false);
+
+  // Add a new state variable for dialog visibility (around line 290 with other states):
+  const [isBlockchainDetailsOpen, setIsBlockchainDetailsOpen] = useState(false);
 
   // Get user initials for avatar fallback
   const getUserInitials = () => {
@@ -465,84 +540,159 @@ export default function DashboardPage() {
     };
   }, [isAuthenticated, user?.email, loadContracts, isLoading, isAuthStateResolved]);
   
-  // Enhanced signer change handler for contract creation
-  const handleNewContractSignerChange = (index: number, value: string) => {
-    const newSigners = [...newContract.signers];
-    const newErrors = [...newContractSignerErrors];
-    const newValidating = [...isValidatingNewContractEmails];
+  // Replace the handleNewContractSignerChange function with this corrected version:
+  const handleNewContractSignerChange = useCallback((index: number, value: string) => {
+    // Convert email to lowercase automatically
+    const lowercaseValue = value.toLowerCase();
     
-    newSigners[index] = value; // Keep original case for display
-    newValidating[index] = true;
+    // Use functional state updates to avoid stale closure values
+    setNewContract(currentContract => ({
+      ...currentContract,
+      signers: currentContract.signers.map((s, i) => i === index ? lowercaseValue : s)
+    }));
     
-    // Clear previous error
-    newErrors[index] = '';
-    
-    setNewContract({ ...newContract, signers: newSigners });
-    setNewContractSignerErrors(newErrors);
-    setIsValidatingNewContractEmails(newValidating);
-    
-    // Debounced validation
-    setTimeout(() => {
-      const trimmedValue = value.trim();
-      const updatedErrors = [...newContractSignerErrors];
-      const updatedValidating = [...isValidatingNewContractEmails];
-      
-      if (trimmedValue) {
-        // Validate the email
-        const validation = validateSignerEmail(trimmedValue, user?.email);
-        
-        if (!validation.isValid) {
-          updatedErrors[index] = validation.error || 'Invalid email';
-        } else {
-          // Check for duplicates in current signers list
-          const lowerValue = trimmedValue.toLowerCase();
-          const duplicateIndex = newSigners.findIndex((s, i) => 
-            i !== index && s.trim().toLowerCase() === lowerValue
-          );
-          
-          if (duplicateIndex !== -1) {
-            updatedErrors[index] = 'This email is already added';
-          }
-        }
-      }
-      
-      updatedValidating[index] = false;
-      setNewContractSignerErrors(updatedErrors);
-      setIsValidatingNewContractEmails(updatedValidating);
-    }, 500); // 500ms debounce
-  };
-
-  // Helper to add new signer for contract creation
-  const handleAddNewContractSigner = () => {
-    setNewContract({ 
-      ...newContract, 
-      signers: [...newContract.signers, ''] 
+    setNewContractSignerErrors(currentErrors => {
+      const newErrors = [...currentErrors];
+      newErrors[index] = ''; // Clear previous error
+      return newErrors;
     });
-    setNewContractSignerErrors([...newContractSignerErrors, '']);
-    setIsValidatingNewContractEmails([...isValidatingNewContractEmails, false]);
-  };
-
-  // Helper to remove signer for contract creation
-  const handleRemoveNewContractSigner = (index: number) => {
-    const newSigners = [...newContract.signers];
-    const newErrors = [...newContractSignerErrors];
-    const newValidating = [...isValidatingNewContractEmails];
     
-    newSigners.splice(index, 1);
-    newErrors.splice(index, 1);
-    newValidating.splice(index, 1);
+    setIsValidatingNewContractEmails(currentValidating => {
+      const newValidating = [...currentValidating];
+      newValidating[index] = true;
+      return newValidating;
+    });
     
-    // Ensure at least one empty signer field
-    if (newSigners.length === 0) {
-      newSigners.push('');
-      newErrors.push('');
-      newValidating.push(false);
+    // Clear any existing timeout for this index
+    if (validationTimeoutRefs.current[index]) {
+      clearTimeout(validationTimeoutRefs.current[index]!);
+      validationTimeoutRefs.current[index] = null;
     }
     
-    setNewContract({ ...newContract, signers: newSigners });
-    setNewContractSignerErrors(newErrors);
-    setIsValidatingNewContractEmails(newValidating);
-  };
+    // Set up new validation timeout
+    validationTimeoutRefs.current[index] = setTimeout(() => {
+      const trimmedValue = lowercaseValue.trim();
+      
+      if (trimmedValue) {
+        // Validate the email format
+        const validation = validateSignerEmail(trimmedValue, user?.email);
+        
+        setNewContractSignerErrors(currentErrors => {
+          const updatedErrors = [...currentErrors];
+          
+          if (!validation.isValid) {
+            updatedErrors[index] = validation.error || 'Invalid email';
+          } else {
+            // Check for duplicates
+            setNewContract(currentContract => {
+              const duplicateIndex = currentContract.signers.findIndex((s, i) => 
+                i !== index && s.trim().toLowerCase() === trimmedValue
+              );
+              
+              if (duplicateIndex !== -1) {
+                updatedErrors[index] = 'This email is already added';
+              }
+              
+              return currentContract; // Don't actually update, just check
+            });
+          }
+          
+          return updatedErrors;
+        });
+      }
+      
+      // Mark validation as complete
+      setIsValidatingNewContractEmails(currentValidating => {
+        const updatedValidating = [...currentValidating];
+        updatedValidating[index] = false;
+        return updatedValidating;
+      });
+      
+      // Clear the timeout ref
+      validationTimeoutRefs.current[index] = null;
+    }, 300);
+  }, [user?.email]); // Remove the state dependencies that were causing stale closures
+
+  // Also update the add/remove functions to use functional updates:
+  const handleAddNewContractSigner = useCallback(() => {
+    setNewContract(currentContract => ({
+      ...currentContract,
+      signers: [...currentContract.signers, '']
+    }));
+    
+    setNewContractSignerErrors(currentErrors => [...currentErrors, '']);
+    setIsValidatingNewContractEmails(currentValidating => [...currentValidating, false]);
+    
+    // Ensure timeout refs array has the right length
+    validationTimeoutRefs.current.push(null);
+  }, []);
+
+  const handleRemoveNewContractSigner = useCallback((index: number) => {
+    // Clear timeout for the removed signer
+    if (validationTimeoutRefs.current[index]) {
+      clearTimeout(validationTimeoutRefs.current[index]!);
+    }
+    
+    setNewContract(currentContract => {
+      const newSigners = [...currentContract.signers];
+      newSigners.splice(index, 1);
+      
+      // Ensure at least one empty signer field
+      if (newSigners.length === 0) {
+        newSigners.push('');
+      }
+      
+      return {
+        ...currentContract,
+        signers: newSigners
+      };
+    });
+    
+    setNewContractSignerErrors(currentErrors => {
+      const newErrors = [...currentErrors];
+      newErrors.splice(index, 1);
+      if (newErrors.length === 0) {
+        newErrors.push('');
+      }
+      return newErrors;
+    });
+    
+    setIsValidatingNewContractEmails(currentValidating => {
+      const newValidating = [...currentValidating];
+      newValidating.splice(index, 1);
+      if (newValidating.length === 0) {
+        newValidating.push(false);
+      }
+      return newValidating;
+    });
+    
+    validationTimeoutRefs.current.splice(index, 1);
+    if (validationTimeoutRefs.current.length === 0) {
+      validationTimeoutRefs.current.push(null);
+    }
+  }, []);
+
+  // Add cleanup effect to clear timeouts when component unmounts or modal closes:
+  useEffect(() => {
+    return () => {
+      // Clear all validation timeouts on cleanup
+      validationTimeoutRefs.current.forEach(timeout => {
+        if (timeout) clearTimeout(timeout);
+      });
+      validationTimeoutRefs.current = [];
+    };
+  }, []);
+
+  // Add this effect to clear timeouts when the modal closes:
+  useEffect(() => {
+    if (!isCreatingContract) {
+      // Clear all pending validations when modal closes
+      validationTimeoutRefs.current.forEach(timeout => {
+        if (timeout) clearTimeout(timeout);
+      });
+      validationTimeoutRefs.current = [];
+    }
+  }, [isCreatingContract]);
 
   // Helper to get valid signers count for contract creation
   const getNewContractValidSignersCount = () => {
@@ -615,6 +765,7 @@ export default function DashboardPage() {
       setIsCreatingContract(false);
       resetForm();
       setSelectedContract(tempContract);
+      setIsNewlyCreatedContract(true);
       setIsEditingContract(true);
       
       // Create the actual contract in the background
@@ -724,6 +875,7 @@ export default function DashboardPage() {
   
   const handleEditContract = (contract: ContractWithRelations) => {
     setSelectedContract(contract);
+    setIsNewlyCreatedContract(false);
     setIsEditingContract(true);
   };
   
@@ -831,6 +983,11 @@ export default function DashboardPage() {
   const filteredContracts = contracts.filter(contract => {
     let matches = true;
     
+    // Exclude completed contracts since they have their own section
+    if (contract.status === 'COMPLETED') {
+      return false;
+    }
+    
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       matches = matches && (
@@ -845,6 +1002,30 @@ export default function DashboardPage() {
     
     return matches;
   });
+
+  // Add these utility functions after your existing utility functions (around line 460):
+  const getWalrusExplorerUrl = (blobId: string) => 
+    `https://walruscan.com/testnet/blob/${blobId}`;
+
+  const getSuiExplorerUrl = (objectId: string) => 
+    `https://testnet.suivision.xyz/object/${objectId}`;
+
+  const getCompletedContracts = () => 
+    contracts.filter(contract => contract.status === 'COMPLETED');
+
+  const handleViewBlockchainDetails = (contract: ContractWithRelations) => {
+    setBlockchainDetailsContract(contract);
+    setIsBlockchainDetailsOpen(true);
+  };
+
+  // Add a proper close handler that delays clearing the contract data:
+  const handleCloseBlockchainDetails = () => {
+    setIsBlockchainDetailsOpen(false);
+    // Delay clearing the contract data to allow animation to complete
+    setTimeout(() => {
+      setBlockchainDetailsContract(null);
+    }, 150); // Adjust timing to match your dialog animation duration
+  };
 
   // Show loading state with skeleton
   if (isLoading || !isAuthStateResolved || (isAuthenticated && isLoadingContracts)) {
@@ -890,11 +1071,16 @@ export default function DashboardPage() {
       <div className="container mx-auto p-6">
         <ContractEditor 
           contract={selectedContract} 
+          startWithAI={isNewlyCreatedContract}
           onSave={(updated) => {
             handleUpdateContract(updated);
             setIsEditingContract(false);
+            setIsNewlyCreatedContract(false);
           }}
-          onCancel={() => setIsEditingContract(false)}
+          onCancel={() => {
+            setIsEditingContract(false);
+            setIsNewlyCreatedContract(false);
+          }}
         />
       </div>
     );
@@ -968,9 +1154,16 @@ export default function DashboardPage() {
           <div className="grid gap-6">
             <Card className="border-gray-100">
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <CardTitle className="text-gray-900">Your Contracts</CardTitle>
-                  <CardDescription className="text-gray-600">Manage and track your contracts</CardDescription>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FileEdit className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-gray-900">Contracts in Progress</CardTitle>
+                    <CardDescription className="text-gray-600">
+                      Manage and track your active contracts
+                    </CardDescription>
+                  </div>
                 </div>
                 <Dialog open={isCreatingContract} onOpenChange={(open) => {
                   setIsCreatingContract(open);
@@ -1279,6 +1472,171 @@ export default function DashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Completed Contracts */}
+            {getCompletedContracts().length > 0 && (
+              <Card className="border-gray-100 mt-6">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <Check className="h-5 w-5 text-green-600" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-gray-900">Completed Contracts</CardTitle>
+                      <CardDescription className="text-gray-600">
+                        Successfully completed contracts with blockchain verification
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {getCompletedContracts().map((contract) => {
+                      const walrusData = contract.metadata?.walrus;
+                      const blobId = walrusData?.storage?.blobId;
+                      const documentIdHex = walrusData?.encryption?.documentId;
+                      const allowlistId = walrusData?.encryption?.allowlistId;
+                      const hasBlockchainData = blobId && documentIdHex && allowlistId;
+                      
+                      return (
+                        <div key={contract.id} className="border rounded-lg p-3 bg-white hover:bg-gray-50 transition-all border-gray-200">
+                          {/* Card Header - Clean title only */}
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div 
+                                className="flex items-center gap-2 cursor-pointer"
+                                onClick={() => handleViewContract(contract)}
+                              >
+                                <FileText className="h-4 w-4 text-green-600 flex-shrink-0" />
+                                <h3 className="font-semibold text-gray-900 truncate text-sm hover:text-green-600 transition-colors">
+                                  {contract.title}
+                                </h3>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Blockchain Status Indicators - Fixed alignment */}
+                          <div className="flex justify-between items-center mb-2">
+                            <div className="flex items-center gap-2">
+                              <Database className="h-3 w-3 text-blue-500" />
+                              <span className="text-xs text-gray-600">
+                                {blobId ? 'Stored' : 'No Storage'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Shield className="h-3 w-3 text-purple-500" />
+                              <span className="text-xs text-gray-600">
+                                {allowlistId ? 'Encrypted' : 'No Encryption'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="space-y-1.5 mb-2">
+                            {/* Decrypt and Download Button */}
+                            {hasBlockchainData && (
+                              <>
+                                {/* Hidden DecryptButton component */}
+                                <div className="hidden">
+                                  <DecryptButton
+                                    ref={(ref) => {
+                                      if (ref) {
+                                        (contract as any)._decryptRef = ref;
+                                      }
+                                    }}
+                                    contractId={contract.id}
+                                    blobId={blobId!}
+                                    documentIdHex={documentIdHex!}
+                                    allowlistId={allowlistId!}
+                                    status={contract.status}
+                                  />
+                                </div>
+                                
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    if ((contract as any)._decryptRef) {
+                                      await (contract as any)._decryptRef.handleDecrypt();
+                                    }
+                                  }}
+                                  className="w-full text-xs flex items-center justify-center gap-2 h-7"
+                                >
+                                  <FileDown className="h-3 w-3" />
+                                  Decrypt and Download
+                                </Button>
+                              </>
+                            )}
+
+                            {/* Download Recovery Data Button */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                try {
+                                  console.log('Download Recovery Data - Contract object:', contract);
+                                  
+                                  toast({
+                                    title: "Preparing Recovery Data",
+                                    description: "Extracting recovery information...",
+                                  });
+                                  
+                                  const recoveryData = extractRecoveryData(contract);
+                                  if (recoveryData) {
+                                    downloadRecoveryData(recoveryData);
+                                    toast({
+                                      title: "Recovery Data Downloaded",
+                                      description: "Your contract recovery file has been saved. Store it securely!",
+                                      variant: "success",
+                                    });
+                                  } else {
+                                    toast({
+                                      title: "Download Failed",
+                                      description: "No recovery data available for this contract.",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                } catch (error) {
+                                  console.error('Error downloading recovery data:', error);
+                                  toast({
+                                    title: "Download Failed",
+                                    description: "There was a problem generating the recovery file. Please try again.",
+                                    variant: "destructive",
+                                  });
+                                }
+                              }}
+                              className="w-full text-xs flex items-center justify-center gap-2 h-7"
+                            >
+                              <Download className="h-3 w-3" />
+                              Download Recovery Data
+                            </Button>
+
+                            {/* View Blockchain Details Button */}
+                            {hasBlockchainData && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleViewBlockchainDetails(contract)}
+                                className="w-full text-xs flex items-center justify-center gap-2 h-7"
+                              >
+                                <Database className="h-3 w-3" />
+                                View Blockchain Details
+                              </Button>
+                            )}
+                          </div>
+
+                          {/* Contract Info */}
+                          <div className="flex justify-between items-center text-xs text-gray-500 pt-1.5 border-t border-gray-100">
+                            <span>{format(new Date(contract.updatedAt), 'MMM dd, yyyy')}</span>
+                            <span>{contract.metadata?.signers?.length || 0} signers</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Delete confirmation dialog */}
@@ -1298,6 +1656,287 @@ export default function DashboardPage() {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+
+          {/* Blockchain Details Modal */}
+          <Dialog 
+            open={isBlockchainDetailsOpen} 
+            onOpenChange={(open) => {
+              if (!open) {
+                handleCloseBlockchainDetails();
+              }
+            }}
+          >
+            <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5 text-blue-600" />
+                  Blockchain Details
+                </DialogTitle>
+                <DialogDescription>
+                  Detailed blockchain information for "{blockchainDetailsContract?.title}"
+                </DialogDescription>
+              </DialogHeader>
+              
+              {/* Content will remain visible during close animation */}
+              {blockchainDetailsContract && (
+                <div className="space-y-6">
+                  {/* Contract Overview */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Contract Overview
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Status:</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                          <span className="font-medium text-green-700">Completed</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Completed:</span>
+                        <span className="font-medium">{format(new Date(blockchainDetailsContract.updatedAt), 'MMM dd, yyyy HH:mm')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Signers:</span>
+                        <span className="font-medium">{blockchainDetailsContract.metadata?.signers?.length || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Owner:</span>
+                        <span className="font-medium">{blockchainDetailsContract.owner?.name || blockchainDetailsContract.owner?.email}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Walrus Storage Details */}
+                  {blockchainDetailsContract.metadata?.walrus?.storage?.blobId && (
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <Database className="h-5 w-5 text-blue-500" />
+                        Walrus Storage
+                      </h3>
+                      <div className="space-y-2">
+                        <BlockchainAddress
+                          label="Blob ID"
+                          address={blockchainDetailsContract.metadata.walrus.storage.blobId}
+                          showFullOnHover={true}
+                        />
+                        {blockchainDetailsContract.metadata.walrus.storage.uploadedAt && (
+                          <div className="flex justify-between py-2">
+                            <span className="text-sm text-gray-600">Uploaded:</span>
+                            <span className="text-sm font-medium">
+                              {format(new Date(blockchainDetailsContract.metadata.walrus.storage.uploadedAt), 'MMM dd, yyyy HH:mm')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Walrus Explorer Button */}
+                      <div className="mt-4 pt-3 border-t border-gray-200">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            window.open(getWalrusExplorerUrl(blockchainDetailsContract.metadata!.walrus!.storage!.blobId!), '_blank');
+                          }}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Database className="h-4 w-4" />
+                          View in Walrus Explorer
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SEAL Encryption Details */}
+                  {blockchainDetailsContract.metadata?.walrus?.encryption?.allowlistId && (
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <Shield className="h-5 w-5 text-purple-500" />
+                        SEAL Encryption
+                      </h3>
+                      <div className="space-y-2">
+                        <BlockchainAddress
+                          label="Allowlist ID"
+                          address={blockchainDetailsContract.metadata.walrus.encryption.allowlistId}
+                          showFullOnHover={true}
+                        />
+                        {blockchainDetailsContract.metadata.walrus.encryption.documentId && (
+                          <BlockchainAddress
+                            label="Document ID"
+                            address={blockchainDetailsContract.metadata.walrus.encryption.documentId}
+                            showFullOnHover={true}
+                          />
+                        )}
+                        {blockchainDetailsContract.metadata.walrus.encryption.capId && (
+                          <BlockchainAddress
+                            label="Cap ID"
+                            address={blockchainDetailsContract.metadata.walrus.encryption.capId}
+                            showFullOnHover={true}
+                          />
+                        )}
+                      </div>
+                      {/* Sui Explorer Button */}
+                      <div className="mt-4 pt-3 border-t border-gray-200">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            window.open(getSuiExplorerUrl(blockchainDetailsContract.metadata!.walrus!.encryption!.allowlistId!), '_blank');
+                          }}
+                          className="w-full flex items-center justify-center gap-2"
+                        >
+                          <Shield className="h-4 w-4" />
+                          View on Sui Explorer
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Authorized Wallets */}
+                  {blockchainDetailsContract.metadata?.walrus?.authorizedWallets && 
+                   blockchainDetailsContract.metadata.walrus.authorizedWallets.length > 0 && (
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <UserCheck className="h-5 w-5 text-orange-500" />
+                        Authorized Wallets
+                      </h3>
+                      <div className="space-y-4">
+                        <div className="flex justify-between py-2 border-b border-gray-200">
+                          <span className="text-sm text-gray-600">Total Authorized:</span>
+                          <span className="text-sm font-medium">{blockchainDetailsContract.metadata.walrus.authorizedWallets.length} wallet(s)</span>
+                        </div>
+                        
+                        {blockchainDetailsContract.metadata.walrus.authorizedWallets.map((wallet, index) => {
+                          // Find the corresponding email by matching wallet address from signatures
+                          const matchingSignature = blockchainDetailsContract.signatures?.find(
+                            sig => sig.walletAddress === wallet
+                          );
+                          const correspondingEmail = matchingSignature?.user?.email;
+                          
+                          return (
+                            <div key={index} className="bg-gray-50 rounded-lg p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-gray-900">Signer {index + 1}</span>
+                                {correspondingEmail && (
+                                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                    Verified
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {/* Email Address */}
+                              {correspondingEmail ? (
+                                <div className="flex items-center justify-between py-1">
+                                  <span className="text-sm text-gray-600 min-w-[60px]">Email:</span>
+                                  <div className="flex items-center gap-2 flex-1 justify-end">
+                                    <span className="text-sm font-medium text-gray-900 bg-white px-3 py-1 rounded border">
+                                      {correspondingEmail}
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(correspondingEmail);
+                                          toast({
+                                            title: "Copied!",
+                                            description: "Email address copied to clipboard",
+                                            variant: "success",
+                                          });
+                                        } catch (err) {
+                                          console.error('Failed to copy:', err);
+                                        }
+                                      }}
+                                      className="h-8 w-8 p-0"
+                                      title="Copy email"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-between py-1">
+                                  <span className="text-sm text-gray-600">Email:</span>
+                                  <span className="text-sm text-gray-400 italic">Not available</span>
+                                </div>
+                              )}
+                              
+                              {/* Wallet Address */}
+                              <BlockchainAddress
+                                label="Wallet"
+                                address={wallet}
+                                showFullOnHover={true}
+                              />
+                            </div>
+                          );
+                        })}
+                        
+                        {/* Additional Signers (if any emails without corresponding wallets) */}
+                        {blockchainDetailsContract.signatures && 
+                         blockchainDetailsContract.signatures.some(sig => 
+                           !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
+                         ) && (
+                          <div className="mt-4 pt-3 border-t border-gray-200">
+                            <h4 className="text-sm font-medium text-gray-900 mb-2">Additional Signers (No Blockchain Wallet)</h4>
+                            {blockchainDetailsContract.signatures
+                              .filter(sig => 
+                                !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
+                              )
+                              .map((signature, index) => (
+                                <div key={index} className="bg-yellow-50 rounded-lg p-3 mb-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium text-gray-900">
+                                      Additional Signer {index + 1}
+                                    </span>
+                                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                                      Not on Blockchain
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between py-1 mt-2">
+                                    <span className="text-sm text-gray-600">Email:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium text-gray-900 bg-white px-3 py-1 rounded border">
+                                        {signature.user.email}
+                                      </span>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={async () => {
+                                          try {
+                                            await navigator.clipboard.writeText(signature.user.email);
+                                            toast({
+                                              title: "Copied!",
+                                              description: "Email address copied to clipboard",
+                                              variant: "success",
+                                            });
+                                          } catch (err) {
+                                            console.error('Failed to copy:', err);
+                                          }
+                                        }}
+                                        className="h-8 w-8 p-0"
+                                        title="Copy email"
+                                      >
+                                        <Copy className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <DialogFooter>
+                <Button variant="outline" onClick={handleCloseBlockchainDetails}>
+                  Close
+                </Button>
+                
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

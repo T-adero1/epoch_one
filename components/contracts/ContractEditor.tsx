@@ -27,6 +27,7 @@ interface ContractEditorProps {
   contract: ContractWithRelations;
   onSave: (updatedContract: ContractWithRelations) => void;
   onCancel: () => void;
+  startWithAI?: boolean;
 }
 
 // Define an interface for the original values
@@ -44,7 +45,12 @@ function isSpacingOnlyChange(group: ChangeGroup): boolean {
   return filteredOriginal.length === 0 && filteredNew.length === 0;
 }
 
-export default function ContractEditor({ contract, onSave, onCancel }: ContractEditorProps) {
+export default function ContractEditor({ 
+  contract, 
+  onSave, 
+  onCancel, 
+  startWithAI = false
+}: ContractEditorProps) {
   const { user } = useZkLogin();
   const [content, setContent] = useState(contract.content || '')
   const [title, setTitle] = useState(contract.title || '')
@@ -63,7 +69,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
   const [hasChanges, setHasChanges] = useState(false)
   
   // AI functionality state
-  const [showAIPanel, setShowAIPanel] = useState(false)
+  const [showAIPanel, setShowAIPanel] = useState(startWithAI)
   const [aiQuery, setAiQuery] = useState('')
   const [isAIProcessing, setIsAIProcessing] = useState(false)
   const [aiSuggestions] = useState([
@@ -382,6 +388,12 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
     !isSpacingOnlyChange(group)
   ).length
 
+  useEffect(() => {
+    if (startWithAI && !content.trim()) {
+      setShowAIPanel(true);
+    }
+  }, [startWithAI, content]);
+
   return (
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4">
@@ -422,6 +434,7 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
             <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
               {/* Header - Mobile Responsive */}
               <div className="p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+                {/* Text container with consistent sizing */}
                 <div className="text-sm text-gray-500">
                   {showDiffMode ? (
                     <div className="flex flex-wrap items-center gap-2">
@@ -435,22 +448,50 @@ export default function ContractEditor({ contract, onSave, onCancel }: ContractE
                         </span>
                       )}
                     </div>
+                  ) : showAIPanel ? (
+                    // Clickable version - same styling as static version
+                    <button
+                      onClick={() => setShowAIPanel(false)}
+                      className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors group"
+                    >
+                      <ChevronLeft className="h-3 w-3 group-hover:translate-x-[-1px] transition-transform flex-shrink-0" />
+                      <span className="font-normal">Contract Editor</span>
+                    </button>
                   ) : (
-                    'Contract Editor'
+                    // Static version with invisible spacer
+                    <div className="flex items-center gap-1 text-sm text-gray-500">
+                      <div className="w-3 h-3 flex-shrink-0"></div>
+                      <span className="font-normal">Contract Editor</span>
+                    </div>
                   )}
                 </div>
                 
+                {/* Always show the button - just disable when AI panel is open */}
                 {!showDiffMode && (
                   <div className="relative group">
-                    <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-200"></div>
+                    <div className={`absolute -inset-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg blur transition duration-200 ${
+                      showAIPanel 
+                        ? 'opacity-10' 
+                        : 'opacity-25 group-hover:opacity-50'
+                    }`}></div>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="relative gap-2 w-full sm:w-auto bg-white"
-                      onClick={() => setShowAIPanel(!showAIPanel)}
-                      disabled={isAIProcessing}
+                      className={`relative gap-2 w-full sm:w-auto transition-all duration-200 ${
+                        showAIPanel 
+                          ? 'bg-gray-50 text-gray-400 cursor-not-allowed' 
+                          : 'bg-white hover:bg-gray-50'
+                      }`}
+                      onClick={() => {
+                        if (!showAIPanel) {
+                          setShowAIPanel(true);
+                        }
+                      }}
+                      disabled={isAIProcessing || showAIPanel}
                     >
-                      <Sparkles className="h-4 w-4" />
+                      <Sparkles className={`h-4 w-4 transition-colors ${
+                        showAIPanel ? 'text-gray-300' : ''
+                      }`} />
                       <span className="sm:inline">Edit with AI</span>
                     </Button>
                   </div>
