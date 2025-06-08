@@ -1360,7 +1360,6 @@ export default function DashboardPage() {
                       <SelectItem value="DRAFT">Draft</SelectItem>
                       <SelectItem value="PENDING">Pending</SelectItem>
                       <SelectItem value="ACTIVE">Active</SelectItem>
-                      <SelectItem value="COMPLETED">Completed</SelectItem>
                       <SelectItem value="EXPIRED">Expired</SelectItem>
                       <SelectItem value="CANCELLED">Cancelled</SelectItem>
                     </SelectContent>
