@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { FileText, AlertTriangle, CheckCircle2, LockKeyhole } from 'lucide-react'
+import { FileText, AlertTriangle, CheckCircle2, LockKeyhole, Download } from 'lucide-react'
 import SignatureDrawingCanvas from '@/components/contracts/SignatureCanvas'
 import { canUserSignContract, getUserSignatureStatus } from '@/app/utils/signatures'
 import { format } from 'date-fns'
@@ -49,6 +49,9 @@ interface ContractDetail {
       email: string;
     };
   }[];
+  s3FileKey?: string;
+  s3FileName?: string;
+  s3ContentType?: string;
 }
 
 // Near the top of the file, after the imports and interface definitions
@@ -117,6 +120,8 @@ export default function ContractSigningPage() {
     signerAddresses: string[];
     signerEmails: string[];
   } | null>(null)
+  const [pdfContent, setPdfContent] = useState<Uint8Array | null>(null)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   
   // Fetch just enough contract info to get the required signer email
   const fetchContractBasicInfo = useCallback(async () => {
@@ -262,6 +267,43 @@ export default function ContractSigningPage() {
     fetchContract()
   }, [contractId, isAuthenticated, isLoading, user?.email, fetchContractBasicInfo, fetchContract]);
   
+  // Add this useEffect to fetch PDF content once when contract loads
+  useEffect(() => {
+    const fetchPdfContent = async () => {
+      if (contract?.s3FileKey && !pdfContent) {
+        try {
+          console.log('[SignPage] Fetching PDF content for display and signing...');
+          
+          // Fetch PDF content once
+          const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            setPdfContent(bytes);
+            
+            // Create blob URL for iframe display
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            setPdfUrl(url);
+            
+            console.log('[SignPage] PDF content cached for display and signing');
+          }
+        } catch (error) {
+          console.error('[SignPage] Failed to fetch PDF content:', error);
+        }
+      }
+    };
+
+    fetchPdfContent();
+    
+    // Cleanup blob URL on unmount
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [contract?.s3FileKey]);
+  
   const handleSignatureCapture = (data: string) => {
     console.log('[ContractSigning] Signature captured, data length:', data.length)
     setSignatureData(data)
@@ -315,9 +357,43 @@ export default function ContractSigningPage() {
             zkLoginStateFromSession.ephemeralKeyPair.privateKey
           );
           
-          // 1. Hash the signable contract content
-          const contractContent = getSignableContractContent(contract);
-          const contentHash = await createSHA256Hash(contractContent);
+          // 1. Hash the contract content (PDF bytes for PDF contracts, JSON for text contracts)
+          let contentHash: string;
+
+          // Check if this is a PDF contract (has uploaded PDF file)
+          const isPdfContract = !!(contract.s3FileKey && contract.s3FileName && contract.s3ContentType);
+
+          if (isPdfContract) {
+            console.log('[ContractSigning] PDF contract detected, using cached PDF content...');
+            
+            try {
+              if (!pdfContent) {
+                throw new Error('PDF content not available - please refresh the page');
+              }
+              
+              // Use cached PDF content for signing
+              contentHash = await createSHA256Hash(pdfContent);
+              console.log('[ContractSigning] PDF content hashed for signing from cache', {
+                pdfSizeBytes: pdfContent.length,
+                hashPrefix: contentHash.substring(0, 16) + '...'
+              });
+            } catch (pdfError) {
+              console.error('[ContractSigning] Failed to process cached PDF:', pdfError);
+              // Fallback to text content signing
+              const contractContent = getSignableContractContent(contract);
+              contentHash = await createSHA256Hash(contractContent);
+            }
+          } else {
+            console.log('[ContractSigning] Text contract detected, signing JSON content...');
+            
+            // Original flow for text contracts - completely unchanged
+            const contractContent = getSignableContractContent(contract);
+            contentHash = await createSHA256Hash(contractContent);
+            console.log('[ContractSigning] Text content hashed for signing', {
+              contentLength: contractContent.length,
+              hashPrefix: contentHash.substring(0, 16) + '...'
+            });
+          }
           
           // 2. Hash the signature image (remove data URL prefix)
           const cleanSignature = signatureData.replace(/^data:image\/[a-z]+;base64,/, '');
@@ -584,7 +660,7 @@ export default function ContractSigningPage() {
                 </div>
               </div>
               
-              <div className="border rounded-md p-6">
+              <div className="border rounded-md p-4 sm:p-6">
                 <div className="prose max-w-none">
                   <h3 className="text-lg font-medium mb-4">Contract Content</h3>
                   <div className="h-4 bg-slate-200 rounded w-full mb-2"></div>
@@ -755,10 +831,78 @@ export default function ContractSigningPage() {
             <div className="border rounded-md p-4 sm:p-6">
               <div className="prose max-w-none">
                 <h3 className="text-lg font-medium mb-4">Contract Content</h3>
-                {contract?.content ? (
-                  <pre className="whitespace-pre-wrap text-xs sm:text-sm p-4 border rounded-md bg-gray-50 overflow-x-auto">{contract.content}</pre>
+                
+                {contract?.s3FileKey ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <FileText className="h-5 w-5 text-blue-600" />
+                      <div>
+                        <p className="text-sm font-medium text-blue-900">
+                          PDF Contract: {contract.s3FileName || 'contract.pdf'}
+                        </p>
+                        <p className="text-xs text-blue-700">
+                          Please review the document below before signing
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Mobile-Optimized PDF Viewer */}
+                    <div className="border rounded-lg overflow-hidden bg-gray-50">
+                      {pdfUrl ? (
+                        <div className="flex flex-col">
+                          {/* Mobile: Show button to open PDF in browser */}
+                          <div className="lg:hidden p-4 text-center space-y-4">
+                            <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+                              <FileText className="h-8 w-8 text-red-600" />
+                            </div>
+                            <div className="space-y-2">
+                              <h4 className="font-semibold text-gray-900">
+                                {contract.s3FileName || 'Contract PDF'}
+                              </h4>
+                              <p className="text-sm text-gray-600">
+                                Open the PDF in your browser for better viewing on mobile
+                              </p>
+                            </div>
+                            <Button
+                              onClick={() => {
+                                window.open(pdfUrl, '_blank');
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white w-full max-w-sm"
+                              size="lg"
+                            >
+                              <FileText className="h-4 w-4 mr-2" />
+                              Open PDF in Browser
+                            </Button>
+                            <p className="text-xs text-gray-500 mt-2">
+                              After reviewing the PDF, return here to sign the contract
+                            </p>
+                          </div>
+                          
+                          {/* Desktop: Show iframe as before */}
+                          <div className="hidden lg:block">
+                            <iframe
+                              src={pdfUrl}
+                              className="w-full h-[600px]"
+                              title="Contract PDF"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
+                          <p className="text-gray-600">Loading PDF...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <p className="text-gray-500 italic">No content available</p>
+                  contract?.content ? (
+                    <pre className="whitespace-pre-wrap text-xs sm:text-sm p-4 border rounded-md bg-gray-50 overflow-x-auto">
+                      {contract.content}
+                    </pre>
+                  ) : (
+                    <p className="text-gray-500 italic">No content available</p>
+                  )
                 )}
               </div>
             </div>

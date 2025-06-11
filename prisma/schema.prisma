@@ -49,6 +49,15 @@ model Contract {
   walrusBlobId    String?
   startDate       DateTime?
   endDate         DateTime?
+  
+  // New AWS S3 fields
+  s3FileKey       String?        // S3 object key
+  s3Bucket        String?        // S3 bucket name
+  s3FileName      String?        // Original filename
+  s3FileSize      Int?           // File size in bytes
+  s3ContentType   String?        // MIME type
+  s3UploadedAt    DateTime?      // Upload timestamp
+  
   owner           User           @relation("ContractOwner", fields: [ownerId], references: [id])
   signatures      Signature[]
 }

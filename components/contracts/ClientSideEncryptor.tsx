@@ -7,6 +7,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromHEX, toHEX } from '@mysten/sui/utils';
 import jsPDF from 'jspdf';
 import { downloadRecoveryData } from '@/app/utils/recoveryData';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
 interface ClientSideEncryptorProps {
   contractId: string;
@@ -152,325 +153,71 @@ export default function ClientSideEncryptor({
       addLog('Converting document to PDF format...');
       let documentBytes;
       try {
-        const pdf = new jsPDF({
-          orientation: 'portrait',
-          unit: 'mm',
-          format: 'a4'
-        });
+        // Check if this is a PDF contract (has uploaded PDF file)
+        const contractResponse = await fetch(`/api/contracts/${contractId}`);
+        const contractData = await contractResponse.json();
+        const isPdfContract = !!(contractData.s3FileKey && contractData.s3FileName);
+
+        let pdfDoc: PDFDocument;
         
-        // Fetch and embed zkLogin signatures invisibly
-        let zkSignatures: any[] = [];
-        try {
-          addLog('Fetching zkLogin signatures for invisible embedding...');
-          const signaturesResponse = await fetch(`/api/signatures?contractId=${contractId}`);
-          if (signaturesResponse.ok) {
-            const signaturesData = await signaturesResponse.json();
-            
-            zkSignatures = signaturesData.signatures
-              ?.filter((sig: any) => sig.zkLoginData)
-              ?.map((sig: any) => ({
-                userEmail: sig.email,
-                userAddress: sig.zkLoginData.userAddress,
-                contentHash: sig.zkLoginData.contentHash,
-                contentSignature: sig.zkLoginData.contentSignature,
-                imageHash: sig.zkLoginData.imageHash,
-                imageSignature: sig.zkLoginData.imageSignature,
-                timestamp: sig.zkLoginData.timestamp,
-                ephemeralPublicKey: sig.zkLoginData.ephemeralPublicKey
-              })) || [];
-              
-            if (zkSignatures.length > 0) {
-              // Method 1: Embed in subject field as base64 (more reliable than custom properties)
-              const zkDataBase64 = Buffer.from(JSON.stringify(zkSignatures)).toString('base64');
-              
-              pdf.setProperties({
-                title: 'Encrypted Contract Document',
-                subject: `zkSignatures:${zkDataBase64}`,
-                creator: 'Epoch One',
-                keywords: `zklogin,contract,${contractId}`,
-                contractId: contractId
-              });
-              
-              // Method 2: Add invisible text off-page as backup
-              pdf.setTextColor(255, 255, 255); // White text (invisible)
-              pdf.setFontSize(1); // Tiny font
-              pdf.text(`ZK_DATA:${zkDataBase64}`, -1000, -1000); // Position off-page
-              
-              addLog(`Embedded ${zkSignatures.length} zkLogin signatures invisibly (subject + off-page text)`);
-            } else {
-              pdf.setProperties({
-                title: 'Encrypted Contract Document',
-                subject: 'Contract Document',
-                creator: 'Epoch One'
-              });
-              addLog('No zkLogin signatures found to embed');
+        if (isPdfContract) {
+          addLog('PDF contract detected - combining original PDF with signatures...');
+          
+          // Fetch the original PDF file
+          const originalPdfResponse = await fetch(`/api/contracts/download-pdf/${contractId}?view=inline`);
+          if (!originalPdfResponse.ok) {
+            throw new Error('Failed to fetch original PDF');
+          }
+          
+          const originalPdfBytes = await originalPdfResponse.arrayBuffer();
+          pdfDoc = await PDFDocument.load(originalPdfBytes);
+          addLog(`Loaded original PDF with ${pdfDoc.getPageCount()} pages`);
+          
+        } else {
+          addLog('Text contract detected - creating new PDF...');
+          
+          // Create new PDF for text contracts
+          pdfDoc = await PDFDocument.create();
+          const page = pdfDoc.addPage();
+          const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+          
+          // Add text content to PDF
+          const lines = enhancedDocumentContent.split('\n');
+          let currentY = page.getHeight() - 50;
+          const fontSize = 10;
+          const lineHeight = 12;
+          
+          for (const line of lines) {
+            if (currentY < 50) {
+              const newPage = pdfDoc.addPage();
+              currentY = newPage.getHeight() - 50;
             }
-          } else {
-            pdf.setProperties({
-              title: 'Encrypted Contract Document',
-              subject: 'Contract Document',
-              creator: 'Epoch One'
+            
+            page.drawText(line, {
+              x: 50,
+              y: currentY,
+              size: fontSize,
+              font,
+              color: rgb(0, 0, 0),
             });
-            addLog('Failed to fetch zkLogin signatures for embedding');
-          }
-        } catch (metadataError) {
-          addLog(`Failed to embed zkLogin data: ${metadataError instanceof Error ? metadataError.message : 'Unknown error'}`);
-          pdf.setProperties({
-            title: 'Encrypted Contract Document',
-            subject: 'Contract Document',
-            creator: 'Epoch One'
-          });
-        }
-        
-        // Reset text color and font for visible content
-        pdf.setTextColor(0, 0, 0); // Black text
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(10);
-        
-        const lines = enhancedDocumentContent.split('\n');
-        let currentY = 20;
-        const lineHeight = 5;
-        const pageHeight = 280;
-        const leftMargin = 10;
-        const rightMargin = 200;
-        
-        // Add text content (clean document without zkLogin demo section)
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          
-          if (currentY > pageHeight - 40) { // Leave space for signature images
-            pdf.addPage();
-            currentY = 20;
-          }
-          
-          if (line.length > 80) {
-            const wrappedLines = pdf.splitTextToSize(line, rightMargin - leftMargin);
-            for (const wrappedLine of wrappedLines) {
-              if (currentY > pageHeight - 40) {
-                pdf.addPage();
-                currentY = 20;
-              }
-              pdf.text(wrappedLine, leftMargin, currentY);
-              currentY += lineHeight;
-            }
-          } else {
-            pdf.text(line, leftMargin, currentY);
-            currentY += lineHeight;
-          }
-        }
-        
-        // Add signature images section FIRST
-        try {
-          addLog('Adding signature images to PDF...');
-          const signaturesResponse = await fetch(`/api/signatures?contractId=${contractId}`);
-          if (signaturesResponse.ok) {
-            const signaturesData = await signaturesResponse.json();
             
-            const signatureImages = signaturesData.signatures
-              ?.filter((sig: any) => sig.signature && sig.signedAt)
-              ?.map((sig: any) => ({
-                userEmail: sig.email,
-                signatureImage: sig.signature,
-                signedAt: new Date(sig.signedAt).toISOString()
-              })) || [];
-            
-            if (signatureImages.length > 0) {
-              addLog(`Adding ${signatureImages.length} signature images to PDF`);
-              
-              // Add some space before signature images
-              currentY += 15;
-              
-              if (currentY > pageHeight - 100) {
-                pdf.addPage();
-                currentY = 20;
-              }
-              
-              // Add section header with better styling
-              pdf.setFontSize(14);
-              pdf.setFont('helvetica', 'bold');
-              pdf.text('SIGNATURES:', leftMargin, currentY);
-              currentY += 8;
-              
-              // Add a decorative line
-              pdf.setLineWidth(0.5);
-              pdf.line(leftMargin, currentY, leftMargin + 100, currentY);
-              currentY += 10;
-              
-              pdf.setFontSize(10);
-              pdf.setFont('helvetica', 'normal');
-              
-              // Add each signature image with better formatting
-              for (let i = 0; i < signatureImages.length; i++) {
-                const sigImage = signatureImages[i];
-                try {
-                  // Check if we need a new page
-                  if (currentY > pageHeight - 90) {
-                    pdf.addPage();
-                    currentY = 20;
-                  }
-                  
-                  // Add signature number and signer info
-                  pdf.setFont('helvetica', 'bold');
-                  pdf.text(`Signature ${i + 1}:`, leftMargin, currentY);
-                  currentY += 6;
-                  
-                  pdf.setFont('helvetica', 'normal');
-                  pdf.text(`Signer: ${sigImage.userEmail}`, leftMargin + 5, currentY);
-                  currentY += 5;
-                  pdf.text(`Date: ${new Date(sigImage.signedAt).toLocaleString()}`, leftMargin + 5, currentY);
-                  currentY += 8;
-                  
-                  // Add signature image with border
-                  if (sigImage.signatureImage && sigImage.signatureImage.startsWith('data:image/')) {
-                    const imageWidth = 80; // mm
-                    const imageHeight = 25; // mm
-                    
-                    // Add border around signature
-                    pdf.setLineWidth(0.3);
-                    pdf.rect(leftMargin, currentY, imageWidth, imageHeight);
-                    
-                    // Add signature image
-                    pdf.addImage(
-                      sigImage.signatureImage,
-                      'PNG',
-                      leftMargin + 1,
-                      currentY + 1,
-                      imageWidth - 2,
-                      imageHeight - 2
-                    );
-                    
-                    currentY += imageHeight + 15;
-                    addLog(`Added signature image for ${sigImage.userEmail}`);
-                  } else {
-                    pdf.text('[Signature image not available]', leftMargin + 5, currentY);
-                    currentY += 15;
-                  }
-                  
-                } catch (imageError) {
-                  addLog(`Failed to add signature image for ${sigImage.userEmail}: ${imageError instanceof Error ? imageError.message : 'Unknown error'}`);
-                  pdf.text(`[Error loading signature for ${sigImage.userEmail}]`, leftMargin + 5, currentY);
-                  currentY += 15;
-                }
-              }
-              
-              // Add verification note
-              currentY += 10;
-              pdf.setFontSize(8);
-              pdf.setFont('helvetica', 'italic');
-              pdf.text('This document contains cryptographic proof of signatures embedded invisibly.', leftMargin, currentY);
-              pdf.text('Verification data can be extracted from PDF metadata for auditing purposes.', leftMargin, currentY + 4);
-              currentY += 15;
-              
-            } else {
-              addLog('No signature images found to embed');
-            }
-          } else {
-            addLog('Failed to fetch signature images for PDF embedding');
+            currentY -= lineHeight;
           }
-        } catch (imageError) {
-          addLog(`Error fetching signature images: ${imageError instanceof Error ? imageError.message : 'Unknown error'}`);
+          
+          addLog(`Created new PDF with ${pdfDoc.getPageCount()} pages from text content`);
         }
+
+        // Now add signature pages to BOTH types of contracts
+        await addContractAppendixToPDF(pdfDoc, contractId, addLog);
         
-        // Now add zkLogin demo section AFTER signature images
-        if (zkSignatures.length > 0) {
-          addLog('Adding zkLogin demo section after signature images...');
-          
-          // Add some space before zkLogin demo section
-          currentY += 10;
-          
-          if (currentY > pageHeight - 150) {
-            pdf.addPage();
-            currentY = 20;
-          }
-          
-          // Add demo section header
-          pdf.setFontSize(12);
-          pdf.setFont('helvetica', 'bold');
-          pdf.text('DEMO: ZKLOGIN CRYPTOGRAPHIC DATA', leftMargin, currentY);
-          currentY += 8;
-          
-          // Add demo note
-          pdf.setFontSize(9);
-          pdf.setFont('helvetica', 'italic');
-          const demoNote = '(Note: This section is shown for demonstration purposes. In production, this data would be embedded invisibly in the PDF metadata.)';
-          const noteLines = pdf.splitTextToSize(demoNote, rightMargin - leftMargin);
-          for (const noteLine of noteLines) {
-            pdf.text(noteLine, leftMargin, currentY);
-            currentY += 4;
-          }
-          currentY += 8;
-          
-          // Add zkLogin data
-          pdf.setFontSize(10);
-          pdf.setFont('helvetica', 'normal');
-          
-          for (const zk of zkSignatures) {
-            // Check if we need a new page
-            if (currentY > pageHeight - 100) {
-              pdf.addPage();
-              currentY = 20;
-            }
-            
-            // Add zkLogin signature data
-            const zkLines = [
-              `Signer: ${zk.userEmail}`,
-              `Wallet Address: ${zk.userAddress}`,
-              `Ephemeral Public Key: ${zk.ephemeralPublicKey}`,
-              `Contract Content Hash: ${zk.contentHash}`,
-              `Contract Content Signature: ${zk.contentSignature}`,
-              `Signature Image Hash: ${zk.imageHash}`,
-              `Signature Image Signature: ${zk.imageSignature}`,
-              `Timestamp: ${new Date(zk.timestamp).toISOString()}`,
-              '---'
-            ];
-            
-            for (const zkLine of zkLines) {
-              if (currentY > pageHeight - 10) {
-                pdf.addPage();
-                currentY = 20;
-              }
-              
-              if (zkLine.length > 80) {
-                const wrappedLines = pdf.splitTextToSize(zkLine, rightMargin - leftMargin);
-                for (const wrappedLine of wrappedLines) {
-                  pdf.text(wrappedLine, leftMargin, currentY);
-                  currentY += lineHeight;
-                }
-      } else {
-                pdf.text(zkLine, leftMargin, currentY);
-                currentY += lineHeight;
-              }
-            }
-            currentY += 5;
-          }
-          
-          // Add explanation
-          currentY += 10;
-          pdf.setFontSize(9);
-          pdf.setFont('helvetica', 'italic');
-          const explanation = [
-            'This cryptographic data proves the authenticity and integrity of each signature without',
-            'requiring trust in a central authority. The zkLogin protocol ensures that:',
-            '• Each signer\'s identity is verified through OAuth providers',
-            '• The signature cannot be forged or tampered with',
-            '• The contract content is cryptographically bound to each signature',
-            '• Privacy is preserved while maintaining verifiability'
-          ];
-          
-          for (const expLine of explanation) {
-            if (currentY > pageHeight - 10) {
-              pdf.addPage();
-              currentY = 20;
-            }
-            pdf.text(expLine, leftMargin, currentY);
-            currentY += 5;
-          }
-        }
+        // Embed zkLogin signatures in metadata
+        await embedZkLoginMetadata(pdfDoc, contractId, addLog);
         
-        const pdfOutput = pdf.output('arraybuffer');
-        documentBytes = new Uint8Array(pdfOutput);
+        // Generate final PDF bytes
+        const finalPdfBytes = await pdfDoc.save();
+        documentBytes = new Uint8Array(finalPdfBytes);
         
-        addLog(`PDF generated successfully with reordered sections: Signature Images → zkLogin Demo. PDF size: ${documentBytes.length} bytes`);
+        addLog(`Final PDF generated with ${pdfDoc.getPageCount()} total pages. Size: ${documentBytes.length} bytes`);
         
       } catch (pdfError) {
         addLog(`Failed to generate PDF: ${pdfError instanceof Error ? pdfError.message : 'Unknown error'}`);
@@ -630,4 +377,510 @@ export default function ClientSideEncryptor({
       )}
     </div>
   );
+}
+
+// Enhanced function with production-quality formatting but original text wrapping logic
+async function addContractAppendixToPDF(pdfDoc: PDFDocument, contractId: string, addLog: (msg: string) => void) {
+  try {
+    addLog('Adding professionally formatted contract appendix to PDF...');
+    
+    // Fetch contract data and signatures
+    const [contractResponse, signaturesResponse] = await Promise.all([
+      fetch(`/api/contracts/${contractId}`),
+      fetch(`/api/signatures?contractId=${contractId}`)
+    ]);
+    
+    if (!contractResponse.ok || !signaturesResponse.ok) {
+      addLog('Failed to fetch contract or signature data');
+      return;
+    }
+    
+    const contractData = await contractResponse.json();
+    const signaturesData = await signaturesResponse.json();
+    
+    // Extract signature data
+    const signatureImages = signaturesData.signatures
+      ?.filter((sig: any) => sig.signature && sig.signedAt)
+      ?.map((sig: any) => ({
+        userEmail: sig.email,
+        signatureImage: sig.signature,
+        signedAt: new Date(sig.signedAt).toISOString()
+      })) || [];
+
+    const zkSignatures = signaturesData.signatures
+      ?.filter((sig: any) => sig.zkLoginData)
+      ?.map((sig: any) => ({
+        userEmail: sig.email,
+        userAddress: sig.zkLoginData.userAddress,
+        contentHash: sig.zkLoginData.contentHash,
+        contentSignature: sig.zkLoginData.contentSignature,
+        imageHash: sig.zkLoginData.imageHash,
+        imageSignature: sig.zkLoginData.imageSignature,
+        timestamp: sig.zkLoginData.timestamp,
+        ephemeralPublicKey: sig.zkLoginData.ephemeralPublicKey
+      })) || [];
+
+    // Add new page for appendix
+    let currentPage = pdfDoc.addPage();
+    const pageWidth = currentPage.getSize().width;
+    const pageHeight = currentPage.getSize().height;
+    
+    // Embed fonts
+    const normalFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+    
+    // Professional layout constants
+    const margins = {
+      left: 60,
+      right: 60,
+      top: 60,
+      bottom: 60
+    };
+    const contentWidth = pageWidth - margins.left - margins.right;
+    
+    let currentY = pageHeight - margins.top;
+    
+    // Enhanced text rendering with ORIGINAL character-based wrapping
+    const addText = (text: string, options: {
+      font?: any;
+      size?: number;
+      isBold?: boolean;
+      isItalic?: boolean;
+      color?: any;
+      indent?: number;
+      spaceAfter?: number;
+      spaceBefore?: number;
+      centered?: boolean;
+    } = {}) => {
+      // Apply spacing before
+      if (options.spaceBefore) {
+        currentY -= options.spaceBefore;
+      }
+      
+      // Check if we need a new page
+      if (currentY < margins.bottom + 50) {
+        currentPage = pdfDoc.addPage();
+        currentY = pageHeight - margins.top;
+      }
+      
+      if (text === '') {
+        currentY -= options.spaceAfter || 12;
+        return;
+      }
+      
+      // Determine font
+      let font = normalFont;
+      if (options.isBold) font = boldFont;
+      else if (options.isItalic) font = italicFont;
+      else if (options.font) font = options.font;
+      
+      const fontSize = options.size || 11;
+      const color = options.color || rgb(0, 0, 0);
+      const indent = options.indent || 0;
+      const lineHeight = fontSize * 1.4; // Professional line spacing
+      
+      // ORIGINAL 80-character wrapping logic
+      if (text.length > 80) {
+        // Split long text into 80-character chunks
+        let remainingText = text;
+        while (remainingText.length > 0) {
+          let chunk = remainingText.substring(0, 80);
+          
+          // Try to break at word boundary if possible
+          if (remainingText.length > 80) {
+            const lastSpace = chunk.lastIndexOf(' ');
+            if (lastSpace > 60) { // Only break at space if it's not too early
+              chunk = chunk.substring(0, lastSpace);
+              remainingText = remainingText.substring(lastSpace + 1); // +1 to skip the space
+            } else {
+              remainingText = remainingText.substring(80);
+            }
+          } else {
+            remainingText = '';
+          }
+          
+          // Remove any leading/trailing spaces from the chunk
+          chunk = chunk.trim();
+          
+          if (chunk.length > 0) { // Only draw non-empty chunks
+            // Check if we need a new page
+            if (currentY < margins.bottom + 20) {
+              currentPage = pdfDoc.addPage();
+              currentY = pageHeight - margins.top;
+            }
+            
+            let x = margins.left + indent;
+            if (options.centered) {
+              const textWidth = font.widthOfTextAtSize(chunk, fontSize);
+              x = (pageWidth - textWidth) / 2;
+            }
+            
+            currentPage.drawText(chunk, {
+              x,
+              y: currentY,
+              size: fontSize,
+              font,
+              color,
+            });
+            
+            currentY -= lineHeight;
+          }
+        }
+      } else {
+        // Normal line (under 80 characters)
+        if (currentY < margins.bottom + 20) {
+          currentPage = pdfDoc.addPage();
+          currentY = pageHeight - margins.top;
+        }
+        
+        let x = margins.left + indent;
+        if (options.centered) {
+          const textWidth = font.widthOfTextAtSize(text, fontSize);
+          x = (pageWidth - textWidth) / 2;
+        }
+        
+        currentPage.drawText(text, {
+          x,
+          y: currentY,
+          size: fontSize,
+          font,
+          color,
+        });
+        
+        currentY -= lineHeight;
+      }
+      
+      // Apply spacing after
+      if (options.spaceAfter) {
+        currentY -= options.spaceAfter;
+      }
+    };
+    
+    // Helper for drawing horizontal lines
+    const addHorizontalLine = (width?: number, thickness?: number, spaceAfter?: number) => {
+      const lineWidth = width || contentWidth;
+      const lineThickness = thickness || 0.5;
+      
+      currentPage.drawLine({
+        start: { x: margins.left, y: currentY },
+        end: { x: margins.left + lineWidth, y: currentY },
+        thickness: lineThickness,
+        color: rgb(0.7, 0.7, 0.7),
+      });
+      
+      currentY -= spaceAfter || 20;
+    };
+    
+    // Helper for section headers
+    const addSectionHeader = (title: string, underline: boolean = true) => {
+      addText(title, {
+        isBold: true,
+        size: 16,
+        spaceBefore: 25,
+        spaceAfter: 8,
+        color: rgb(0.2, 0.2, 0.2)
+      });
+      
+      if (underline) {
+        addHorizontalLine(undefined, 1, 15);
+      }
+    };
+    
+    // Helper for subsection headers
+    const addSubsectionHeader = (title: string) => {
+      addText(title, {
+        isBold: true,
+        size: 13,
+        spaceBefore: 20,
+        spaceAfter: 10,
+        color: rgb(0.3, 0.3, 0.3)
+      });
+    };
+    
+    // 1. CONTRACT EXECUTION RECORD HEADER
+    addText('CONTRACT EXECUTION RECORD', {
+      isBold: true,
+      size: 20,
+      centered: true,
+      spaceAfter: 10,
+      color: rgb(0.1, 0.1, 0.1)
+    });
+    
+    addHorizontalLine(undefined, 2, 30);
+    
+    // 2. CONTRACT INFORMATION SECTION
+    addSectionHeader('CONTRACT INFORMATION');
+    
+    const contractInfo = [
+      { label: 'Title', value: contractData.title },
+      { label: 'Status', value: contractData.status },
+      { label: 'Created', value: new Date(contractData.createdAt).toLocaleString() },
+      { label: 'Contract ID', value: contractData.id }
+    ];
+    
+    for (const info of contractInfo) {
+      addText(`${info.label}:`, {
+        isBold: true,
+        size: 11,
+        spaceAfter: 3
+      });
+      addText(info.value, {
+        size: 11,
+        indent: 20,
+        spaceAfter: 12,
+        color: rgb(0.2, 0.2, 0.2)
+      });
+    }
+    
+    // 3. PARTIES SECTION
+    addSectionHeader('CONTRACTING PARTIES');
+    
+    addText('Contract Creator (Party A):', {
+      isBold: true,
+      size: 12,
+      spaceAfter: 5
+    });
+    addText(contractData.owner?.email || 'Unknown', {
+      size: 11,
+      indent: 20,
+      spaceAfter: 15,
+      color: rgb(0.2, 0.2, 0.2)
+    });
+    
+    addText('Authorized Signers (Party B):', {
+      isBold: true,
+      size: 12,
+      spaceAfter: 5
+    });
+    const signers = contractData.metadata?.signers || ['No signers'];
+    for (const signer of signers) {
+      addText(`• ${signer}`, {
+        size: 11,
+        indent: 20,
+        spaceAfter: 8,
+        color: rgb(0.2, 0.2, 0.2)
+      });
+    }
+    
+    // 4. SIGNATURE VERIFICATION SECTION
+    if (signatureImages.length > 0) {
+      addSectionHeader('SIGNATURE VERIFICATION');
+      
+      for (let i = 0; i < signatureImages.length; i++) {
+        const sig = signatureImages[i];
+        
+        addSubsectionHeader(`Signature ${i + 1}: ${sig.userEmail}`);
+        
+        addText(`Date: ${new Date(sig.signedAt).toLocaleString()}`, {
+          size: 10,
+          color: rgb(0.4, 0.4, 0.4),
+          spaceAfter: 15
+        });
+        
+        // Add signature image with professional styling
+        if (sig.signatureImage && sig.signatureImage.startsWith('data:image/')) {
+          try {
+            if (currentY < margins.bottom + 120) {
+              currentPage = pdfDoc.addPage();
+              currentY = pageHeight - margins.top;
+            }
+            
+            const base64Data = sig.signatureImage.split(',')[1];
+            const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+            const image = await pdfDoc.embedPng(imageBytes);
+            
+            // Draw signature container with shadow effect
+            const sigWidth = 240;
+            const sigHeight = 80;
+            const sigX = margins.left + 20;
+            const sigY = currentY - sigHeight;
+            
+            // Shadow
+            currentPage.drawRectangle({
+              x: sigX + 3,
+              y: sigY - 3,
+              width: sigWidth,
+              height: sigHeight,
+              color: rgb(0.9, 0.9, 0.9),
+            });
+            
+            // Main container
+            currentPage.drawRectangle({
+              x: sigX,
+              y: sigY,
+              width: sigWidth,
+              height: sigHeight,
+              color: rgb(1, 1, 1),
+              borderColor: rgb(0.7, 0.7, 0.7),
+              borderWidth: 1,
+            });
+            
+            // Signature image
+            currentPage.drawImage(image, {
+              x: sigX + 10,
+              y: sigY + 10,
+              width: sigWidth - 20,
+              height: sigHeight - 20,
+            });
+            
+            currentY = sigY - 25;
+            addLog(`Added professional signature display for ${sig.userEmail}`);
+          } catch (imageError) {
+            addLog(`Failed to add signature image for ${sig.userEmail}`);
+            addText('[Signature image could not be displayed]', {
+              isItalic: true,
+              size: 10,
+              color: rgb(0.6, 0.6, 0.6),
+              spaceAfter: 20
+            });
+          }
+        }
+      }
+    }
+    
+    // 5. CRYPTOGRAPHIC VERIFICATION SECTION
+    if (zkSignatures.length > 0) {
+      addSectionHeader('CRYPTOGRAPHIC VERIFICATION DATA');
+      
+      addText('The following data provides cryptographic proof of signature authenticity:', {
+        isItalic: true,
+        size: 11,
+        spaceAfter: 20,
+        color: rgb(0.4, 0.4, 0.4)
+      });
+      
+      for (let i = 0; i < zkSignatures.length; i++) {
+        const zk = zkSignatures[i];
+        
+        addSubsectionHeader(`Signer ${i + 1}: ${zk.userEmail}`);
+        
+        // Create a structured layout for crypto data with 80-char wrapping
+        const cryptoFields = [
+          { label: 'Wallet Address', value: zk.userAddress },
+          { label: 'Content Hash', value: zk.contentHash },
+          { label: 'Content Signature', value: zk.contentSignature },
+          { label: 'Image Hash', value: zk.imageHash },
+          { label: 'Image Signature', value: zk.imageSignature },
+          { label: 'Timestamp', value: new Date(zk.timestamp).toISOString() },
+          { label: 'Public Key', value: zk.ephemeralPublicKey }
+        ];
+        
+        for (const field of cryptoFields) {
+          addText(`${field.label}:`, {
+            isBold: true,
+            size: 10,
+            spaceAfter: 3
+          });
+          
+          // The 80-character wrapping will handle long hashes automatically
+          addText(field.value, {
+            size: 9,
+            indent: 15,
+            spaceAfter: 10,
+            color: rgb(0.3, 0.3, 0.3)
+          });
+        }
+        
+        if (i < zkSignatures.length - 1) {
+          addHorizontalLine(contentWidth * 0.5, 0.5, 15);
+        }
+      }
+    }
+    
+    // 6. VERIFICATION NOTES SECTION
+    addSectionHeader('VERIFICATION NOTES');
+    
+    const verificationNotes = [
+      'This document contains cryptographic proof of signatures embedded in metadata',
+      'Each signature is cryptographically bound to the exact document content',
+      'Verification data can be extracted and validated independently',
+      'zkLogin protocol ensures signatures cannot be forged or tampered with',
+      'Original document content is preserved without modification'
+    ];
+    
+    for (const note of verificationNotes) {
+      addText(`• ${note}`, {
+        size: 10,
+        indent: 10,
+        spaceAfter: 8,
+        color: rgb(0.4, 0.4, 0.4)
+      });
+    }
+    
+    // 7. DEMO SECTION (if zkLogin data exists) - SIMPLIFIED VERSION
+    if (zkSignatures.length > 0) {
+      currentY -= 30; // Extra space before demo section
+      
+      addText('DEMO: ZKLOGIN CRYPTOGRAPHIC DATA', {
+        isBold: true,
+        size: 14,
+        centered: true,
+        spaceAfter: 10,
+        color: rgb(0.2, 0.2, 0.6)
+      });
+      
+      addText('(Note: This section is shown for demonstration purposes. In production, this data would be embedded invisibly in the PDF metadata.)', {
+        isItalic: true,
+        size: 10,
+        centered: true,
+        spaceAfter: 20,
+        color: rgb(0.5, 0.5, 0.5)
+      });
+      
+      // This long text will automatically wrap at 80 characters
+      addText('This cryptographic data proves the authenticity and integrity of each signature without requiring trust in a central authority. The zkLogin protocol ensures that each signer\'s identity is verified through OAuth providers, signatures cannot be forged, and privacy is preserved while maintaining verifiability.', {
+        size: 10,
+        spaceAfter: 20,
+        color: rgb(0.4, 0.4, 0.4)
+      });
+    }
+    
+    addLog(`Added professionally formatted contract appendix with ${signatureImages.length} signature displays`);
+    
+  } catch (error) {
+    addLog(`Error adding contract appendix: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+// Helper function to embed zkLogin metadata
+async function embedZkLoginMetadata(pdfDoc: PDFDocument, contractId: string, addLog: (msg: string) => void) {
+  try {
+    addLog('Embedding zkLogin metadata...');
+    const signaturesResponse = await fetch(`/api/signatures?contractId=${contractId}`);
+    
+    if (!signaturesResponse.ok) {
+      addLog('Failed to fetch zkLogin data');
+      return;
+    }
+    
+    const signaturesData = await signaturesResponse.json();
+    const zkSignatures = signaturesData.signatures
+      ?.filter((sig: any) => sig.zkLoginData)
+      ?.map((sig: any) => ({
+        userEmail: sig.email,
+        userAddress: sig.zkLoginData.userAddress,
+        contentHash: sig.zkLoginData.contentHash,
+        contentSignature: sig.zkLoginData.contentSignature,
+        imageHash: sig.zkLoginData.imageHash,
+        imageSignature: sig.zkLoginData.imageSignature,
+        timestamp: sig.zkLoginData.timestamp,
+        ephemeralPublicKey: sig.zkLoginData.ephemeralPublicKey
+      })) || [];
+
+    if (zkSignatures.length > 0) {
+      const zkDataBase64 = Buffer.from(JSON.stringify(zkSignatures)).toString('base64');
+      
+      // Set PDF metadata
+      pdfDoc.setTitle('Encrypted Contract Document');
+      pdfDoc.setSubject(`zkSignatures:${zkDataBase64}`);
+      pdfDoc.setCreator('Epoch One');
+      pdfDoc.setKeywords(['zklogin', 'contract', contractId]);
+      
+      addLog(`Embedded ${zkSignatures.length} zkLogin signatures in PDF metadata`);
+    }
+    
+  } catch (error) {
+    addLog(`Error embedding zkLogin metadata: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 } 

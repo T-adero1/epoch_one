@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   Card, 
@@ -20,7 +20,10 @@ import {
   UserCheck, 
   Send, 
   Share2,
-  Lock
+  Lock,
+  Loader2,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ContractStatus, SignatureStatus } from '@prisma/client'
@@ -42,6 +45,7 @@ interface ContractSignature {
   };
 }
 
+// Updated Contract interface to include S3 fields
 interface Contract {
   id: string;
   title: string;
@@ -61,6 +65,12 @@ interface Contract {
     email: string;
   };
   signatures?: ContractSignature[];
+  // Add S3 fields for PDF support
+  s3FileKey?: string | null;
+  s3FileName?: string | null;
+  s3FileSize?: number | null;
+  s3ContentType?: string | null;
+  s3Bucket?: string | null;
 }
 
 interface ContractDetailsProps {
@@ -69,6 +79,10 @@ interface ContractDetailsProps {
   onUpdate: (updatedContract: Contract) => void;
   defaultTab?: string;
   onSend?: () => void;
+  uploadedFileData?: {
+    blob: Blob;
+    fileName: string;
+  } | null;
 }
 
 export default function ContractDetails({ 
@@ -76,11 +90,16 @@ export default function ContractDetails({
   onBack, 
   onUpdate, 
   defaultTab = "content",
-  onSend
+  onSend,
+  uploadedFileData
 }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
   const { user } = useZkLogin();
+
+  // PDF viewing state
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [isLoadingPdf, setIsLoadingPdf] = useState(false);
   
   const handleSave = (updatedContract: Contract) => {
     setIsEditing(false)
@@ -93,6 +112,68 @@ export default function ContractDetails({
     setCopySuccess(`Link for ${email} copied!`)
     setTimeout(() => setCopySuccess(''), 3000)
   }
+
+  // Load PDF URL when component mounts or contract changes
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadPdf = async () => {
+      if (!contract.s3FileKey) return;
+      
+      // If we have uploaded file data, use it directly (much faster!)
+      if (uploadedFileData?.blob) {
+        console.log('[ContractDetails] Using uploaded file data directly - no S3 request needed!');
+        const url = URL.createObjectURL(uploadedFileData.blob);
+        if (isMounted) {
+          setPdfUrl(url);
+          setIsLoadingPdf(false);
+        }
+        return;
+      }
+      
+      // Fallback: fetch from S3 only if we don't have local data
+      console.log('[ContractDetails] No local file data, fetching from S3...');
+      setIsLoadingPdf(true);
+      try {
+        const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+        if (response.ok && isMounted) {
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          setPdfUrl(url);
+        } else if (isMounted) {
+          throw new Error('Failed to load PDF');
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error loading PDF:', error);
+          toast({
+            title: "Error Loading PDF",
+            description: "Failed to load the PDF file. Please try again.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingPdf(false);
+        }
+      }
+    };
+
+    if (contract.s3FileKey) {
+      loadPdf();
+    }
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [contract.s3FileKey, uploadedFileData]); // Add uploadedFileData to dependencies
+
+  // Check if this contract has a PDF file
+  const hasPdfFile = !!(contract.s3FileKey && contract.s3FileName);
   
   const handleSendContract = async () => {
     try {
@@ -226,6 +307,16 @@ export default function ContractDetails({
               {contract.description && (
                 <CardDescription className="mt-1 text-sm">{contract.description}</CardDescription>
               )}
+              {/* Show PDF file info if available */}
+              {hasPdfFile && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  <FileText className="h-3 w-3 text-red-600" />
+                  <span>{contract.s3FileName}</span>
+                  {contract.s3FileSize && (
+                    <span>• {(contract.s3FileSize / 1024 / 1024).toFixed(2)} MB</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -240,25 +331,117 @@ export default function ContractDetails({
           
           <TabsContent value="content" className="min-h-[400px] sm:min-h-[500px]">
             <div className="border rounded-md p-4 sm:p-6 min-h-[400px] sm:min-h-[500px] bg-white">
-              {contract.content ? (
-                <div className="prose max-w-none">
-                  <pre className="whitespace-pre-wrap font-mono text-xs sm:text-sm overflow-x-auto">{contract.content}</pre>
+              {/* Conditional rendering for PDF vs Text contracts */}
+              {hasPdfFile ? (
+                // PDF Contract Display - Mobile Optimized
+                <div className="h-full flex flex-col -m-4 sm:-m-6">
+                  {/* PDF Header */}
+                  <div className="p-3 sm:p-4 border-b bg-gray-50">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-red-600 flex-shrink-0" />
+                        <span className="text-sm font-medium text-gray-700">PDF Contract</span>
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {contract.s3FileName}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* PDF Mobile View - Fully Responsive */}
+                  <div className="flex-1 flex items-center justify-center bg-gray-50 p-3 sm:p-6">
+                    <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                      {/* PDF Icon - Responsive sizing */}
+                      <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
+                        <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+                      </div>
+                      
+                      {/* File Info - Mobile optimized */}
+                      <div className="space-y-2">
+                        <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
+                          {contract.s3FileName}
+                        </h3>
+                        {contract.s3FileSize && (
+                          <p className="text-xs sm:text-sm text-gray-600">
+                            File size: {(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB
+                          </p>
+                        )}
+                      </div>
+                      
+                      {/* Description - Mobile friendly */}
+                      <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
+                        <span className="hidden sm:inline">
+                          Open the PDF in a new browser tab for optimal viewing on your device.
+                        </span>
+                        <span className="sm:hidden">
+                          Tap to open PDF in your browser for better viewing.
+                        </span>
+                      </p>
+                      
+                      {/* Action Button - Touch friendly */}
+                      <div className="pt-2">
+                        <Button
+                          onClick={async () => {
+                            try {
+                              const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+                              if (response.ok) {
+                                const blob = await response.blob();
+                                const url = URL.createObjectURL(blob);
+                                window.open(url, '_blank');
+                                // Clean up the blob URL after a short delay
+                                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                              } else {
+                                throw new Error('Failed to load PDF');
+                              }
+                            } catch (error) {
+                              console.error('Error opening PDF:', error);
+                              toast({
+                                title: "Error",
+                                description: "Failed to open PDF. Please try again.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
+                          size="lg"
+                        >
+                          <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
+                          <span className="hidden sm:inline">Open PDF in Browser</span>
+                          <span className="sm:hidden">Open PDF</span>
+                        </Button>
+                      </div>
+                      
+                      {/* Additional info for mobile users */}
+                      <div className="pt-2 sm:hidden">
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          Your device will use its preferred PDF viewer app or browser.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : contract.content ? (
+                // Text Contract Display
+                <div className="prose prose-sm sm:prose max-w-none">
+                  <pre className="whitespace-pre-wrap font-mono text-xs sm:text-sm overflow-x-auto bg-gray-50 p-3 sm:p-4 rounded border">{contract.content}</pre>
                 </div>
               ) : contract.status === 'COMPLETED' ? (
-                <div className="flex flex-col items-center justify-center h-full text-blue-600 px-4">
+                // Completed Contract with Encrypted Content
+                <div className="flex flex-col items-center justify-center h-full text-blue-600 px-3 sm:px-4">
                   <div className="relative mb-4">
-                    <FileText className="h-12 sm:h-16 w-12 sm:w-16 text-gray-300" />
-                    <Lock className="h-6 sm:h-8 w-6 sm:w-8 absolute -bottom-1 -right-1 bg-white rounded-full p-1 text-blue-600" />
+                    <FileText className="h-10 w-10 sm:h-12 sm:w-12 md:h-16 md:w-16 text-gray-300" />
+                    <Lock className="h-5 w-5 sm:h-6 sm:w-6 md:h-8 md:w-8 absolute -bottom-1 -right-1 bg-white rounded-full p-1 text-blue-600" />
                   </div>
-                  <p className="text-base sm:text-lg font-medium text-gray-700 text-center">Content Encrypted</p>
-                  <p className="text-xs sm:text-sm text-gray-500 mt-2 text-center max-w-md">
+                  <p className="text-sm sm:text-base md:text-lg font-medium text-gray-700 text-center">Content Encrypted</p>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-2 text-center max-w-sm sm:max-w-md leading-relaxed">
                     This contract has been completed and its content is now securely encrypted. 
                     Use the "Decrypt and Download" option to access the document.
                   </p>
                 </div>
               ) : (
+                // No Content Available
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <FileText className="h-12 sm:h-16 w-12 sm:w-16 mb-4" />
+                  <FileText className="h-10 w-10 sm:h-12 sm:w-12 md:h-16 md:w-16 mb-4" />
                   <p className="text-sm sm:text-base">No content available</p>
                 </div>
               )}
@@ -362,6 +545,11 @@ export default function ContractDetails({
                     <p className="text-xs sm:text-sm text-gray-500">
                       {format(new Date(contract.createdAt), 'MMM dd, yyyy HH:mm')}
                     </p>
+                    {hasPdfFile && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        PDF file attached: {contract.s3FileName}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -384,7 +572,12 @@ export default function ContractDetails({
       {contract.status === ContractStatus.DRAFT && (
         <CardFooter className="flex flex-col sm:flex-row sm:justify-between gap-3 pt-4 border-t px-4 sm:px-6">
           <div className="text-xs sm:text-sm text-gray-500 hidden sm:block">
-            {/* Placeholder for status text to match editor layout */}
+            {hasPdfFile && (
+              <span className="flex items-center gap-1">
+                <FileText className="h-3 w-3 text-red-600" />
+                PDF Contract
+              </span>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <Button variant="outline" onClick={() => setIsEditing(true)} className="w-full sm:w-auto">
