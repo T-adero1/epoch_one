@@ -316,18 +316,50 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // Check if the contract exists
-    const contractExists = await prisma.contract.findUnique({
+    // Check if the contract exists and get S3 file info
+    const contract = await prisma.contract.findUnique({
       where: { id },
-      select: { id: true }
+      select: { 
+        id: true,
+        s3FileKey: true,
+        s3FileName: true
+      }
     });
 
-    if (!contractExists) {
+    if (!contract) {
       log.warn('Contract not found for deletion', { contractId: id });
       return NextResponse.json(
         { error: 'Contract not found' },
         { status: 404 }
       );
+    }
+
+    // Delete PDF from S3 if it exists
+    if (contract.s3FileKey) {
+      try {
+        log.info('Deleting S3 file for contract', { 
+          contractId: id, 
+          s3FileKey: contract.s3FileKey,
+          fileName: contract.s3FileName
+        });
+        
+        const { deleteFromS3 } = await import('@/app/utils/s3');
+        await deleteFromS3(contract.s3FileKey);
+        
+        log.info('Successfully deleted S3 file', { 
+          contractId: id, 
+          s3FileKey: contract.s3FileKey 
+        });
+      } catch (s3Error) {
+        // Log the error but don't fail the entire operation
+        log.error('Failed to delete S3 file, continuing with contract deletion', {
+          contractId: id,
+          s3FileKey: contract.s3FileKey,
+          error: s3Error instanceof Error ? s3Error.message : String(s3Error)
+        });
+      }
+    } else {
+      log.info('No S3 file to delete for contract', { contractId: id });
     }
 
     // Use a transaction to delete signatures first, then the contract
