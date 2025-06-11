@@ -260,7 +260,7 @@ export default function PDFEditor({
           showAIPanel ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'
         }`}>
           {contract.s3FileKey ? (
-            <div className="h-full flex items-center justify-center bg-gray-50 p-3 sm:p-6">
+            <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
               <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
                 {/* PDF Icon - Responsive sizing */}
                 <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
@@ -344,7 +344,7 @@ export default function PDFEditor({
               </div>
             </div>
           ) : (
-            <div className="h-full flex items-center justify-center p-3 sm:p-6">
+            <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
               <div className="w-full max-w-sm mx-auto text-center space-y-4">
                 <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-gray-400" />
                 <div className="space-y-2">

@@ -335,8 +335,8 @@ export default function ContractDetails({
               {hasPdfFile ? (
                 // PDF Contract Display - Mobile Optimized
                 <div className="h-full flex flex-col -m-4 sm:-m-6">
-                  {/* PDF Header */}
-                  <div className="p-3 sm:p-4 border-b bg-gray-50">
+                  {/* PDF Header - Changed from bg-gray-50 to bg-white */}
+                  <div className="p-3 sm:p-4 border-b bg-white">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-red-600 flex-shrink-0" />
@@ -348,75 +348,117 @@ export default function ContractDetails({
                     </div>
                   </div>
                   
-                  {/* PDF Mobile View - Fully Responsive */}
-                  <div className="flex-1 flex items-center justify-center bg-gray-50 p-3 sm:p-6">
-                    <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-                      {/* PDF Icon - Responsive sizing */}
-                      <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
-                        <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
-                      </div>
-                      
-                      {/* File Info - Mobile optimized */}
-                      <div className="space-y-2">
-                        <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
-                          {contract.s3FileName}
-                        </h3>
-                        {contract.s3FileSize && (
-                          <p className="text-xs sm:text-sm text-gray-600">
-                            File size: {(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB
-                          </p>
-                        )}
-                      </div>
-                      
-                      {/* Description - Mobile friendly */}
-                      <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
-                        <span className="hidden sm:inline">
-                          Open the PDF in a new browser tab for optimal viewing on your device.
-                        </span>
-                        <span className="sm:hidden">
-                          Tap to open PDF in your browser for better viewing.
-                        </span>
-                      </p>
-                      
-                      {/* Action Button - Touch friendly */}
-                      <div className="pt-2">
-                        <Button
-                          onClick={async () => {
-                            try {
-                              const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
-                              if (response.ok) {
-                                const blob = await response.blob();
-                                const url = URL.createObjectURL(blob);
-                                window.open(url, '_blank');
-                                // Clean up the blob URL after a short delay
-                                setTimeout(() => URL.revokeObjectURL(url), 1000);
-                              } else {
-                                throw new Error('Failed to load PDF');
-                              }
-                            } catch (error) {
-                              console.error('Error opening PDF:', error);
-                              toast({
-                                title: "Error",
-                                description: "Failed to open PDF. Please try again.",
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
-                          size="lg"
-                        >
-                          <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
-                          <span className="hidden sm:inline">Open PDF in Browser</span>
-                          <span className="sm:hidden">Open PDF</span>
-                        </Button>
-                      </div>
-                      
-                      {/* Additional info for mobile users */}
-                      <div className="pt-2 sm:hidden">
-                        <p className="text-xs text-gray-500 leading-relaxed">
-                          Your device will use its preferred PDF viewer app or browser.
+                  {/* PDF Mobile View - Changed from bg-gray-50 to bg-white */}
+                  <div className="flex-1 flex items-center justify-center bg-white">
+                    {/* Mobile: Button to open PDF in browser */}
+                    <div className="lg:hidden w-full p-3 sm:p-6">
+                      <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                        {/* PDF Icon - Responsive sizing */}
+                        <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
+                          <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+                        </div>
+                        
+                        {/* File Info - Mobile optimized */}
+                        <div className="space-y-2">
+                          <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
+                            {contract.s3FileName}
+                          </h3>
+                          {contract.s3FileSize && (
+                            <p className="text-xs sm:text-sm text-gray-600">
+                              File size: {(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB
+                            </p>
+                          )}
+                        </div>
+                        
+                        {/* Description - Mobile friendly */}
+                        <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
+                          <span className="hidden sm:inline">
+                            Open the PDF in a new browser tab for optimal viewing on your device.
+                          </span>
+                          <span className="sm:hidden">
+                            Tap to open PDF in your browser for better viewing.
+                          </span>
                         </p>
+                        
+                        {/* Action Button - Touch friendly */}
+                        <div className="pt-2">
+                          <Button
+                            onClick={async () => {
+                              try {
+                                const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+                                if (response.ok) {
+                                  const blob = await response.blob();
+                                  const url = URL.createObjectURL(blob);
+                                  window.open(url, '_blank');
+                                  // Clean up the blob URL after a short delay
+                                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                } else {
+                                  throw new Error('Failed to load PDF');
+                                }
+                              } catch (error) {
+                                console.error('Error opening PDF:', error);
+                                toast({
+                                  title: "Error",
+                                  description: "Failed to open PDF. Please try again.",
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
+                            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
+                            size="lg"
+                          >
+                            <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
+                            <span className="hidden sm:inline">Open PDF in Browser</span>
+                            <span className="sm:hidden">Open PDF</span>
+                          </Button>
+                        </div>
+                        
+                        {/* Additional info for mobile users */}
+                        <div className="pt-2 sm:hidden">
+                          <p className="text-xs text-gray-500 leading-relaxed">
+                            Your device will use its preferred PDF viewer app or browser.
+                          </p>
+                        </div>
                       </div>
+                    </div>
+
+                    {/* Desktop: Inline iframe (as before) */}
+                    <div className="hidden lg:block w-full h-full relative">
+                      {isLoadingPdf ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white">
+                          <div className="text-center">
+                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-blue-600" />
+                            <p className="text-sm text-gray-600">Loading PDF...</p>
+                          </div>
+                        </div>
+                      ) : pdfUrl ? (
+                        <iframe
+                          src={pdfUrl}
+                          className="absolute inset-0 w-full h-full border-0"
+                          title="Contract PDF"
+                          style={{ minHeight: '450px' }}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center bg-white">
+                          <div className="text-center">
+                            <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
+                            <p className="text-sm text-gray-600 mb-3">Failed to load PDF</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (contract.s3FileKey) {
+                                  // Trigger a reload by updating the component
+                                  window.location.reload();
+                                }
+                              }}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Retry
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
