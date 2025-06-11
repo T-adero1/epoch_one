@@ -22,7 +22,7 @@ module epochone::epochone {
     use std::string;
     // Crypto module is not available in this environment yet, but will be uncommented in production
     use sui::ed25519;
-    use sui::zklogin_verified_id::{Self};
+   
     
     // ===== Constants =====
     const PREFIX: vector<u8> = b"signing_a_document_using_EPOCHONE!";
@@ -66,13 +66,21 @@ module epochone::epochone {
     }
     
     // ===== Identity =====
+    /* KEY PRINCIPLES:
+    * 1. All personal data (emails, OAuth sub, salts) is encrypted before blockchain storage
+      * 1.1. Each user has a unique salt
+    * 2. Only contract counterparties can decrypt each other's data 
+    * 3. General public sees only encrypted data - no privacy violations
+    * 4. Legal disputes can be resolved with mathematical proof of wallet ownership (e.g. zkLogin)
+    */
     public struct Identity has store {
         owner: address,
         registered_at: u64,
         aud_verified: bool,
         key_claim_value: Option<vector<u8>>,  // Store sub claim from zkLogin
         issuer: Option<vector<u8>>,           // Store issuer information (e.g., "accounts.google.com")
-        audience: Option<vector<u8>>          // Store audience (client ID)
+        audience: Option<vector<u8>>,         // Store audience (client ID)
+        user_salt: Option<u128>,              // Store unique salt
     }
     
     // ===== Gas Voucher =====
@@ -197,41 +205,30 @@ module epochone::epochone {
     
     /// Register an identity linked to an email hash
     /// @param registry: The registry object
-    /// @param email_hash: The hash of the user's email
-    /// @param sub_value: The ZkLogin sub (subject) value
-    /// @param issuer_value: The issuer (e.g., accounts.google.com)
-    /// @param audience_value: The audience (client ID)
+    /// @param encrypted_email_hash: The encrypted hash of the user's email
+    /// @param encrypted_sub_value: The encrypted OAuth sub (subject) value
+    /// @param encrypted_issuer_value: The encrypted issuer (e.g., accounts.google.com)
+    /// @param encrypted_audience_value: The encrypted audience (client ID)
+    /// @param encrypted_salt: The unique encrypted salt
     /// @param clock: The clock object
     /// @param ctx: The transaction context
     public entry fun register_identity(
         registry: &mut Registry,
-        email_hash: vector<u8>,
-        sub_value: vector<u8>,
-        issuer_value: vector<u8>,
-        audience_value: vector<u8>,
+        encrypted_email_hash: vector<u8>,     // Encrypted data
+        encrypted_sub_value: vector<u8>,      // Encrypted OAuth sub
+        encrypted_issuer_value: vector<u8>,   // Encrypted issuer
+        encrypted_audience_value: vector<u8>, // Encrypted audience  
+        encrypted_salt: u128,                 // Encrypted salt 
         clock: &Clock,
         ctx: &mut TxContext
     ) {
         let owner = tx_context::sender(ctx);
         
         // Check if the identity is already registered
-        assert!(!table::contains(&registry.email_identities, email_hash), ERR_ALREADY_REGISTERED);
+        assert!(!table::contains(&registry.email_identities, encrypted_email_hash), ERR_ALREADY_REGISTERED);
         assert!(!table::contains(&registry.verified_ids, owner), ERR_ALREADY_REGISTERED);
         
-        // Verify zklogin identity
-        let pin_hash = 0;
-        let sub_claim = string::utf8(b"sub");
-        let sub_value_str = string::utf8(sub_value);
-        let issuer_str = string::utf8(issuer_value);
-        let audience_str = string::utf8(audience_value);
-        let ok = zklogin_verified_id::check_zklogin_id(
-            owner,
-            &sub_claim,  // key_claim_name
-            &sub_value_str,
-            &issuer_str,
-            &audience_str,
-            pin_hash
-        );
+        
 
         
         assert!(ok, ERR_BAD_AUD);
@@ -241,22 +238,24 @@ module epochone::epochone {
             owner,
             registered_at: clock::timestamp_ms(clock),
             aud_verified: true,
-            key_claim_value: option::some(sub_value),
-            issuer: option::some(issuer_value),
-            audience: option::some(audience_value)
+            key_claim_value: option::some(encrypted_sub_value),
+            issuer: option::some(encrypted_issuer_value),
+            audience: option::some(encrypted_audience_value),
+            user_salt: option::some(encrypted_salt),  
         };
         
         // Add the identity to both tables in the registry
-        table::add(&mut registry.email_identities, email_hash, identity);
+        table::add(&mut registry.email_identities, encrypted_email_hash, identity);
         
         // Create a duplicate of the identity to store by address
         let identity_by_address = Identity {
             owner,
             registered_at: clock::timestamp_ms(clock),
             aud_verified: true,
-            key_claim_value: option::some(sub_value),
-            issuer: option::some(issuer_value),
-            audience: option::some(audience_value)
+            key_claim_value: option::some(encrypted_sub_value),
+            issuer: option::some(encrypted_issuer_value),
+            audience: option::some(encrypted_audience_value),
+            user_salt: option::some(encrypted_salt),  
         };
         
         table::add(&mut registry.verified_ids, owner, identity_by_address);
@@ -530,14 +529,15 @@ module epochone::epochone {
     }
     
     /// Get identity details
-    public fun get_identity(registry: &Registry, email_hash: vector<u8>): (address, u64, bool) {
+    public fun get_identity(registry: &Registry, email_hash: vector<u8>): (address, u64, bool, Option<u128>) {
         assert!(table::contains(&registry.email_identities, email_hash), ERR_NOT_FOUND);
         
         let identity = table::borrow(&registry.email_identities, email_hash);
         (
             identity.owner,
             identity.registered_at,
-            identity.aud_verified
+            identity.aud_verified,
+            identity.user_salt
         )
     }
     
@@ -564,7 +564,8 @@ module epochone::epochone {
         bool, 
         Option<vector<u8>>, 
         Option<vector<u8>>, 
-        Option<vector<u8>>
+        Option<vector<u8>>,
+        Option<u128>
     ) {
         assert!(table::contains(&registry.verified_ids, owner_address), ERR_NOT_FOUND);
         
@@ -575,7 +576,8 @@ module epochone::epochone {
             identity.aud_verified,
             identity.key_claim_value,
             identity.issuer,
-            identity.audience
+            identity.audience,
+            identity.user_salt
         )
     }
     
@@ -594,7 +596,8 @@ module epochone::epochone {
             aud_verified: verified,
             key_claim_value: option::none(),
             issuer: option::none(),
-            audience: option::none()
+            audience: option::none(),
+            user_salt: option::none(),
         };
         
         table::add(&mut registry.email_identities, email_hash, identity);
@@ -607,7 +610,8 @@ module epochone::epochone {
                 aud_verified: verified,
                 key_claim_value: option::none(),
                 issuer: option::none(),
-                audience: option::none()
+                audience: option::none(),
+                user_salt: option::none(),
             };
             
             table::add(&mut registry.verified_ids, owner, identity_by_address);
