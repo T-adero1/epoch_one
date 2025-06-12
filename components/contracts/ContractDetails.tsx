@@ -335,20 +335,7 @@ export default function ContractDetails({
               {hasPdfFile ? (
                 // PDF Contract Display - Mobile Optimized
                 <div className="h-full flex flex-col -m-4 sm:-m-6">
-                  {/* PDF Header - Changed from bg-gray-50 to bg-white */}
-                  <div className="p-3 sm:p-4 border-b bg-white">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-red-600 flex-shrink-0" />
-                        <span className="text-sm font-medium text-gray-700">PDF Contract</span>
-                      </div>
-                      <div className="text-xs text-gray-500 truncate">
-                        {contract.s3FileName}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* PDF Mobile View - Changed from bg-gray-50 to bg-white */}
+                  {/* PDF content starts directly here */}
                   <div className="flex-1 flex items-center justify-center bg-white">
                     {/* Mobile: Button to open PDF in browser */}
                     <div className="lg:hidden w-full p-3 sm:p-6">
