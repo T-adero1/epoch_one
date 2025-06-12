@@ -136,7 +136,7 @@ export const generateContractPDF = async (
     const leftMargin = 10;
     const rightMargin = 200;
     
-    // Add text content
+    // Add text content with smart wrapping to prevent overflow
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
@@ -145,18 +145,21 @@ export const generateContractPDF = async (
         currentY = 20;
       }
       
-      if (line.length > 80) {
-        const wrappedLines = pdf.splitTextToSize(line, rightMargin - leftMargin);
-        for (const wrappedLine of wrappedLines) {
-          if (currentY > pageHeight - 40) {
-            pdf.addPage();
-            currentY = 20;
-          }
-          pdf.text(wrappedLine, leftMargin, currentY);
-          currentY += lineHeight;
+      // Apply smart text wrapping to ALL lines based on available page width
+      // This prevents ANY text from running off the page
+      const availableWidth = rightMargin - leftMargin;
+      const wrappedLines = pdf.splitTextToSize(line, availableWidth);
+      
+      // Handle each wrapped line
+      for (const wrappedLine of wrappedLines) {
+        // Check if we need a new page for this wrapped line
+        if (currentY > pageHeight - 40) {
+          pdf.addPage();
+          currentY = 20;
         }
-      } else {
-        pdf.text(line, leftMargin, currentY);
+        
+        // Add the wrapped line (guaranteed to fit within page width)
+        pdf.text(wrappedLine, leftMargin, currentY);
         currentY += lineHeight;
       }
     }

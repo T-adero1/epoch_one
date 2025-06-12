@@ -380,7 +380,7 @@ export default function ContractSigningPage() {
             } catch (pdfError) {
               console.error('[ContractSigning] Failed to process cached PDF:', pdfError);
               // Fallback to text content signing
-              const contractContent = getSignableContractContent(contract);
+          const contractContent = getSignableContractContent(contract);
               contentHash = await createSHA256Hash(contractContent);
             }
           } else {
@@ -900,8 +900,8 @@ export default function ContractSigningPage() {
                     <pre className="whitespace-pre-wrap text-xs sm:text-sm p-4 border rounded-md bg-gray-50 overflow-x-auto">
                       {contract.content}
                     </pre>
-                  ) : (
-                    <p className="text-gray-500 italic">No content available</p>
+                ) : (
+                  <p className="text-gray-500 italic">No content available</p>
                   )
                 )}
               </div>

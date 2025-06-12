@@ -892,8 +892,8 @@ export default function DashboardPage() {
         setSelectedContractTab("content"); // Show the PDF content tab
       } else {
         // For text contracts, go to AI editor
-        setIsNewlyCreatedContract(true);
-        setIsEditingContract(true);
+      setIsNewlyCreatedContract(true);
+      setIsEditingContract(true);
       }
       
       // Create the actual contract in the background
@@ -917,8 +917,8 @@ export default function DashboardPage() {
         } catch (uploadError) {
           // Contract was created but PDF upload failed
           console.error('PDF upload failed:', uploadError);
-          setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
-          setSelectedContract(actualContract as unknown as ContractWithRelations);
+      setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
+      setSelectedContract(actualContract as unknown as ContractWithRelations);
         }
       } else {
         // No PDF to upload
@@ -1391,126 +1391,126 @@ export default function DashboardPage() {
                         </div>
 
                         {/* Auto-populate title from PDF filename */}
-                        <div className="grid gap-2">
-                          <label htmlFor="title" className="text-sm font-medium text-gray-900">
-                            Title
-                          </label>
-                          <Input
-                            id="title"
-                            value={newContract.title}
-                            onChange={(e) => setNewContract({ ...newContract, title: e.target.value })}
-                            placeholder="Contract title"
-                            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <label htmlFor="description" className="text-sm font-medium text-gray-900">
-                            Description
-                          </label>
-                          <Input
-                            id="description"
-                            value={newContract.description}
-                            onChange={(e) => setNewContract({ ...newContract, description: e.target.value })}
-                            placeholder="Contract description"
-                            className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                          />
+                      <div className="grid gap-2">
+                        <label htmlFor="title" className="text-sm font-medium text-gray-900">
+                          Title
+                        </label>
+                        <Input
+                          id="title"
+                          value={newContract.title}
+                          onChange={(e) => setNewContract({ ...newContract, title: e.target.value })}
+                          placeholder="Contract title"
+                          className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label htmlFor="description" className="text-sm font-medium text-gray-900">
+                          Description
+                        </label>
+                        <Input
+                          id="description"
+                          value={newContract.description}
+                          onChange={(e) => setNewContract({ ...newContract, description: e.target.value })}
+                          placeholder="Contract description"
+                          className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                        />
+                      </div>
+                      
+                      {/* Enhanced Signers Section */}
+                      <div className="grid gap-4">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-gray-900">Signers</label>
+                          <span className="text-xs text-gray-500">
+                            Valid: {getNewContractValidSignersCount()}
+                          </span>
                         </div>
                         
-                        {/* Enhanced Signers Section */}
-                        <div className="grid gap-4">
-                          <div className="flex items-center justify-between">
-                            <label className="text-sm font-medium text-gray-900">Signers</label>
-                            <span className="text-xs text-gray-500">
-                              Valid: {getNewContractValidSignersCount()}
-                            </span>
-                          </div>
-                          
-                          {/* Info panel */}
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <div className="flex items-start gap-2">
-                              <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                              <div className="text-xs text-blue-800">
-                                <p className="font-medium mb-1">Email Requirements:</p>
-                                <ul className="list-disc list-inside space-y-0.5 text-blue-700">
-                                  <li>Valid email format (e.g., user@example.com)</li>
-                                  <li>Cannot add your own email address</li>
-                                  <li>Each email can only be added once</li>
-                                </ul>
-                              </div>
+                        {/* Info panel */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <div className="flex items-start gap-2">
+                            <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                            <div className="text-xs text-blue-800">
+                              <p className="font-medium mb-1">Email Requirements:</p>
+                              <ul className="list-disc list-inside space-y-0.5 text-blue-700">
+                                <li>Valid email format (e.g., user@example.com)</li>
+                                <li>Cannot add your own email address</li>
+                                <li>Each email can only be added once</li>
+                              </ul>
                             </div>
                           </div>
-                          
-                          {/* Signers list */}
-                          <div className="space-y-3">
-                            {newContract.signers.map((signer, index) => (
-                              <div key={index} className="space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <div className="p-1.5 bg-blue-50 rounded-full">
-                                    <User className="h-3 w-3 text-blue-500" />
-                                  </div>
-                                  <div className="flex-1 relative">
-                                    <Input
-                                      value={signer}
-                                      onChange={(e) => handleNewContractSignerChange(index, e.target.value)}
-                                      placeholder="Enter signer email (e.g., john@company.com)"
-                                      className={`text-sm ${
-                                        newContractSignerErrors[index] 
-                                          ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
-                                          : signer.trim() && !newContractSignerErrors[index] && !isValidatingNewContractEmails[index]
-                                          ? 'border-green-500 focus:border-green-500 focus:ring-green-500'
-                                          : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
-                                      }`}
-                                    />
-                                    {isValidatingNewContractEmails[index] && (
-                                      <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                        <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
-                                      </div>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Add/Remove buttons */}
-                                  {index === newContract.signers.length - 1 ? (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={handleAddNewContractSigner}
-                                      className="border-gray-200 hover:bg-blue-50 px-2 py-1 h-8"
-                                    >
-                                      <Plus className="h-3 w-3 text-blue-600" />
-                                    </Button>
-                                  ) : (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleRemoveNewContractSigner(index)}
-                                      className="px-2 py-1 h-8"
-                                    >
-                                      <Trash2 className="h-3 w-3 text-gray-400" />
-                                    </Button>
+                        </div>
+                        
+                        {/* Signers list */}
+                        <div className="space-y-3">
+                          {newContract.signers.map((signer, index) => (
+                            <div key={index} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 bg-blue-50 rounded-full">
+                                  <User className="h-3 w-3 text-blue-500" />
+                                </div>
+                                <div className="flex-1 relative">
+                                  <Input
+                                    value={signer}
+                                    onChange={(e) => handleNewContractSignerChange(index, e.target.value)}
+                                    placeholder="Enter signer email (e.g., john@company.com)"
+                                    className={`text-sm ${
+                                      newContractSignerErrors[index] 
+                                        ? 'border-red-500 focus:border-red-500 focus:ring-red-500' 
+                                        : signer.trim() && !newContractSignerErrors[index] && !isValidatingNewContractEmails[index]
+                                        ? 'border-green-500 focus:border-green-500 focus:ring-green-500'
+                                        : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500'
+                                    }`}
+                                  />
+                                  {isValidatingNewContractEmails[index] && (
+                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                                      <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
+                                    </div>
                                   )}
                                 </div>
                                 
-                                {/* Fixed height validation message area */}
-                                <div className="h-8 ml-6"> {/* Fixed height container */}
-                                  {newContractSignerErrors[index] ? (
-                                    <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 p-2 rounded-md h-full">
-                                      <AlertCircle className="h-3 w-3 flex-shrink-0" />
-                                      <span className="truncate">{newContractSignerErrors[index]}</span>
-                                    </div>
-                                  ) : signer.trim() && !isValidatingNewContractEmails[index] ? (
-                                    <div className="flex items-center gap-2 text-xs text-green-600 h-full">
-                                      <Check className="h-3 w-3 flex-shrink-0" />
-                                      <span>Valid email address</span>
-                                    </div>
-                                  ) : (
-                                    <div className="h-full"></div> /* Empty spacer to maintain height */
-                                  )}
-                                </div>
+                                {/* Add/Remove buttons */}
+                                {index === newContract.signers.length - 1 ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleAddNewContractSigner}
+                                    className="border-gray-200 hover:bg-blue-50 px-2 py-1 h-8"
+                                  >
+                                    <Plus className="h-3 w-3 text-blue-600" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveNewContractSigner(index)}
+                                    className="px-2 py-1 h-8"
+                                  >
+                                    <Trash2 className="h-3 w-3 text-gray-400" />
+                                  </Button>
+                                )}
                               </div>
-                            ))}
-                          </div>
+                              
+                              {/* Fixed height validation message area */}
+                              <div className="h-8 ml-6"> {/* Fixed height container */}
+                                {newContractSignerErrors[index] ? (
+                                  <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 p-2 rounded-md h-full">
+                                    <AlertCircle className="h-3 w-3 flex-shrink-0" />
+                                    <span className="truncate">{newContractSignerErrors[index]}</span>
+                                  </div>
+                                ) : signer.trim() && !isValidatingNewContractEmails[index] ? (
+                                  <div className="flex items-center gap-2 text-xs text-green-600 h-full">
+                                    <Check className="h-3 w-3 flex-shrink-0" />
+                                    <span>Valid email address</span>
+                                  </div>
+                                ) : (
+                                  <div className="h-full"></div> /* Empty spacer to maintain height */
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
+                    </div>
                     </div>
                     
                     {/* Fixed Footer */}
@@ -1551,8 +1551,8 @@ export default function DashboardPage() {
                 <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:items-center sm:gap-4 mb-6">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Search contracts..."
+                    <Input 
+                      placeholder="Search contracts..." 
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-10 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
@@ -1652,14 +1652,14 @@ export default function DashboardPage() {
                           key={contract.id} 
                           className="bg-white border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
                         >
-                          <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-start justify-between mb-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-2">
                                 <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
                                 <h3 className="font-medium text-gray-900 truncate text-sm">
                                   {contract.title}
                                 </h3>
-                              </div>
+                            </div>
                               <div className="flex items-center gap-2 mb-2">
                                 <div className={`w-2 h-2 rounded-full ${getStatusColor(contract)}`}></div>
                                 <span className={`text-xs font-medium px-2 py-1 rounded-full ${
@@ -1670,25 +1670,25 @@ export default function DashboardPage() {
                                 }`}>
                                   {getDisplayStatus(contract)}
                                 </span>
-                              </div>
-                            </div>
-                            <div className="flex-shrink-0 ml-2">
-                              <ContractActions
-                                contractId={contract.id}
-                                status={contract.status}
-                                contract={contract}
-                                onEdit={() => handleEditContract(contract)}
-                                onDelete={() => handleConfirmDelete(contract.id)}
-                                onSend={() => handleSendContract(contract)}
-                                onView={() => handleViewContract(contract)}
-                              />
                             </div>
                           </div>
+                            <div className="flex-shrink-0 ml-2">
+                          <ContractActions 
+                            contractId={contract.id}
+                            status={contract.status}
+                            contract={contract}
+                            onEdit={() => handleEditContract(contract)}
+                            onDelete={() => handleConfirmDelete(contract.id)}
+                            onSend={() => handleSendContract(contract)}
+                                onView={() => handleViewContract(contract)}
+                          />
+                        </div>
+                        </div>
                           <div className="flex justify-between items-center text-xs text-gray-500">
                             <span>{format(new Date(contract.updatedAt), 'MMM dd, yyyy')}</span>
-                            <span>{contract.metadata?.signers?.length || 0} signers</span>
-                          </div>
+                          <span>{contract.metadata?.signers?.length || 0} signers</span>
                         </div>
+                      </div>
                       ))}
                     </div>
                   )}
@@ -1902,49 +1902,49 @@ export default function DashboardPage() {
               
               {/* Scrollable Content */}
               <div className="flex-1 overflow-y-auto">
-                {blockchainDetailsContract && (
+              {blockchainDetailsContract && (
                   <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-                    {/* Contract Overview */}
+                  {/* Contract Overview */}
                     <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
                       <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2 text-sm sm:text-base">
-                        <FileText className="h-4 w-4" />
-                        Contract Overview
-                      </h3>
+                      <FileText className="h-4 w-4" />
+                      Contract Overview
+                    </h3>
                       <div className="space-y-3 sm:space-y-2">
                         <div className="flex justify-between items-center py-1">
                           <span className="text-gray-600 text-sm">Status:</span>
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
                             <span className="font-medium text-green-700 text-sm">Completed</span>
-                          </div>
                         </div>
+                      </div>
                         <div className="flex justify-between items-center py-1">
                           <span className="text-gray-600 text-sm">Completed:</span>
                           <span className="font-medium text-sm text-right">
                             {format(new Date(blockchainDetailsContract.updatedAt), 'MMM dd, yyyy HH:mm')}
                           </span>
-                        </div>
+                      </div>
                         <div className="flex justify-between items-center py-1">
                           <span className="text-gray-600 text-sm">Signers:</span>
                           <span className="font-medium text-sm">{blockchainDetailsContract.metadata?.signers?.length || 0}</span>
-                        </div>
+                      </div>
                         <div className="flex justify-between items-start py-1">
                           <span className="text-gray-600 text-sm">Owner:</span>
                           <span className="font-medium text-sm text-right max-w-[60%] break-words">
                             {blockchainDetailsContract.owner?.name || blockchainDetailsContract.owner?.email}
                           </span>
-                        </div>
                       </div>
                     </div>
+                  </div>
 
-                    {/* Walrus Storage Details */}
-                    {blockchainDetailsContract.metadata?.walrus?.storage?.blobId && (
+                  {/* Walrus Storage Details */}
+                  {blockchainDetailsContract.metadata?.walrus?.storage?.blobId && (
                       <div className="border rounded-lg p-3 sm:p-4">
                         <h3 className="font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2 text-sm sm:text-base">
                           <Database className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500" />
-                          Walrus Storage
-                        </h3>
-                        <div className="space-y-2">
+                        Walrus Storage
+                      </h3>
+                      <div className="space-y-2">
                           {/* Mobile-optimized BlockchainAddress */}
                           <div className="space-y-2">
                             <div className="flex flex-col space-y-1">
@@ -1977,42 +1977,42 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           
-                          {blockchainDetailsContract.metadata.walrus.storage.uploadedAt && (
+                        {blockchainDetailsContract.metadata.walrus.storage.uploadedAt && (
                             <div className="flex justify-between items-center py-2 border-t border-gray-100">
-                              <span className="text-sm text-gray-600">Uploaded:</span>
-                              <span className="text-sm font-medium">
-                                {format(new Date(blockchainDetailsContract.metadata.walrus.storage.uploadedAt), 'MMM dd, yyyy HH:mm')}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* Walrus Explorer Button */}
-                        <div className="mt-4 pt-3 border-t border-gray-200">
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              window.open(getWalrusExplorerUrl(blockchainDetailsContract.metadata!.walrus!.storage!.blobId!), '_blank');
-                            }}
-                            className="w-full flex items-center justify-center gap-2 h-10"
-                          >
-                            <Database className="h-4 w-4" />
-                            <span className="text-sm">View in Walrus Explorer</span>
-                          </Button>
-                        </div>
+                            <span className="text-sm text-gray-600">Uploaded:</span>
+                            <span className="text-sm font-medium">
+                              {format(new Date(blockchainDetailsContract.metadata.walrus.storage.uploadedAt), 'MMM dd, yyyy HH:mm')}
+                            </span>
+                          </div>
+                        )}
                       </div>
-                    )}
+                        
+                      {/* Walrus Explorer Button */}
+                      <div className="mt-4 pt-3 border-t border-gray-200">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            window.open(getWalrusExplorerUrl(blockchainDetailsContract.metadata!.walrus!.storage!.blobId!), '_blank');
+                          }}
+                            className="w-full flex items-center justify-center gap-2 h-10"
+                        >
+                          <Database className="h-4 w-4" />
+                            <span className="text-sm">View in Walrus Explorer</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
-                    {/* SEAL Encryption Details */}
-                    {blockchainDetailsContract.metadata?.walrus?.encryption?.allowlistId && (
+                  {/* SEAL Encryption Details */}
+                  {blockchainDetailsContract.metadata?.walrus?.encryption?.allowlistId && (
                       <div className="border rounded-lg p-3 sm:p-4">
                         <h3 className="font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2 text-sm sm:text-base">
                           <Shield className="h-4 w-4 sm:h-5 sm:w-5 text-purple-500" />
-                          SEAL Encryption
-                        </h3>
+                        SEAL Encryption
+                      </h3>
                         <div className="space-y-3">
                           {/* Allowlist ID */}
-                          <div className="space-y-2">
+                      <div className="space-y-2">
                             <div className="flex flex-col space-y-1">
                               <span className="text-sm text-gray-600 font-medium">Allowlist ID:</span>
                               <div className="flex items-center gap-2 bg-gray-50 p-2 rounded">
@@ -2044,7 +2044,7 @@ export default function DashboardPage() {
                           </div>
 
                           {/* Document ID */}
-                          {blockchainDetailsContract.metadata.walrus.encryption.documentId && (
+                        {blockchainDetailsContract.metadata.walrus.encryption.documentId && (
                             <div className="space-y-2">
                               <div className="flex flex-col space-y-1">
                                 <span className="text-sm text-gray-600 font-medium">Document ID:</span>
@@ -2078,7 +2078,7 @@ export default function DashboardPage() {
                           )}
 
                           {/* Cap ID */}
-                          {blockchainDetailsContract.metadata.walrus.encryption.capId && (
+                        {blockchainDetailsContract.metadata.walrus.encryption.capId && (
                             <div className="space-y-2">
                               <div className="flex flex-col space-y-1">
                                 <span className="text-sm text-gray-600 font-medium">Cap ID:</span>
@@ -2109,93 +2109,93 @@ export default function DashboardPage() {
                                 </div>
                               </div>
                             </div>
-                          )}
-                        </div>
-                        
-                        {/* Sui Explorer Button */}
-                        <div className="mt-4 pt-3 border-t border-gray-200">
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              window.open(getSuiExplorerUrl(blockchainDetailsContract.metadata!.walrus!.encryption!.allowlistId!), '_blank');
-                            }}
-                            className="w-full flex items-center justify-center gap-2 h-10"
-                          >
-                            <Shield className="h-4 w-4" />
-                            <span className="text-sm">View on Sui Explorer</span>
-                          </Button>
-                        </div>
+                        )}
                       </div>
-                    )}
+                        
+                      {/* Sui Explorer Button */}
+                      <div className="mt-4 pt-3 border-t border-gray-200">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            window.open(getSuiExplorerUrl(blockchainDetailsContract.metadata!.walrus!.encryption!.allowlistId!), '_blank');
+                          }}
+                            className="w-full flex items-center justify-center gap-2 h-10"
+                        >
+                          <Shield className="h-4 w-4" />
+                            <span className="text-sm">View on Sui Explorer</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
-                    {/* Authorized Wallets */}
-                    {blockchainDetailsContract.metadata?.walrus?.authorizedWallets && 
-                     blockchainDetailsContract.metadata.walrus.authorizedWallets.length > 0 && (
+                  {/* Authorized Wallets */}
+                  {blockchainDetailsContract.metadata?.walrus?.authorizedWallets && 
+                   blockchainDetailsContract.metadata.walrus.authorizedWallets.length > 0 && (
                       <div className="border rounded-lg p-3 sm:p-4">
                         <h3 className="font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2 text-sm sm:text-base">
                           <UserCheck className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500" />
-                          Authorized Wallets
-                        </h3>
-                        <div className="space-y-4">
+                        Authorized Wallets
+                      </h3>
+                      <div className="space-y-4">
                           <div className="flex justify-between items-center py-2 border-b border-gray-200">
-                            <span className="text-sm text-gray-600">Total Authorized:</span>
-                            <span className="text-sm font-medium">{blockchainDetailsContract.metadata.walrus.authorizedWallets.length} wallet(s)</span>
-                          </div>
-                          
+                          <span className="text-sm text-gray-600">Total Authorized:</span>
+                          <span className="text-sm font-medium">{blockchainDetailsContract.metadata.walrus.authorizedWallets.length} wallet(s)</span>
+                        </div>
+                        
                           <div className="space-y-4">
-                            {blockchainDetailsContract.metadata.walrus.authorizedWallets.map((wallet, index) => {
-                              // Find the corresponding email by matching wallet address from signatures
-                              const matchingSignature = blockchainDetailsContract.signatures?.find(
-                                sig => sig.walletAddress === wallet
-                              );
-                              const correspondingEmail = matchingSignature?.user?.email;
-                              
-                              return (
+                        {blockchainDetailsContract.metadata.walrus.authorizedWallets.map((wallet, index) => {
+                          // Find the corresponding email by matching wallet address from signatures
+                          const matchingSignature = blockchainDetailsContract.signatures?.find(
+                            sig => sig.walletAddress === wallet
+                          );
+                          const correspondingEmail = matchingSignature?.user?.email;
+                          
+                          return (
                                 <div key={index} className="bg-gray-50 rounded-lg p-3 space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm font-medium text-gray-900">Signer {index + 1}</span>
-                                    {correspondingEmail && (
-                                      <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                                        Verified
-                                      </span>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Email Address */}
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium text-gray-900">Signer {index + 1}</span>
+                                {correspondingEmail && (
+                                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                                    Verified
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {/* Email Address */}
                                   <div className="space-y-2">
                                     <span className="text-sm text-gray-600 font-medium">Email:</span>
-                                    {correspondingEmail ? (
+                              {correspondingEmail ? (
                                       <div className="flex items-center gap-2 bg-white p-2 rounded border">
                                         <span className="text-sm text-gray-900 break-all flex-1">
-                                          {correspondingEmail}
-                                        </span>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={async () => {
-                                            try {
-                                              await navigator.clipboard.writeText(correspondingEmail);
-                                              toast({
-                                                title: "Copied!",
-                                                description: "Email address copied to clipboard",
-                                                variant: "success",
-                                              });
-                                            } catch (err) {
-                                              console.error('Failed to copy:', err);
-                                            }
-                                          }}
+                                      {correspondingEmail}
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={async () => {
+                                        try {
+                                          await navigator.clipboard.writeText(correspondingEmail);
+                                          toast({
+                                            title: "Copied!",
+                                            description: "Email address copied to clipboard",
+                                            variant: "success",
+                                          });
+                                        } catch (err) {
+                                          console.error('Failed to copy:', err);
+                                        }
+                                      }}
                                           className="h-8 w-8 p-0 flex-shrink-0"
-                                          title="Copy email"
-                                        >
-                                          <Copy className="h-3 w-3" />
-                                        </Button>
-                                      </div>
-                                    ) : (
-                                      <span className="text-sm text-gray-400 italic">Not available</span>
-                                    )}
+                                      title="Copy email"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                              ) : (
+                                  <span className="text-sm text-gray-400 italic">Not available</span>
+                              )}
                                   </div>
-                                  
-                                  {/* Wallet Address */}
+                              
+                              {/* Wallet Address */}
                                   <div className="space-y-2">
                                     <span className="text-sm text-gray-600 font-medium">Wallet:</span>
                                     <div className="flex items-center gap-2 bg-white p-2 rounded border">
@@ -2224,71 +2224,71 @@ export default function DashboardPage() {
                                       </Button>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                            </div>
+                          );
+                        })}
                           </div>
-                          
-                          {/* Additional Signers (if any emails without corresponding wallets) */}
-                          {blockchainDetailsContract.signatures && 
-                           blockchainDetailsContract.signatures.some(sig => 
-                             !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
-                           ) && (
-                            <div className="mt-4 pt-3 border-t border-gray-200">
+                        
+                        {/* Additional Signers (if any emails without corresponding wallets) */}
+                        {blockchainDetailsContract.signatures && 
+                         blockchainDetailsContract.signatures.some(sig => 
+                           !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
+                         ) && (
+                          <div className="mt-4 pt-3 border-t border-gray-200">
                               <h4 className="text-sm font-medium text-gray-900 mb-3">Additional Signers (No Blockchain Wallet)</h4>
                               <div className="space-y-3">
-                                {blockchainDetailsContract.signatures
-                                  .filter(sig => 
-                                    !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
-                                  )
-                                  .map((signature, index) => (
+                            {blockchainDetailsContract.signatures
+                              .filter(sig => 
+                                !blockchainDetailsContract.metadata?.walrus?.authorizedWallets?.includes(sig.walletAddress || '')
+                              )
+                              .map((signature, index) => (
                                     <div key={index} className="bg-yellow-50 rounded-lg p-3">
                                       <div className="flex items-center justify-between mb-2">
-                                        <span className="text-sm font-medium text-gray-900">
-                                          Additional Signer {index + 1}
-                                        </span>
-                                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                                          Not on Blockchain
-                                        </span>
-                                      </div>
+                                    <span className="text-sm font-medium text-gray-900">
+                                      Additional Signer {index + 1}
+                                    </span>
+                                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                                      Not on Blockchain
+                                    </span>
+                                  </div>
                                       <div className="space-y-2">
                                         <span className="text-sm text-gray-600 font-medium">Email:</span>
                                         <div className="flex items-center gap-2 bg-white p-2 rounded border">
                                           <span className="text-sm text-gray-900 break-all flex-1">
-                                            {signature.user.email}
-                                          </span>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={async () => {
-                                              try {
-                                                await navigator.clipboard.writeText(signature.user.email);
-                                                toast({
-                                                  title: "Copied!",
-                                                  description: "Email address copied to clipboard",
-                                                  variant: "success",
-                                                });
-                                              } catch (err) {
-                                                console.error('Failed to copy:', err);
-                                              }
-                                            }}
+                                        {signature.user.email}
+                                      </span>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={async () => {
+                                          try {
+                                            await navigator.clipboard.writeText(signature.user.email);
+                                            toast({
+                                              title: "Copied!",
+                                              description: "Email address copied to clipboard",
+                                              variant: "success",
+                                            });
+                                          } catch (err) {
+                                            console.error('Failed to copy:', err);
+                                          }
+                                        }}
                                             className="h-8 w-8 p-0 flex-shrink-0"
-                                            title="Copy email"
-                                          >
-                                            <Copy className="h-3 w-3" />
-                                          </Button>
-                                        </div>
-                                      </div>
+                                        title="Copy email"
+                                      >
+                                        <Copy className="h-3 w-3" />
+                                      </Button>
                                     </div>
-                                  ))}
+                                  </div>
+                                </div>
+                              ))}
                               </div>
-                            </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
               
               {/* Fixed Footer */}

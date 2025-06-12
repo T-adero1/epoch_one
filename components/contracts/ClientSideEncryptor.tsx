@@ -180,28 +180,120 @@ export default function ClientSideEncryptor({
           pdfDoc = await PDFDocument.create();
           const page = pdfDoc.addPage();
           const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-          
-          // Add text content to PDF
+              
+          // Add text content to PDF with proper text wrapping
           const lines = enhancedDocumentContent.split('\n');
-          let currentY = page.getHeight() - 50;
+          let currentPage = page;
+          let currentY = currentPage.getHeight() - 50;
           const fontSize = 10;
           const lineHeight = 12;
+          const leftMargin = 5;
+          const rightMargin = 20;
+          const pageWidth = currentPage.getSize().width;
+          const availableWidth = pageWidth - leftMargin - rightMargin;
           
           for (const line of lines) {
             if (currentY < 50) {
-              const newPage = pdfDoc.addPage();
-              currentY = newPage.getHeight() - 50;
+              currentPage = pdfDoc.addPage();
+              currentY = currentPage.getHeight() - 50;
             }
             
-            page.drawText(line, {
-              x: 50,
-              y: currentY,
-              size: fontSize,
-              font,
-              color: rgb(0, 0, 0),
-            });
+            const textWidth = font.widthOfTextAtSize(line, fontSize);
             
-            currentY -= lineHeight;
+            if (textWidth > availableWidth) {
+              const words = line.split(' ');
+              let currentLine = '';
+              
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+                
+                if (testWidth <= availableWidth) {
+                  currentLine = testLine;
+                } else {
+                  if (currentLine) {
+                    if (currentY < 50) {
+                      currentPage = pdfDoc.addPage();
+                      currentY = currentPage.getHeight() - 50;
+                    }
+                    
+                    currentPage.drawText(currentLine, {
+                      x: leftMargin,
+                      y: currentY,
+                      size: fontSize,
+                      font,
+                      color: rgb(0, 0, 0),
+                    });
+                    
+                    currentY -= lineHeight;
+                    currentLine = word;
+                  } else {
+                    let remainingWord = word;
+                    while (remainingWord.length > 0) {
+                      let chunk = '';
+                      
+                      for (let i = 1; i <= remainingWord.length; i++) {
+                        const testChunk = remainingWord.substring(0, i);
+                        const chunkWidth = font.widthOfTextAtSize(testChunk, fontSize);
+                        
+                        if (chunkWidth <= availableWidth) {
+                          chunk = testChunk;
+                        } else {
+                          break;
+                        }
+                      }
+                      
+                      if (chunk.length === 0) {
+                        chunk = remainingWord.substring(0, 1);
+                      }
+                      
+                      if (currentY < 50) {
+                        currentPage = pdfDoc.addPage();
+                        currentY = currentPage.getHeight() - 50;
+                      }
+                      
+                      currentPage.drawText(chunk, {
+                        x: leftMargin,
+                        y: currentY,
+                        size: fontSize,
+                        font,
+                        color: rgb(0, 0, 0),
+                      });
+                      
+                      currentY -= lineHeight;
+                      remainingWord = remainingWord.substring(chunk.length);
+                    }
+                  }
+                }
+              }
+              
+              if (currentLine) {
+                if (currentY < 50) {
+                  currentPage = pdfDoc.addPage();
+                  currentY = currentPage.getHeight() - 50;
+                }
+                
+                currentPage.drawText(currentLine, {
+                  x: leftMargin,
+                  y: currentY,
+                  size: fontSize,
+                  font,
+                  color: rgb(0, 0, 0),
+                });
+                
+                currentY -= lineHeight;
+              }
+            } else {
+              currentPage.drawText(line, {
+                x: leftMargin,
+                y: currentY,
+                size: fontSize,
+                font,
+                color: rgb(0, 0, 0),
+              });
+              
+              currentY -= lineHeight;
+            }
           }
           
           addLog(`Created new PDF with ${pdfDoc.getPageCount()} pages from text content`);
