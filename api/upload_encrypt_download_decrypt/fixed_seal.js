@@ -15,14 +15,12 @@ async function initSealClient(suiClient) {
   
   try {
     // Get allowlisted key servers - this should return an array
-    const keyServers = await getAllowlistedKeyServers(config.NETWORK);
+    const keyServers = ['0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75'];
     console.log(`- Key servers:`, keyServers);
-    
-    
     
     const client = new SealClient({
       suiClient,
-      serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
+      serverConfigs: keyServers.map((id) => ({
         objectId: id,
         weight: 1,
       })),

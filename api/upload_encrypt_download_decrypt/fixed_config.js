@@ -6,7 +6,7 @@ require('dotenv').config();
 
 // Network configuration
 const NETWORK = 'testnet';
-const RPC_URL = 'https://fullnode.testnet.sui.io:443';
+const RPC_URL = 'https://sui-testnet-rpc.publicnode.com';
 
 // Package IDs
 const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || 'b5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';

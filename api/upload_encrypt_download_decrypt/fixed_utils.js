@@ -17,7 +17,8 @@ const { getFullnodeUrl } = require('@mysten/sui/client');
 // Initialize SUI client
 async function initSuiClient() {
   console.log('\n Initializing Sui client...');
-  const client = new SuiClient({ url: getFullnodeUrl('testnet') });
+  const rpc_url = "https://sui-testnet-rpc.publicnode.com";
+  const client = new SuiClient({ url: rpc_url });
   
   // Validate the client is working
   try {
@@ -154,48 +155,67 @@ function readFromFile(filePath) {
 
 // Wait for transaction confirmation and object availability
 async function waitForTransactionFinality(client, transactionDigest, maxAttempts = 10, delayMs = 1000) {
-  console.log(`\n Waiting for transaction ${transactionDigest} to be finalized...`);
+  console.log(`\n 🔄 Waiting for transaction ${transactionDigest} to be finalized...`);
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       console.log(`- Attempt ${attempt}/${maxAttempts} - Checking transaction status...`);
-      
+      await new Promise(resolve => setTimeout(resolve, 1500)); // Add 1 second delay between attempts
       // Get transaction status
       const txStatus = await client.getTransactionBlock({
         digest: transactionDigest,
         options: { showEffects: true }
       });
       
+      // 🔍 LOG THE FULL NODE RESPONSE
+      console.log(`\n📋 FULL NODE RESPONSE (Attempt ${attempt}):`);
+      console.log(JSON.stringify(txStatus, null, 2));
+      console.log(`\n📊 TRANSACTION EFFECTS:`);
+      console.log(JSON.stringify(txStatus.effects, null, 2));
+      
       if (txStatus.effects?.status?.status === 'success') {
         // Verify objects are available
-        console.log('- Transaction successful, verifying object availability...');
+        console.log('✅ Transaction successful, verifying object availability...');
         const objects = txStatus.effects.created?.map(obj => obj.reference.objectId) || [];
+        
+        console.log(`📦 Created objects: ${JSON.stringify(objects, null, 2)}`);
         
         if (objects.length > 0) {
           // Try to get the first object to confirm it's available
           try {
-            await client.getObject({ id: objects[0] });
-            console.log(` Transaction finalized and objects are available`);
+            const objectResponse = await client.getObject({ id: objects[0] });
+            console.log(`✅ Object ${objects[0]} is available:`);
+            console.log(JSON.stringify(objectResponse, null, 2));
+            
+            console.log(`🎉 Transaction finalized and objects are available`);
             return true;
           } catch (objErr) {
-            console.log(`- Objects not yet available: ${objErr.message}`);
+            console.log(`⚠️ Objects not yet available: ${objErr.message}`);
+            console.log(`🔄 Will retry in ${delayMs}ms...`);
           }
         } else {
-          console.log(' Transaction finalized (no objects to verify)');
+          console.log('✅ Transaction finalized (no objects to verify)');
           return true;
+        }
+      } else {
+        console.log(`❌ Transaction status: ${txStatus.effects?.status?.status || 'unknown'}`);
+        if (txStatus.effects?.status?.error) {
+          console.log(`🚨 Transaction error: ${JSON.stringify(txStatus.effects.status.error, null, 2)}`);
         }
       }
       
       // Wait before next attempt
+      console.log(`⏳ Waiting ${delayMs}ms before next attempt...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     } catch (error) {
-      console.log(`- Error checking transaction: ${error.message}`);
+      console.log(`❌ Error checking transaction: ${error.message}`);
+      console.log(`🔍 Full error:`, error);
       // Wait before retry
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
   
-  console.warn(` Waited for ${maxAttempts} attempts but transaction may not be fully finalized`);
+  console.warn(`⚠️ Waited for ${maxAttempts} attempts but transaction may not be fully finalized`);
   return false;
 }
 
