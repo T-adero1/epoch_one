@@ -124,7 +124,7 @@ export default function ClientSideEncryptor({
       
       setStatus('encrypting');
       addLog('Initializing SEAL client');
-      const keyServers = [process.env.NEXT_PUBLIC_KEYSERVER || ''];
+      const keyServers = ['0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75'];
       addLog(`Using key servers: ${keyServers.join(', ')}`);
       
       const sealClient = new SealClient({
@@ -323,7 +323,7 @@ export default function ClientSideEncryptor({
       addLog(`Using document ID: ${documentIdHex}`);
       addLog(`Using salt: ${documentSalt}`);
       
-      const { encryptedObject: encryptedBytes } = await sealClient.encrypt({
+      const { encryptedObject: encryptedBytes, key: backupKey } = await sealClient.encrypt({
         threshold: 1,
         packageId: SEAL_PACKAGE_ID,
         id: documentIdHex,
