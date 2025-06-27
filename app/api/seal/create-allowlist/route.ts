@@ -15,6 +15,7 @@ const NETWORK = 'testnet';
 async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAttempts = 10) {
   console.log(`[API] Verifying ${objectIds.length} objects exist and are available...`);
   
+  // First try with the primary client
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       // Get multiple objects in a single call
@@ -22,6 +23,10 @@ async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAtt
         ids: objectIds,
         options: { showContent: true }
       });
+      
+      // 🔍 LOG THE FULL NODE RESPONSE
+      console.log(`\n📋 PRIMARY NODE RESPONSE (Attempt ${attempt}):`);
+      console.log(JSON.stringify(objects, null, 2));
       
       // Check if all objects exist and are valid
       const allExist = objects.every(obj => 
@@ -32,21 +37,68 @@ async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAtt
       );
       
       if (allExist) {
-        console.log('[API] All objects verified and available');
+        console.log('✅ [API] All objects verified and available on primary node');
         return true;
       }
       
-      console.log(`[API] Attempt ${attempt}/${maxAttempts} - Some objects not available yet`);
+      console.log(`⚠️ [API] Primary node attempt ${attempt}/${maxAttempts} - Some objects not available yet`);
       
       // If not all exist, wait a moment before retrying
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
-      console.log(`[API] Error verifying objects: ${e.message}`);
+      console.log(`❌ [API] Error with primary node: ${e.message}`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
   
-  throw new Error(`Objects [${objectIds.join(', ')}] not available after ${maxAttempts} attempts`);
+  // If primary node failed, try with backup node
+  const backupRpcUrl = process.env.SUI_RPC_URL2;
+  if (backupRpcUrl) {
+    console.log(`🔄 [API] Primary node failed after ${maxAttempts} attempts, trying backup node: ${backupRpcUrl}`);
+    
+    const backupClient = new SuiClient({ url: backupRpcUrl });
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // Get multiple objects in a single call with backup client
+        const objects = await backupClient.multiGetObjects({
+          ids: objectIds,
+          options: { showContent: true }
+        });
+        
+        // 🔍 LOG THE BACKUP NODE RESPONSE
+        console.log(`\n📋 BACKUP NODE RESPONSE (Attempt ${attempt}):`);
+        console.log(JSON.stringify(objects, null, 2));
+        
+        // Check if all objects exist and are valid
+        const allExist = objects.every(obj => 
+          obj && 
+          obj.data && 
+          !obj.error && 
+          obj.data.content !== null
+        );
+        
+        if (allExist) {
+          console.log('✅ [API] All objects verified and available on backup node');
+          return true;
+        }
+        
+        console.log(`⚠️ [API] Backup node attempt ${attempt}/${maxAttempts} - Some objects not available yet`);
+        
+        // If not all exist, wait a moment before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (e: any) {
+        console.log(`❌ [API] Error with backup node: ${e.message}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    console.error(`❌ [API] Both primary and backup nodes failed after ${maxAttempts} attempts each`);
+    throw new Error(`Objects [${objectIds.join(', ')}] not available after ${maxAttempts * 2} total attempts across 2 nodes`);
+  } else {
+    console.error(`❌ [API] Primary node failed and no backup node configured (SUI_RPC_URL2 not set)`);
+    throw new Error(`Objects [${objectIds.join(', ')}] not available after ${maxAttempts} attempts on primary node`);
+  }
 }
 
 export async function POST(req: NextRequest) {

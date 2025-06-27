@@ -124,7 +124,7 @@ export default function ClientSideEncryptor({
       
       setStatus('encrypting');
       addLog('Initializing SEAL client');
-      const keyServerIds = await getAllowlistedKeyServers(NETWORK);
+      const keyServerIds = [process.env.NEXT_PUBLIC_KEYSERVER];
       addLog(`Found ${keyServerIds.length} key servers`);
       
       const sealClient = new SealClient({
