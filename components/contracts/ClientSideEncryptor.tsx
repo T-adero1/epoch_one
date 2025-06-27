@@ -331,6 +331,7 @@ export default function ClientSideEncryptor({
       });
       
       addLog('Document encrypted successfully');
+      addLog(`Backup key available: ${!!backupKey}`);
       addLog(`Encrypted data size: ${encryptedBytes.length} bytes`);
       
       setProgress(70);
