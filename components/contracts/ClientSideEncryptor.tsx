@@ -124,19 +124,17 @@ export default function ClientSideEncryptor({
       
       setStatus('encrypting');
       addLog('Initializing SEAL client');
-      const keyServerIds = [process.env.NEXT_PUBLIC_KEYSERVER];
-      addLog(`Found ${keyServerIds.length} key servers`);
+      const keyServers = [process.env.NEXT_PUBLIC_KEYSERVER || ''];
+      addLog(`Using key servers: ${keyServers.join(', ')}`);
       
       const sealClient = new SealClient({
         suiClient: suiClient as any,
-        serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
+        serverConfigs: keyServers.map((id) => ({
           objectId: id,
           weight: 1,
         })),
         verifyKeyServers: true
       });
-      
-      addLog(`Generating document ID from allowlist ID: ${allowlistId}`);
       const { documentIdHex, documentSalt } = createDocumentIdFromAllowlist(allowlistId);
       
       let enhancedDocumentContent;
