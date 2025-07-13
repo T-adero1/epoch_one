@@ -41,6 +41,9 @@ import ContractDetails from '@/components/contracts/ContractDetails';
 import ContractEditor from '@/components/contracts/ContractEditor';
 import UserProfile from '@/components/UserProfile';
 
+// Add this import at the top
+import PDFEncryptor from '@/components/contracts/PDFEncryptor';
+
 // Skeleton Loading Component
 const DashboardSkeleton = () => {
   return (
@@ -66,9 +69,16 @@ const DashboardSkeleton = () => {
       {/* Main Content Card */}
       <Card className="border-gray-100">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <div className="h-6 bg-gray-200 rounded w-32 mb-2"></div>
-            <div className="h-4 bg-gray-100 rounded w-48"></div>
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <FileEdit className="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <CardTitle className="text-gray-900">Contracts in Progress</CardTitle>
+              <CardDescription className="text-gray-600">
+                Manage and track your active contracts
+              </CardDescription>
+            </div>
           </div>
           <div className="h-10 bg-gray-200 rounded w-32"></div>
         </CardHeader>
@@ -208,6 +218,10 @@ interface ContractWithRelations {
       email: string;
     };
   }[];
+  s3FileName?: string;
+  s3FileSize?: number;
+  s3ContentType?: string;
+  s3FileKey?: string;
 }
 
 // Add this component near the top of your file (after imports):
@@ -823,7 +837,7 @@ export default function DashboardPage() {
     }
   };
 
-  // Enhanced handleCreateContract with validation
+  // Enhanced handleCreateContract with background upload
   const handleCreateContract = async () => {
     // Prevent spam clicking
     if (isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim() || !user?.email) return;
@@ -847,32 +861,11 @@ export default function DashboardPage() {
         .filter((s, index) => s.trim() !== '' && !newContractSignerErrors[index])
         .map(s => s.trim().toLowerCase());
       
-      // Create a temporary contract object for optimistic UI
-      const tempContract: ContractWithRelations = {
-        id: 'temp-' + Date.now(), // Temporary ID
-        title: newContract.title,
-        description: newContract.description,
-        content: newContract.content || '',
-        status: 'DRAFT',
-        ownerId: user.email,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        expiresAt: null,
-        metadata: {
-          signers: validSigners,
-        },
-        owner: {
-          id: user.id || user.email,
-          name: user.displayName || null,
-          email: user.email,
-        },
-        signatures: [],
-      };
-
       // Store if PDF was selected before resetting form
       const hasPdfFile = !!selectedPdfFile;
+      const pdfFileData = selectedPdfFile; // Store reference to original file
 
-      // Reset the form
+      // Reset the form IMMEDIATELY
       const resetForm = () => {
         setNewContract({ title: '', description: '', content: '', signers: [''] });
         setNewContractSignerErrors(['']);
@@ -880,23 +873,11 @@ export default function DashboardPage() {
         setSelectedPdfFile(null);
       };
 
-      // Immediately close the creation modal
+      // Immediately close the creation modal and reset form
       setIsCreatingContract(false);
       resetForm();
-      setSelectedContract(tempContract);
       
-      // Choose the appropriate view based on whether PDF was uploaded
-      if (hasPdfFile) {
-        // For PDF contracts, go directly to viewer
-        setIsViewingContract(true);
-        setSelectedContractTab("content"); // Show the PDF content tab
-      } else {
-        // For text contracts, go to AI editor
-      setIsNewlyCreatedContract(true);
-      setIsEditingContract(true);
-      }
-      
-      // Create the actual contract in the background
+      // Create the contract in database
       const actualContract = await createContract({
         title: newContract.title,
         description: newContract.description,
@@ -904,34 +885,63 @@ export default function DashboardPage() {
         ownerId: user.email,
         metadata: {
           signers: validSigners,
+          // NO PDF metadata here - we'll add it after encryption
         },
       });
 
-      // If PDF file was selected, upload it
+      // Create contract object for immediate display with local PDF data
+      const displayContract: ContractWithRelations = {
+        ...actualContract,
+        // Add temporary local PDF metadata for immediate display
+        ...(hasPdfFile && {
+          s3FileName: pdfFileData?.name,
+          s3FileSize: pdfFileData?.size,
+          s3ContentType: pdfFileData?.type,
+          s3FileKey: 'local-file', // Indicator that this is local data
+        }),
+      } as ContractWithRelations;
+
+      // IMMEDIATELY store the original unencrypted file for instant viewing
+      if (hasPdfFile && pdfFileData) {
+        setUploadedFileData({
+          blob: pdfFileData, // Original unencrypted file
+          fileName: pdfFileData.name
+        });
+      }
+
+      // Add to contracts list and show immediately
+      setContracts([displayContract, ...contracts]);
+      setSelectedContract(displayContract);
+      
       if (hasPdfFile) {
-        try {
-          const uploadResult = await handleUploadPdf(actualContract.id);
-          // Update with contract that includes PDF info
-          setContracts([uploadResult.contract as unknown as ContractWithRelations, ...contracts]);
-          setSelectedContract(uploadResult.contract as unknown as ContractWithRelations);
-        } catch (uploadError) {
-          // Contract was created but PDF upload failed
-          console.error('PDF upload failed:', uploadError);
-      setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
-      setSelectedContract(actualContract as unknown as ContractWithRelations);
-        }
+        setIsViewingContract(true);
+        setSelectedContractTab("content");
+        
+        // Show immediate success message
+        toast({
+          title: "Contract Created",
+          description: `Contract with PDF is ready to view. Encryption happening in background...`,
+          variant: "success",
+        });
       } else {
-        // No PDF to upload
-        setContracts([actualContract as unknown as ContractWithRelations, ...contracts]);
-        setSelectedContract(actualContract as unknown as ContractWithRelations);
+        setIsNewlyCreatedContract(true);
+        setIsEditingContract(true);
+        
+        toast({
+          title: "Contract Created", 
+          description: "Opening AI editor...",
+          variant: "success",
+        });
+      }
+
+      // BACKGROUND ENCRYPTION: Start encryption asynchronously without blocking UI
+      if (hasPdfFile && pdfFileData) {
+        // Don't await this - let it run in background
+        handleBackgroundPdfUpload(actualContract.id, pdfFileData).catch(error => {
+          console.error('[BACKGROUND] Encryption failed but user experience not affected:', error);
+        });
       }
       
-      toast({
-        title: "Contract Created",
-        description: `Contract created with ${validSigners.length} signer(s).${hasPdfFile ? ' Opening PDF viewer...' : ' Opening AI editor...'}`,
-        variant: "success",
-      });
-    
     } catch (error) {
       console.error('Error creating contract:', error);
       
@@ -948,6 +958,225 @@ export default function DashboardPage() {
       });
     } finally {
       setIsCreatingInProgress(false);
+    }
+  };
+
+  // Make sure this function doesn't interfere with UI (around line 957)
+  const handleBackgroundPdfUpload = async (contractId: string, pdfFile: File) => {
+    try {
+      console.log(`[BACKGROUND] Starting PDF encryption and upload for contract ${contractId}`);
+      
+      // Get signer addresses from the contract
+      const signerAddresses = newContract.signers
+        .filter(s => s.trim() !== '')
+        .map(s => s.trim().toLowerCase());
+      
+      // Define the encryption result type explicitly
+      type EncryptionResult = {
+        encryptedBytes: Uint8Array;
+        allowlistId: string;
+        documentId: string;
+        capId: string;
+      };
+      
+      // Create a ref to hold the encryption result
+      let encryptionResult: EncryptionResult | null = null;
+      
+      // Encrypt the PDF function
+      const encryptPDF = async (): Promise<void> => {
+        try {
+          // Create allowlist with user's wallet address included
+          // Use the existing user data from the component's useZkLogin hook
+          const userAddress = user?.address; // Get from component level
+          const allSignerAddresses = [
+            ...signerAddresses,
+            ...(userAddress ? [userAddress] : [])
+          ].filter((addr, index, arr) => arr.indexOf(addr) === index);
+
+          console.log('[BACKGROUND] Creating allowlist with addresses:', allSignerAddresses);
+
+          const allowlistResponse = await fetch('/api/seal/create-allowlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contractId,
+              signerAddresses: allSignerAddresses
+            })
+          });
+
+          if (!allowlistResponse.ok) {
+            throw new Error(`Failed to create allowlist: ${allowlistResponse.status}`);
+          }
+
+          const { allowlistId, capId } = await allowlistResponse.json();
+
+          // Initialize SEAL client
+          const { SealClient, getAllowlistedKeyServers } = await import('@mysten/seal');
+          const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
+          const { fromHEX, toHEX } = await import('@mysten/sui/utils');
+
+          const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
+          const keyServers = getAllowlistedKeyServers('testnet');
+          
+          const sealClient = new SealClient({
+            suiClient: suiClient as any,
+            serverConfigs: keyServers.map((id) => ({
+              objectId: id,
+              weight: 1,
+            })),
+            verifyKeyServers: true
+          });
+
+          // Generate document ID
+          const createDocumentIdFromAllowlist = (allowlistId: string) => {
+            const cleanAllowlistId = allowlistId.startsWith('0x') ? allowlistId.slice(2) : allowlistId;
+            const allowlistBytes = fromHEX(cleanAllowlistId);
+            const saltBytes = new Uint8Array(crypto.getRandomValues(new Uint8Array(5)));
+            const fullIdBytes = new Uint8Array([...allowlistBytes, ...saltBytes]);
+            const documentIdHex = toHEX(fullIdBytes);
+            return { documentIdHex };
+          };
+
+          const { documentIdHex } = createDocumentIdFromAllowlist(allowlistId);
+
+          // Read PDF file as bytes
+          const fileBuffer = await pdfFile.arrayBuffer();
+          const fileBytes = new Uint8Array(fileBuffer);
+
+          // Encrypt the PDF
+          const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
+            '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+
+          console.log('[BACKGROUND] Encrypting PDF with SEAL...');
+          const { encryptedObject: encryptedBytes } = await sealClient.encrypt({
+            threshold: 1,
+            packageId: SEAL_PACKAGE_ID,
+            id: documentIdHex,
+            data: fileBytes
+          });
+
+          // Assign the result with explicit typing
+          encryptionResult = {
+            encryptedBytes,
+            allowlistId,
+            documentId: documentIdHex,
+            capId
+          };
+
+          console.log('[BACKGROUND] PDF encrypted successfully');
+
+        } catch (error) {
+          console.error('[BACKGROUND] Encryption failed:', error);
+          throw error;
+        }
+      };
+
+      // Execute the encryption
+      await encryptPDF();
+
+      // Type assertion to help TypeScript understand the type after null check
+      if (!encryptionResult) {
+        throw new Error('Encryption failed - no result returned');
+      }
+
+      // Now TypeScript knows encryptionResult is not null
+      const typedEncryptionResult = encryptionResult as EncryptionResult;
+
+      // Convert encrypted bytes to base64 safely (no stack overflow)
+      const base64EncryptedBytes = Buffer.from(typedEncryptionResult.encryptedBytes).toString('base64');
+      
+      console.log('[BACKGROUND] Converted to base64, length:', base64EncryptedBytes.length);
+      
+      // Upload encrypted PDF using existing endpoint
+      const formData = new FormData();
+      formData.append('file', pdfFile); // Original file for metadata
+      formData.append('contractId', contractId);
+      formData.append('encryptedBytes', base64EncryptedBytes);
+      formData.append('allowlistId', typedEncryptionResult.allowlistId);
+      formData.append('documentId', typedEncryptionResult.documentId);
+      formData.append('capId', typedEncryptionResult.capId);
+      formData.append('isEncrypted', 'true');
+
+      console.log('[BACKGROUND] Uploading encrypted PDF...');
+      const response = await fetch('/api/contracts/upload-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
+      
+      const result = await response.json();
+      
+      // **NEW: Cache the encrypted PDF in IndexDB for future use**
+      try {
+        const { pdfCache } = await import('@/app/utils/pdfCache');
+        await pdfCache.storeEncryptedPDF(
+          contractId,
+          typedEncryptionResult.encryptedBytes,
+          pdfFile.name,
+          {
+            allowlistId: typedEncryptionResult.allowlistId,
+            documentId: typedEncryptionResult.documentId,
+            capId: typedEncryptionResult.capId,
+            isEncrypted: true
+          }
+        );
+        console.log('[BACKGROUND] Cached encrypted PDF in IndexDB');
+      } catch (cacheError) {
+        console.warn('[BACKGROUND] Failed to cache encrypted PDF:', cacheError);
+        // Don't fail the entire operation if caching fails
+      }
+      
+      // Update the contract in local state with encryption metadata
+      setContracts(prevContracts => 
+        prevContracts.map(contract => 
+          contract.id === contractId 
+            ? { 
+                ...contract, 
+                ...result.contract,
+                metadata: {
+                  ...contract.metadata,
+                  ...result.contract.metadata
+                }
+              }
+            : contract
+        )
+      );
+      
+      // Silently update selected contract if it's the one we just uploaded
+      setSelectedContract(prevSelected => 
+        prevSelected?.id === contractId 
+          ? { 
+              ...prevSelected, 
+              ...result.contract,
+              metadata: {
+                ...prevSelected.metadata,
+                ...result.contract.metadata
+              }
+            }
+          : prevSelected
+      );
+      
+      console.log(`[BACKGROUND] Encrypted PDF upload completed silently for contract ${contractId}`);
+      
+      toast({
+        title: "PDF Encrypted & Cached",
+        description: `${pdfFile.name} has been encrypted and cached for fast access.`,
+        variant: "success",
+      });
+      
+    } catch (error) {
+      console.error(`[BACKGROUND] PDF encryption failed (background process):`, error);
+      
+      // Show subtle error notification but don't break user experience
+      toast({
+        title: "Background Encryption Failed",
+        description: `PDF is viewable but encryption failed. Please try re-uploading.`,
+        variant: "destructive",
+      });
     }
   };
   

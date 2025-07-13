@@ -58,6 +58,13 @@ model Contract {
   s3ContentType   String?        // MIME type
   s3UploadedAt    DateTime?      // Upload timestamp
   
+  // New encryption fields
+  sealAllowlistId   String?
+  sealDocumentId    String?
+  sealCapId         String?
+  isEncrypted       Boolean @default(false)
+  originalFileName  String?
+  
   owner           User           @relation("ContractOwner", fields: [ownerId], references: [id])
   signatures      Signature[]
 }
