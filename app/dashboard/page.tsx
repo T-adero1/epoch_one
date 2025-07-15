@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FileText, Plus, Search, ChevronDown, ArrowLeft, AlertCircle, Info, Check, Loader2, Trash2, User, Shield, ExternalLink, Download, UserCheck, Database, Copy, FileDown, Activity, Clock, FileEdit, Upload, X } from 'lucide-react';
 import { getContracts, createContract, deleteContract } from '@/app/utils/contracts';
+import { hashGoogleId } from '@/app/utils/privacy'; // Add this import
 import { format } from 'date-fns';
 import {
   DropdownMenu,
@@ -73,7 +74,7 @@ const DashboardSkeleton = () => {
             <div className="p-2 bg-blue-100 rounded-lg">
               <FileEdit className="h-5 w-5 text-blue-600" />
             </div>
-            <div>
+          <div>
               <CardTitle className="text-gray-900">Contracts in Progress</CardTitle>
               <CardDescription className="text-gray-600">
                 Manage and track your active contracts
@@ -515,11 +516,16 @@ export default function DashboardPage() {
   };
   
   const loadContracts = useCallback(async () => {
-    if (!user?.email) return;
+    if (!user?.email || !user?.googleId) return;
     try {
       console.log('[DASHBOARD] Starting contract data fetch for user:', user.email);
       setIsLoadingContracts(true);
-      const data = await getContracts(user.email);
+      
+      // Hash the Google ID before sending to API
+      const hashedGoogleId = await hashGoogleId(user.googleId);
+      console.log('[DASHBOARD] Hashed Google ID for contract fetch');
+      
+      const data = await getContracts(hashedGoogleId);
       console.log('[DASHBOARD] Contract data received:', data);
       
       // Log details of COMPLETED contracts to check metadata
@@ -545,7 +551,7 @@ export default function DashboardPage() {
       setIsLoadingContracts(false);
       console.log('[DASHBOARD] Contract loading complete');
     }
-  }, [user?.email]);
+  }, [user?.email, user?.googleId]); // Add googleId to dependencies
 
   // Load actual contracts
   useEffect(() => {
@@ -840,7 +846,7 @@ export default function DashboardPage() {
   // Enhanced handleCreateContract with background upload
   const handleCreateContract = async () => {
     // Prevent spam clicking
-    if (isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim() || !user?.email) return;
+    if (isCreatingInProgress || !newContract.title.trim() || !newContract.description.trim() || !user?.email || !user?.googleId) return;
     
     // Validate signers before creating
     const hasValidationErrors = newContractSignerErrors.some(error => error !== '');
@@ -860,7 +866,7 @@ export default function DashboardPage() {
       const validSigners = newContract.signers
         .filter((s, index) => s.trim() !== '' && !newContractSignerErrors[index])
         .map(s => s.trim().toLowerCase());
-      
+
       // Store if PDF was selected before resetting form
       const hasPdfFile = !!selectedPdfFile;
       const pdfFileData = selectedPdfFile; // Store reference to original file
@@ -877,14 +883,29 @@ export default function DashboardPage() {
       setIsCreatingContract(false);
       resetForm();
       
+      // Hash the owner's Google ID
+      const ownerGoogleIdHash = await hashGoogleId(user.googleId);
+      
+      // Hash signer Google IDs (for now, we'll use email as placeholder since we don't have signer Google IDs)
+      // In a real implementation, you'd need to get the Google IDs of the signers somehow
+      // For now, we'll hash the emails as a temporary solution
+      const signerGoogleIdHashes = await Promise.all(
+        validSigners.map(async (email) => {
+          // This is a temporary solution - in reality you'd need the actual Google IDs
+          // For now, we'll create a deterministic hash based on email
+          return await hashGoogleId(`email_placeholder_${email}`);
+        })
+      );
+      
       // Create the contract in database
       const actualContract = await createContract({
         title: newContract.title,
         description: newContract.description,
         content: newContract.content || '',
-        ownerId: user.email,
+        ownerGoogleIdHash, // Use hashed Google ID
+        signerGoogleIdHashes, // Use hashed signer identifiers
         metadata: {
-          signers: validSigners,
+          signerEmails: validSigners, // Keep emails in metadata for display/invite purposes
           // NO PDF metadata here - we'll add it after encryption
         },
       });
@@ -926,9 +947,9 @@ export default function DashboardPage() {
       } else {
         setIsNewlyCreatedContract(true);
         setIsEditingContract(true);
-        
+      
         toast({
-          title: "Contract Created", 
+          title: "Contract Created",
           description: "Opening AI editor...",
           variant: "success",
         });
@@ -941,7 +962,7 @@ export default function DashboardPage() {
           console.error('[BACKGROUND] Encryption failed but user experience not affected:', error);
         });
       }
-      
+    
     } catch (error) {
       console.error('Error creating contract:', error);
       
@@ -966,10 +987,24 @@ export default function DashboardPage() {
     try {
       console.log(`[BACKGROUND] Starting PDF encryption and upload for contract ${contractId}`);
       
-      // Get signer addresses from the contract
-      const signerAddresses = newContract.signers
+      // Get signer addresses from the contract and hash any emails
+      const rawSignerAddresses = newContract.signers
         .filter(s => s.trim() !== '')
         .map(s => s.trim().toLowerCase());
+      
+      // Hash emails before sending to API for privacy
+      const signerAddresses = await Promise.all(
+        rawSignerAddresses.map(async (address) => {
+          // Check if it's an email (contains @) and hash it
+          if (address.includes('@')) {
+            const hashedEmail = await hashGoogleId(`email_${address}`);
+            console.log(`[BACKGROUND] Hashed email for privacy: ${address.substring(0, 5)}...`);
+            return hashedEmail;
+          }
+          // If it's already a wallet address, return as-is
+          return address;
+        })
+      );
       
       // Define the encryption result type explicitly
       type EncryptionResult = {
@@ -989,11 +1024,11 @@ export default function DashboardPage() {
           // Use the existing user data from the component's useZkLogin hook
           const userAddress = user?.address; // Get from component level
           const allSignerAddresses = [
-            ...signerAddresses,
+            ...signerAddresses, // Now contains hashed emails
             ...(userAddress ? [userAddress] : [])
           ].filter((addr, index, arr) => arr.indexOf(addr) === index);
 
-          console.log('[BACKGROUND] Creating allowlist with addresses:', allSignerAddresses);
+          console.log('[BACKGROUND] Creating allowlist with hashed addresses:', allSignerAddresses.map(addr => addr.substring(0, 8) + '...'));
 
           const allowlistResponse = await fetch('/api/seal/create-allowlist', {
             method: 'POST',

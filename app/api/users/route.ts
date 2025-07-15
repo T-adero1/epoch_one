@@ -28,11 +28,9 @@ export async function GET(request: Request) {
     const user = await prisma.user.findUnique({
       where: { email },
       select: {
-        id: true,
+        walletAddress: true,
         email: true,
         name: true,
-        walletAddress: true,
-        googleId: true,
         createdAt: true
       }
     });
@@ -46,9 +44,8 @@ export async function GET(request: Request) {
     }
     
     log.info('Successfully fetched user', { 
-      userId: user.id || '',
-      hasWalletAddress: Boolean(user.walletAddress),
-      hasGoogleId: Boolean(user.googleId)
+      walletAddress: user.walletAddress || '',
+      email: user.email || ''
     });
     
     return NextResponse.json(user);
@@ -66,29 +63,31 @@ export async function GET(request: Request) {
 
 // POST /api/users - Create or update a user
 export async function POST(request: Request) {
+  let body: any = {};
+  
   try {
-    const body = await request.json();
-    const { email, name, walletAddress, googleId } = body;
+    body = await request.json();
+    const { email, name, walletAddress } = body;
     
     log.info('Creating/updating user', { 
       email: email || '',
       name: name || '',
       hasName: Boolean(name),
-      hasWalletAddress: Boolean(walletAddress),
-      hasGoogleId: Boolean(googleId)
+      hasWalletAddress: Boolean(walletAddress)
     });
     
-    if (!email) {
-      log.warn('Missing required field', { 
-        missingField: 'email' 
+    if (!email || !walletAddress) {
+      log.warn('Missing required fields', { 
+        hasEmail: Boolean(email),
+        hasWalletAddress: Boolean(walletAddress)
       });
       return NextResponse.json(
-        { error: 'Email is required' },
+        { error: 'Email and wallet address are required' },
         { status: 400 }
       );
     }
     
-    // Check if user already exists
+    // Check if user already exists by email
     const existingUser = await prisma.user.findUnique({
       where: { email }
     });
@@ -96,11 +95,11 @@ export async function POST(request: Request) {
     if (existingUser) {
       log.info('Updating existing user', { 
         email: email || '', 
-        userId: existingUser.id || '',
+        currentWalletAddress: existingUser.walletAddress || '',
+        newWalletAddress: walletAddress || '',
         updates: {
           name: name || undefined,
-          walletAddress: walletAddress || undefined,
-          googleId: googleId || undefined
+          walletAddress: walletAddress || undefined
         }
       });
       
@@ -109,26 +108,21 @@ export async function POST(request: Request) {
         where: { email },
         data: {
           ...(name && { name }),
-          ...(walletAddress && { walletAddress }),
-          ...(googleId && { googleId })
+          ...(walletAddress && { walletAddress })
         },
         select: {
-          id: true,
+          walletAddress: true,
           email: true,
           name: true,
-          walletAddress: true,
-          googleId: true,
-          createdAt: true,
-          updatedAt: true
+          createdAt: true
         }
       });
       
       log.info('Successfully updated user', { 
-        userId: updatedUser.id || '',
+        walletAddress: updatedUser.walletAddress || '',
         email: updatedUser.email || '',
         updatedName: Boolean(name),
-        updatedWalletAddress: Boolean(walletAddress),
-        updatedGoogleId: Boolean(googleId)
+        updatedWalletAddress: Boolean(walletAddress)
       });
       
       return NextResponse.json(updatedUser);
@@ -137,31 +131,26 @@ export async function POST(request: Request) {
     // Create new user
     log.info('Creating new user', {
       email,
-      hasName: Boolean(name),
-      hasWalletAddress: Boolean(walletAddress),
-      hasGoogleId: Boolean(googleId)
+      walletAddress,
+      hasName: Boolean(name)
     });
     
     const newUser = await prisma.user.create({
       data: {
         email,
         name,
-        walletAddress: walletAddress || `placeholder-${Date.now()}`,
-        googleId
+        walletAddress
       },
       select: {
-        id: true,
+        walletAddress: true,
         email: true,
         name: true,
-        walletAddress: true,
-        googleId: true,
-        createdAt: true,
-        updatedAt: true
+        createdAt: true
       }
     });
     
     log.info('Successfully created new user', { 
-      userId: newUser.id || '',
+      walletAddress: newUser.walletAddress || '',
       email: newUser.email || ''
     });
     
@@ -176,4 +165,4 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-} 
+}

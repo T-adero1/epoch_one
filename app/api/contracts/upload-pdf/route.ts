@@ -64,12 +64,7 @@ export async function POST(request: NextRequest) {
           originalFileName: file?.name || `${contractId}.pdf`,
         },
         include: {
-          owner: true,
-          signatures: {
-            include: {
-              user: true,
-            },
-          },
+          signatures: true // Only include signatures, no user data
         },
       });
 
@@ -126,12 +121,7 @@ export async function POST(request: NextRequest) {
           isEncrypted: false,
         },
         include: {
-          owner: true,
-          signatures: {
-            include: {
-              user: true,
-            },
-          },
+          signatures: true // Only include signatures, no user data
         },
       });
 

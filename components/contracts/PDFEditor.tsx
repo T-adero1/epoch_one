@@ -30,7 +30,6 @@ interface PDFEditorProps {
     s3FileName?: string | null;
     s3FileSize?: number | null;
     s3ContentType?: string | null;
-    // **UPDATED: Use the correct nested structure**
     isEncrypted?: boolean;
     sealAllowlistId?: string | null;
     sealDocumentId?: string | null;
@@ -52,6 +51,98 @@ interface PDFEditorProps {
   showAIButton?: boolean;
 }
 
+// **IMPROVED: More reliable encryption detection**
+const isContractEncrypted = (contract: any): boolean => {
+  // Priority 1: Direct encryption flags
+  if (contract.isEncrypted === true) return true;
+  if (contract.sealAllowlistId) return true;
+  if (contract.metadata?.walrus?.encryption?.allowlistId) return true;
+  
+  // Priority 2: Filename indicators (most reliable fallback)
+  const fileName = contract.s3FileName || contract.s3FileKey || '';
+  if (fileName.includes('.encrypted.')) return true;
+  
+  // Priority 3: Check if filename ends with typical encrypted extensions
+  if (fileName.endsWith('.encrypted.pdf')) return true;
+  
+  return false;
+};
+
+// Add this helper function near the top of the file
+const createOrGetSessionKey = async (allowlistId: string, userAddress: string) => {
+  const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
+    '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+  const TTL_MIN = 30;
+
+  try {
+    // **UPDATED: Check cache first using allowlistId**
+    const { pdfCache } = await import('@/app/utils/pdfCache');
+    const cachedSessionKeyData = await pdfCache.getSessionKey(allowlistId, userAddress);
+    
+    if (cachedSessionKeyData) {
+      console.log('[PDFEditor] Using cached session key for allowlist:', allowlistId);
+      // Import session key from cache
+      const { SessionKey } = await import('@mysten/seal');
+      const sessionKey = SessionKey.import(cachedSessionKeyData);
+      return sessionKey;
+    }
+
+    console.log('[PDFEditor] Creating new session key for allowlist:', allowlistId);
+    // Create new session key (existing logic)
+    const sessionData = localStorage.getItem("epochone_session");
+    if (!sessionData) {
+      throw new Error("No session data found");
+    }
+    
+    const sessionObj = JSON.parse(sessionData);
+    const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
+    
+    if (!zkLoginState?.ephemeralKeyPair?.privateKey) {
+      throw new Error("No ephemeral key found");
+    }
+
+    const { bech32 } = await import('bech32');
+    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+    const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
+    const { SessionKey } = await import('@mysten/seal');
+
+    function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
+      if (!suiPrivateKey.startsWith('suiprivkey1')) {
+        throw new Error('Invalid Sui private key format');
+      }
+      const decoded = bech32.decode(suiPrivateKey);
+      const privateKeyBytes = Buffer.from(bech32.fromWords(decoded.words));
+      return new Uint8Array(privateKeyBytes.slice(1)); // Remove flag byte
+    }
+
+    const privateKeyBytes = decodeSuiPrivateKey(zkLoginState.ephemeralKeyPair.privateKey);
+    const ephemeralKeypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
+    const ephemeralAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
+    const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+    const sessionKey = new SessionKey({
+      address: ephemeralAddress,
+      packageId: SEAL_PACKAGE_ID,
+      ttlMin: TTL_MIN,
+      signer: ephemeralKeypair,
+      suiClient: suiClient as any
+    });
+
+    const personalMessage = sessionKey.getPersonalMessage();
+    const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
+    await sessionKey.setPersonalMessageSignature(signature.signature);
+
+    // **UPDATED: Cache the session key using allowlistId**
+    const exportedSessionKey = sessionKey.export();
+    await pdfCache.storeSessionKey(allowlistId, SEAL_PACKAGE_ID, exportedSessionKey, TTL_MIN, userAddress);
+
+    return sessionKey;
+  } catch (error) {
+    console.error('[PDFEditor] Session key creation failed:', error);
+    throw error;
+  }
+};
+
 export default function PDFEditor({ 
   contract, 
   onFileUpdate, 
@@ -69,6 +160,12 @@ export default function PDFEditor({
   const [decryptedPdfBlob, setDecryptedPdfBlob] = useState<Blob | null>(null);
   const [decryptedPdfUrl, setDecryptedPdfUrl] = useState<string | null>(null);
   
+  // **NEW: Track loading state to prevent double loading**
+  const [hasInitialized, setHasInitialized] = useState(false);
+  // **NEW: Track cache check state**
+  const [isCheckingCache, setIsCheckingCache] = useState(false);
+  const [cacheCheckComplete, setCacheCheckComplete] = useState(false);
+  
   // AI functionality state
   const [showAIPanel, setShowAIPanel] = useState(startWithAI);
   const [aiQuery, setAiQuery] = useState('');
@@ -82,9 +179,11 @@ export default function PDFEditor({
     "Add legal disclaimers and terms"
   ]);
 
-  // **NEW: Add extensive logging on component mount**
+  // **UPDATED: Single initialization effect to prevent double loading**
   useEffect(() => {
-    console.log('[PDFEditor] Component mounted with contract:', {
+    if (hasInitialized) return;
+    
+    console.log('[PDFEditor] Initializing component with contract:', {
       contractId: contract.id,
       title: contract.title,
       s3FileKey: contract.s3FileKey,
@@ -96,35 +195,46 @@ export default function PDFEditor({
       metadata: contract.metadata,
       walrusEncryption: contract.metadata?.walrus?.encryption
     });
-  }, [contract]);
 
-  // **UPDATED: Enhanced encryption detection with filename fallback**
-  const isContractEncrypted = (): boolean => {
-    console.log('[PDFEditor] Checking if contract is encrypted...');
+    const isEncrypted = isContractEncrypted(contract);
+    console.log('[PDFEditor] Encryption detection result:', isEncrypted);
     
-    const checks = {
-      isEncrypted: !!contract.isEncrypted,
-      sealAllowlistId: !!contract.sealAllowlistId,
-      metadataAllowlistId: !!contract.metadata?.walrus?.encryption?.allowlistId,
-      filenameIndicatesEncrypted: !!(contract.s3FileName?.includes('.encrypted.') || contract.s3FileKey?.includes('.encrypted.'))
-    };
+    if (isEncrypted) {
+      console.log('[PDFEditor] Contract is encrypted - checking cache first');
+      checkCacheForDecryptedPDF();
+    } else if (contract.s3FileKey) {
+      console.log('[PDFEditor] Contract is not encrypted - loading regular PDF');
+      loadPdfUrl();
+    } else {
+      console.log('[PDFEditor] No PDF file available');
+    }
     
-    const result = !!(
-      contract.isEncrypted ||
-      contract.sealAllowlistId ||
-      contract.metadata?.walrus?.encryption?.allowlistId ||
-      // **NEW: Fallback detection by filename**
-      contract.s3FileName?.includes('.encrypted.') ||
-      contract.s3FileKey?.includes('.encrypted.')
-    );
-    
-    console.log('[PDFEditor] Encryption check results:', {
-      checks,
-      finalResult: result
-    });
-    
-    return result;
-  };
+    setHasInitialized(true);
+  }, [contract.id, hasInitialized]);
+
+  // **NEW: Reset when contract changes**
+  useEffect(() => {
+    if (hasInitialized) {
+      console.log('[PDFEditor] Contract changed, resetting state');
+      setHasInitialized(false);
+      setCacheCheckComplete(false);
+      setIsCheckingCache(false);
+      
+      // Clean up URLs
+      if (decryptedPdfUrl) {
+        URL.revokeObjectURL(decryptedPdfUrl);
+      }
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+      
+      // Reset state
+      setDecryptedPdfBlob(null);
+      setDecryptedPdfUrl(null);
+      setPdfUrl(null);
+      setIsLoadingPdf(false);
+    }
+  }, [contract.id]);
 
   // **UPDATED: Enhanced decryption success handler with cache integration**
   const handleDecryptionSuccess = async (decryptedBlob: Blob) => {
@@ -166,40 +276,32 @@ export default function PDFEditor({
     });
   };
 
-  // **NEW: Check IndexDB cache on mount**
-  useEffect(() => {
-    const checkCacheForDecryptedPDF = async () => {
-      if (!isContractEncrypted() || decryptedPdfBlob) return;
+  // **UPDATED: Enhanced cache check with proper state management**
+  const checkCacheForDecryptedPDF = async () => {
+    if (!isContractEncrypted(contract) || decryptedPdfBlob) return;
+    
+    setIsCheckingCache(true);
+    console.log('[PDFEditor] Checking IndexDB cache for decrypted PDF...');
+    
+    try {
+      const { pdfCache } = await import('@/app/utils/pdfCache');
+      const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
       
-      console.log('[PDFEditor] Checking IndexDB cache for decrypted PDF...');
-      try {
-        const { pdfCache } = await import('@/app/utils/pdfCache');
-        const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
-        
-        if (cachedPDF) {
-          console.log('[PDFEditor] Found decrypted PDF in cache!');
-          const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
-          handleDecryptionSuccess(blob);
-        } else {
-          console.log('[PDFEditor] No decrypted PDF found in cache');
-        }
-      } catch (error) {
-        console.warn('[PDFEditor] Cache check failed:', error);
+      if (cachedPDF) {
+        console.log('[PDFEditor] Found decrypted PDF in cache!');
+        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
+        await handleDecryptionSuccess(blob);
+      } else {
+        console.log('[PDFEditor] No decrypted PDF found in cache');
       }
-    };
-
-    checkCacheForDecryptedPDF();
-  }, [contract.id]);
-
-  // **NEW: Reset decryption state when contract changes**
-  useEffect(() => {
-    // Clean up previous decrypted data when contract changes
-    if (decryptedPdfUrl) {
-      URL.revokeObjectURL(decryptedPdfUrl);
+    } catch (error) {
+      console.warn('[PDFEditor] Cache check failed:', error);
+    } finally {
+      setIsCheckingCache(false);
+      setCacheCheckComplete(true);
+      console.log('[PDFEditor] Cache check complete');
     }
-    setDecryptedPdfBlob(null);
-    setDecryptedPdfUrl(null);
-  }, [contract.id]);
+  };
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -215,29 +317,23 @@ export default function PDFEditor({
     };
   }, [decryptedPdfUrl, pdfUrl]);
 
-  // Load PDF URL when component mounts (for non-encrypted PDFs)
-  useEffect(() => {
-    if (contract.s3FileKey && !isContractEncrypted()) {
-      console.log('[PDFEditor] Loading PDF URL for non-encrypted contract');
-      loadPdfUrl();
-    } else {
-      console.log('[PDFEditor] Skipping PDF URL load:', {
-        hasS3FileKey: !!contract.s3FileKey,
-        isEncrypted: isContractEncrypted()
-      });
-    }
-  }, [contract.s3FileKey]);
-
+  // **UPDATED: Only load regular PDFs (never encrypted ones)**
   const loadPdfUrl = async () => {
     if (!contract.s3FileKey) return;
     
-    console.log('[PDFEditor] Loading PDF URL for contract:', contract.id);
+    // **CRITICAL: Never load encrypted PDFs through this path**
+    if (isContractEncrypted(contract)) {
+      console.log('[PDFEditor] Refusing to load encrypted PDF through regular path');
+      return;
+    }
+    
+    console.log('[PDFEditor] Loading PDF URL for non-encrypted contract:', contract.id);
     setIsLoadingPdf(true);
     try {
       const response = await fetch(`/api/contracts/download-pdf/${contract.id}`);
       if (response.ok) {
         const data = await response.json();
-        console.log('[PDFEditor] PDF URL loaded successfully:', data.downloadUrl);
+        console.log('[PDFEditor] Regular PDF URL loaded successfully:', data.downloadUrl);
         setPdfUrl(data.downloadUrl);
       } else {
         throw new Error('Failed to load PDF');
@@ -314,8 +410,8 @@ export default function PDFEditor({
       }
       setSelectedFile(null);
       
-      // Reload the PDF URL if not encrypted
-      if (!isContractEncrypted()) {
+      // **UPDATED: Only reload if not encrypted**
+      if (!isContractEncrypted(contract)) {
         console.log('[PDFEditor] Reloading PDF URL after replacement');
         await loadPdfUrl();
       } else {
@@ -411,6 +507,7 @@ export default function PDFEditor({
     // Clear state
     setDecryptedPdfBlob(null);
     setDecryptedPdfUrl(null);
+    setCacheCheckComplete(false);
     
     // Clear cache
     try {
@@ -427,24 +524,27 @@ export default function PDFEditor({
     });
   };
 
-  // **UPDATED: Enhanced PDF viewer with inline PDF display**
+  // **UPDATED: Enhanced PDF viewer with cache check prevention**
   const renderPDFViewer = () => {
     console.log('[PDFEditor] Rendering PDF viewer...');
     
-    const isEncrypted = isContractEncrypted();
+    const isEncrypted = isContractEncrypted(contract);
     
     console.log('[PDFEditor] Render state:', {
       isEncrypted,
       hasDecryptedBlob: !!decryptedPdfBlob,
       hasDecryptedUrl: !!decryptedPdfUrl,
-      hasS3FileKey: !!contract.s3FileKey
+      hasS3FileKey: !!contract.s3FileKey,
+      hasInitialized,
+      isCheckingCache,
+      cacheCheckComplete
     });
     
-    // **ENCRYPTED PDF HANDLING**
+    // **ENCRYPTED PDF HANDLING** - Only path for encrypted contracts
     if (isEncrypted) {
       console.log('[PDFEditor] Rendering encrypted PDF section');
       
-      // **UPDATED: Show inline decrypted PDF viewer WITHOUT header (buttons moved to main header)**
+      // Show inline decrypted PDF viewer
       if (decryptedPdfBlob && decryptedPdfUrl) {
         console.log('[PDFEditor] Rendering inline decrypted PDF viewer');
         return (
@@ -459,16 +559,55 @@ export default function PDFEditor({
         );
       }
       
-      // **NEW: Auto-decryption component**
-      return (
-        <AutoDecryptionView 
-          contract={contract}
-          onDecrypted={handleDecryptionSuccess}
-        />
-      );
+      // **NEW: Show cache checking state**
+      if (isCheckingCache) {
+        console.log('[PDFEditor] Showing cache check loading state');
+        return (
+          <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
+            <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+              <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 rounded-full">
+                <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 animate-spin" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Checking Cache</h3>
+                <p className="text-xs sm:text-sm text-blue-600">Looking for cached decrypted PDF...</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // **UPDATED: Only show AutoDecryptionView if cache check is complete and no cached PDF found**
+      if (cacheCheckComplete && !decryptedPdfBlob) {
+        console.log('[PDFEditor] Cache check complete, no cached PDF found, showing AutoDecryptionView');
+        return (
+          <AutoDecryptionView 
+            contract={contract}
+            onDecrypted={handleDecryptionSuccess}
+          />
+        );
+      }
+      
+      // **NEW: Show waiting state if cache check hasn't completed yet**
+      if (!cacheCheckComplete) {
+        console.log('[PDFEditor] Cache check not complete yet, showing waiting state');
+        return (
+          <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
+            <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+              <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full">
+                <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-gray-600" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Preparing Encrypted PDF</h3>
+                <p className="text-xs sm:text-sm text-gray-600">Initializing decryption...</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
     }
     
-    // **REGULAR PDF HANDLING** (updated to move buttons to main header)
+    // **REGULAR PDF HANDLING** - Only for non-encrypted contracts
     if (contract.s3FileKey && !isEncrypted && pdfUrl) {
       console.log('[PDFEditor] Rendering inline regular PDF viewer');
       return (
@@ -526,15 +665,18 @@ export default function PDFEditor({
   };
 
   console.log('[PDFEditor] Component render, current state:', {
-    isEncrypted: isContractEncrypted(),
+    isEncrypted: isContractEncrypted(contract),
     hasDecryptedBlob: !!decryptedPdfBlob,
     hasDecryptedUrl: !!decryptedPdfUrl,
-    showAIPanel
+    showAIPanel,
+    hasInitialized,
+    isCheckingCache,
+    cacheCheckComplete
   });
 
   return (
     <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
-      {/* **UPDATED: Enhanced Header with PDF Actions** */}
+      {/* Header with PDF Actions (unchanged) */}
       <div className="p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
         <div className="text-sm text-gray-500">
           {showAIPanel ? (
@@ -549,16 +691,15 @@ export default function PDFEditor({
             <div className="flex items-center gap-1 text-sm text-gray-500">
               <FileText className="h-3 w-3 flex-shrink-0 text-red-600" />
               <span className="font-normal">PDF Editor</span>
-              {/* **NEW: Show encryption indicator** */}
-              {isContractEncrypted() && (
+              {/* Show encryption indicator */}
+              {isContractEncrypted(contract) && (
                 <div className="flex items-center gap-1 ml-2">
                   <Shield className="h-3 w-3 text-purple-500" />
                   <span className="text-xs text-purple-600">Encrypted</span>
-                  
                 </div>
               )}
-              {/* **NEW: Show regular PDF info** */}
-              {!isContractEncrypted() && contract.s3FileName && (
+              {/* Show regular PDF info */}
+              {!isContractEncrypted(contract) && contract.s3FileName && (
                 <div className="flex items-center gap-1 ml-2">
                   <span className="text-xs text-gray-600">
                     {contract.s3FileName}
@@ -571,7 +712,7 @@ export default function PDFEditor({
         </div>
         
         <div className="flex items-center gap-2">
-          {/* **NEW: PDF Action Buttons (moved from PDF viewer)** */}
+          {/* PDF Action Buttons for decrypted PDFs */}
           {decryptedPdfBlob && decryptedPdfUrl && (
             <>
               <Button
@@ -592,12 +733,11 @@ export default function PDFEditor({
                 <ExternalLink className="h-3 w-3 mr-1" />
                 Open in Tab
               </Button>
-              
             </>
           )}
           
-          {/* **NEW: Regular PDF Action Buttons** */}
-          {!isContractEncrypted() && pdfUrl && (
+          {/* PDF Action Buttons for regular PDFs */}
+          {!isContractEncrypted(contract) && pdfUrl && (
             <>
               <Button
                 onClick={downloadPdf}
@@ -631,7 +771,7 @@ export default function PDFEditor({
             </>
           )}
           
-          {/* **AI Edit Button** */}
+          {/* AI Edit Button */}
           {showAIButton && !showAIPanel && (
             <div className="relative group">
               <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg blur transition duration-200 opacity-25 group-hover:opacity-50"></div>
@@ -816,7 +956,7 @@ export default function PDFEditor({
   );
 }
 
-// **NEW: Auto-Decryption View Component** (unchanged)
+// AutoDecryptionView component (unchanged)
 const AutoDecryptionView = ({ 
   contract, 
   onDecrypted 
@@ -1059,23 +1199,12 @@ const AutoDecryptionView = ({
         setProgress(70);
         setDecryptionStep('fetching-keys');
 
-        // Create session key for decryption
-        const sessionKey = new SessionKey({
-          address: ephemeralAddress,
-          packageId: SEAL_PACKAGE_ID,
-          ttlMin: TTL_MIN,
-          signer: ephemeralKeypair,
-          suiClient: suiClient as any
-        });
-        
-        // Sign personal message
-        const personalMessage = sessionKey.getPersonalMessage();
-        const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
-        await sessionKey.setPersonalMessageSignature(signature.signature);
-        
+        // **UPDATED: Use cached session key**
+        const sessionKey = await createOrGetSessionKey(allowlistId, userAddress);
+
         // Create seal_approve transaction
         const tx = new Transaction();
-        tx.setSender(ephemeralAddress);
+        tx.setSender(sessionKey.address); // Use session key address
         
         const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
         const documentIdBytes = fromHEX(rawId);
@@ -1094,7 +1223,7 @@ const AutoDecryptionView = ({
           onlyTransactionKind: true
         });
 
-        // Fetch keys
+        // **OPTIMIZED: Use cached session key, SEAL client will cache the actual keys**
         await sealClient.fetchKeys({
           ids: [rawId],
           txBytes: txKindBytes,
@@ -1105,7 +1234,7 @@ const AutoDecryptionView = ({
         setProgress(90);
         setDecryptionStep('decrypting');
 
-        // Decrypt the data
+        // Decrypt the data  
         const decryptedData = await sealClient.decrypt({
           data: new Uint8Array(encryptedData),
           sessionKey: sessionKey,
@@ -1171,31 +1300,25 @@ const AutoDecryptionView = ({
   return (
     <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
       <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-        {/* Decryption Icon */}
         <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-purple-100 rounded-full">
           <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600 animate-spin" />
         </div>
-        
-        {/* File Info */}
         <div className="space-y-2">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
             Auto-Decrypting PDF
           </h3>
           <p className="text-xs sm:text-sm text-purple-600">
-            {getStepMessage()}
+            Starting decryption process...
           </p>
         </div>
-        
-        {/* Progress Bar */}
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div 
             className="bg-purple-600 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
-        
         <div className="pt-2 text-xs text-gray-500 leading-relaxed">
-          Decryption happens entirely on your device - the file never leaves encrypted
+          Decryption happens entirely on your device
         </div>
       </div>
     </div>

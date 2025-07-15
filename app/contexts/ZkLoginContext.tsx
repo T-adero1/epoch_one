@@ -966,7 +966,6 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           email: userData.email,
           walletAddress: userData.address,
           name: userData.displayName,
-          googleId: userData.googleId
         }),
       });
 

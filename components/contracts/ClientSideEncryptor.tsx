@@ -8,6 +8,7 @@ import { fromHEX, toHEX } from '@mysten/sui/utils';
 import jsPDF from 'jspdf';
 import { downloadRecoveryData } from '@/app/utils/recoveryData';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { hashGoogleId } from '@/app/utils/privacy'; // Add this import
 
 interface ClientSideEncryptorProps {
   contractId: string;
@@ -90,17 +91,31 @@ export default function ClientSideEncryptor({
       
       addLog(`Starting document encryption for contract: ${contractId}`);
       addLog(`Document content length: ${documentContent.length}`);
-      addLog(`Signer addresses: ${signerAddresses.join(', ')}`);
+      addLog(`Raw signer addresses: ${signerAddresses.join(', ')}`);
+      
+      // Hash any email addresses for privacy before sending to API
+      const hashedSignerAddresses = await Promise.all(
+        signerAddresses.map(async (address) => {
+          // Check if it's an email (contains @) and hash it
+          if (address.includes('@')) {
+            const hashedEmail = await hashGoogleId(`email_${address}`);
+            addLog(`Hashed email for privacy: ${address.substring(0, 5)}...`);
+            return hashedEmail;
+          }
+          // If it's already a wallet address, return as-is
+          return address;
+        })
+      );
       
       addLog('Requesting allowlist creation from server');
-      addLog(`Using signer addresses: ${signerAddresses.join(', ')}`);
+      addLog(`Using hashed signer addresses for privacy`);
       
       const allowlistResponse = await fetch('/api/seal/create-allowlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contractId,
-          signerAddresses
+          signerAddresses: hashedSignerAddresses // Send hashed addresses
         })
       });
       

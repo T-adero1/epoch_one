@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   Card, 
@@ -118,6 +118,14 @@ export default function ContractDetails({
   const [decryptedPdfBlob, setDecryptedPdfBlob] = useState<Blob | null>(null);
   const [decryptedPdfUrl, setDecryptedPdfUrl] = useState<string | null>(null);
   
+  // **NEW: Add cache check state to prevent double loading**
+  const [isCheckingCache, setIsCheckingCache] = useState(false);
+  const [cacheCheckComplete, setCacheCheckComplete] = useState(false);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  
+  // **NEW: Track previous contract ID to prevent unnecessary resets**
+  const prevContractIdRef = useRef<string | null>(null);
+  
   const handleSave = (updatedContract: Contract) => {
     setIsEditing(false)
     onUpdate(updatedContract)
@@ -197,95 +205,162 @@ export default function ContractDetails({
     });
   };
 
-  // **NEW: Check IndexDB cache on mount**
-  useEffect(() => {
-    const checkCacheForDecryptedPDF = async () => {
-      if (!isContractEncrypted() || decryptedPdfBlob) return;
-      
-      console.log('[ContractDetails] Checking IndexDB cache for decrypted PDF...');
-      try {
-        const { pdfCache } = await import('@/app/utils/pdfCache');
-        const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
-        
-        if (cachedPDF) {
-          console.log('[ContractDetails] Found decrypted PDF in cache!');
-          const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
-          handleDecryptionSuccess(blob);
-        } else {
-          console.log('[ContractDetails] No decrypted PDF found in cache');
-        }
-      } catch (error) {
-        console.warn('[ContractDetails] Cache check failed:', error);
-      }
-    };
-
-    checkCacheForDecryptedPDF();
-  }, [contract.id]);
-
-  // **UPDATED: Load PDF with encryption awareness**
-  useEffect(() => {
-    let isMounted = true;
+  // **UPDATED: Enhanced cache check with proper state management**
+  const checkCacheForDecryptedPDF = async () => {
+    if (!isContractEncrypted() || decryptedPdfBlob) return;
     
-    const loadPdf = async () => {
-      if (!contract.s3FileKey) return;
+    setIsCheckingCache(true);
+    console.log('[ContractDetails] Checking IndexDB cache for decrypted PDF...');
+    
+    try {
+      const { pdfCache } = await import('@/app/utils/pdfCache');
+      const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
       
-      // **NEW: Skip regular PDF loading if encrypted**
-      if (isContractEncrypted()) {
-        console.log('[ContractDetails] Contract is encrypted, skipping regular PDF load');
-        return;
+      if (cachedPDF) {
+        console.log('[ContractDetails] Found decrypted PDF in cache!');
+        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
+        await handleDecryptionSuccess(blob);
+      } else {
+        console.log('[ContractDetails] No decrypted PDF found in cache');
       }
-      
-      // If we have uploaded file data, use it directly (much faster!)
-      if (uploadedFileData?.blob) {
-        console.log('[ContractDetails] Using uploaded file data directly - no S3 request needed!');
-        const url = URL.createObjectURL(uploadedFileData.blob);
-        if (isMounted) {
-          setPdfUrl(url);
-          setIsLoadingPdf(false);
-        }
-        return;
-      }
-      
-      // Fallback: fetch from S3 only if we don't have local data
-      console.log('[ContractDetails] No local file data, fetching from S3...');
-      setIsLoadingPdf(true);
-      try {
-        const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
-        if (response.ok && isMounted) {
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
-          setPdfUrl(url);
-        } else if (isMounted) {
-          throw new Error('Failed to load PDF');
-        }
-      } catch (error) {
-        if (isMounted) {
-          console.error('Error loading PDF:', error);
-          toast({
-            title: "Error Loading PDF",
-            description: "Failed to load the PDF file. Please try again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingPdf(false);
-        }
-      }
-    };
-
-    if (contract.s3FileKey) {
-      loadPdf();
+    } catch (error) {
+      console.warn('[ContractDetails] Cache check failed:', error);
+    } finally {
+      setIsCheckingCache(false);
+      setCacheCheckComplete(true);
+      console.log('[ContractDetails] Cache check complete');
     }
+  };
 
-    // Cleanup function
-    return () => {
-      isMounted = false;
-      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+  // **NEW: Single initialization effect to prevent double loading**
+  useEffect(() => {
+    if (hasInitialized) return;
+    
+    console.log('[ContractDetails] Initializing component with contract:', {
+      contractId: contract.id,
+      s3FileKey: contract.s3FileKey,
+      s3FileName: contract.s3FileName,
+      isEncrypted: contract.isEncrypted,
+      sealAllowlistId: contract.sealAllowlistId,
+      metadata: contract.metadata
+    });
+
+    const isEncrypted = isContractEncrypted();
+    console.log('[ContractDetails] Encryption detection result:', isEncrypted);
+    
+    if (isEncrypted) {
+      console.log('[ContractDetails] Contract is encrypted - checking cache first');
+      checkCacheForDecryptedPDF();
+    } else if (contract.s3FileKey) {
+      console.log('[ContractDetails] Contract is not encrypted - loading regular PDF');
+      loadPdf();
+    } else {
+      console.log('[ContractDetails] No PDF file available');
+    }
+    
+    setHasInitialized(true);
+    prevContractIdRef.current = contract.id;
+  }, [contract.id, hasInitialized]);
+
+  // **UPDATED: Smarter reset logic - only reset if contract ID actually changed**
+  useEffect(() => {
+    if (hasInitialized && prevContractIdRef.current !== contract.id) {
+      console.log('[ContractDetails] Contract ID changed, resetting state');
+      setHasInitialized(false);
+      setCacheCheckComplete(false);
+      setIsCheckingCache(false);
+      
+      // Clean up URLs
+      if (decryptedPdfUrl) {
+        URL.revokeObjectURL(decryptedPdfUrl);
+      }
+      if (pdfUrl) {
         URL.revokeObjectURL(pdfUrl);
       }
-    };
-  }, [contract.s3FileKey, uploadedFileData]);
+      
+      // Reset state
+      setDecryptedPdfBlob(null);
+      setDecryptedPdfUrl(null);
+      setPdfUrl(null);
+      setIsLoadingPdf(false);
+      
+      prevContractIdRef.current = contract.id;
+    } else if (hasInitialized && prevContractIdRef.current === contract.id) {
+      console.log('[ContractDetails] Contract metadata updated, preserving current PDF display');
+      // Contract metadata updated but ID is the same - preserve current display
+      // Don't reset anything, just update the ref
+      prevContractIdRef.current = contract.id;
+    }
+  }, [contract.id, hasInitialized]);
+
+  // **NEW: Handle contract encryption metadata updates without resetting display**
+  useEffect(() => {
+    if (hasInitialized && prevContractIdRef.current === contract.id) {
+      const isEncrypted = isContractEncrypted();
+      
+      // If contract became encrypted but we already have a working PDF display, 
+      // don't switch to encrypted mode - preserve the current display
+      if (isEncrypted && (pdfUrl || decryptedPdfUrl)) {
+        console.log('[ContractDetails] Contract became encrypted but preserving current PDF display');
+        // Don't do anything - keep the current display working
+        return;
+      }
+      
+      // If contract became encrypted and we don't have a working display,
+      // then we can safely switch to encrypted mode
+      if (isEncrypted && !pdfUrl && !decryptedPdfUrl && !isCheckingCache && !cacheCheckComplete) {
+        console.log('[ContractDetails] Contract became encrypted, switching to encrypted mode');
+        setCacheCheckComplete(false);
+        setIsCheckingCache(false);
+        checkCacheForDecryptedPDF();
+      }
+    }
+  }, [contract.isEncrypted, contract.sealAllowlistId, contract.metadata?.walrus?.encryption?.allowlistId]);
+
+  // **NEW: Enhanced PDF loading with encryption awareness**
+  const loadPdf = async () => {
+    if (!contract.s3FileKey) return;
+    
+    // **NEW: Skip regular PDF loading if encrypted**
+    if (isContractEncrypted()) {
+      console.log('[ContractDetails] Contract is encrypted, skipping regular PDF load');
+      return;
+    }
+    
+    console.log('[ContractDetails] Loading non-encrypted PDF...');
+    
+    // If we have uploaded file data, use it directly (much faster!)
+    if (uploadedFileData?.blob) {
+      console.log('[ContractDetails] Using uploaded file data directly - no S3 request needed!');
+      const url = URL.createObjectURL(uploadedFileData.blob);
+      setPdfUrl(url);
+      setIsLoadingPdf(false);
+      return;
+    }
+    
+    // Fallback: fetch from S3 only if we don't have local data
+    console.log('[ContractDetails] No local file data, fetching from S3...');
+    setIsLoadingPdf(true);
+    try {
+      const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      } else {
+        throw new Error('Failed to load PDF');
+      }
+    } catch (error) {
+      console.error('[ContractDetails] Error loading PDF:', error);
+      toast({
+        title: "Error Loading PDF",
+        description: "Failed to load the PDF file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingPdf(false);
+    }
+  };
 
   // **NEW: Clean up decrypted URLs on unmount**
   useEffect(() => {
@@ -294,17 +369,12 @@ export default function ContractDetails({
         console.log('[ContractDetails] Cleaning up decrypted PDF URL on unmount');
         URL.revokeObjectURL(decryptedPdfUrl);
       }
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        console.log('[ContractDetails] Cleaning up PDF URL on unmount');
+        URL.revokeObjectURL(pdfUrl);
+      }
     };
-  }, [decryptedPdfUrl]);
-
-  // **NEW: Reset decryption state when contract changes**
-  useEffect(() => {
-    if (decryptedPdfUrl) {
-      URL.revokeObjectURL(decryptedPdfUrl);
-    }
-    setDecryptedPdfBlob(null);
-    setDecryptedPdfUrl(null);
-  }, [contract.id]);
+  }, [decryptedPdfUrl, pdfUrl]);
 
   // Check if this contract has a PDF file
   const hasPdfFile = !!(contract.s3FileKey && contract.s3FileName);
@@ -427,191 +497,264 @@ export default function ContractDetails({
     }
   };
 
-  // **NEW: Enhanced PDF rendering with encryption support**
+  // **UPDATED: Enhanced PDF rendering with encryption support and no double loading**
   const renderPDFContent = () => {
     if (!hasPdfFile) return null;
 
-    // **ENCRYPTED PDF HANDLING**
+    // **NEW: Preserve existing working PDF display - priority order**
+    // 1. If we have a working decrypted PDF, always show it
+    if (decryptedPdfBlob && decryptedPdfUrl) {
+      console.log('[ContractDetails] Using existing decrypted PDF display');
+      return (
+        <div className="h-full flex flex-col -m-4 sm:-m-6">
+          {/* PDF Content */}
+          <div className="flex-1 flex items-center justify-center bg-white">
+            {/* Mobile: Button to open PDF in browser */}
+            <div className="lg:hidden w-full p-3 sm:p-6">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-purple-100 rounded-full">
+                  <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" />
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
+                    {contract.s3FileName?.replace('.encrypted.', '.') || 'Decrypted Contract'}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-purple-600">
+                    Decrypted • Ready to view
+                  </p>
+                </div>
+                
+                <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
+                  <span className="hidden sm:inline">
+                    Open the decrypted PDF in a new browser tab for optimal viewing.
+                  </span>
+                  <span className="sm:hidden">
+                    Tap to open decrypted PDF in your browser.
+                  </span>
+                </p>
+                
+                <div className="pt-2">
+                  <Button
+                    onClick={() => window.open(decryptedPdfUrl, '_blank')}
+                    className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
+                    size="lg"
+                  >
+                    <Shield className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span className="hidden sm:inline">Open Decrypted PDF</span>
+                    <span className="sm:hidden">Open PDF</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop: Inline iframe */}
+            <div className="hidden lg:block w-full h-full relative">
+              <iframe
+                src={decryptedPdfUrl}
+                className="absolute inset-0 w-full h-full border-0"
+                title="Decrypted Contract PDF"
+                style={{ minHeight: '450px' }}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. If we have a working regular PDF, always show it
+    if (pdfUrl) {
+      console.log('[ContractDetails] Using existing regular PDF display');
+      return (
+        <div className="h-full flex flex-col -m-4 sm:-m-6">
+          {/* PDF content starts directly here */}
+          <div className="flex-1 flex items-center justify-center bg-white">
+            {/* Mobile: Button to open PDF in browser */}
+            <div className="lg:hidden w-full p-3 sm:p-6">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
+                  <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
+                    {contract.s3FileName}
+                  </h3>
+                  {contract.s3FileSize && (
+                    <p className="text-xs sm:text-sm text-gray-600">
+                      File size: {(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB
+                    </p>
+                  )}
+                </div>
+                
+                <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
+                  <span className="hidden sm:inline">
+                    Open the PDF in a new browser tab for optimal viewing on your device.
+                  </span>
+                  <span className="sm:hidden">
+                    Tap to open PDF in your browser for better viewing.
+                  </span>
+                </p>
+                
+                <div className="pt-2">
+                  <Button
+                    onClick={async () => {
+                      try {
+                        window.open(pdfUrl, '_blank');
+                      } catch (error) {
+                        console.error('Error opening PDF:', error);
+                        toast({
+                          title: "Error",
+                          description: "Failed to open PDF. Please try again.",
+                          variant: "destructive",
+                        });
+                      }
+                    }}
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
+                    size="lg"
+                  >
+                    <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span className="hidden sm:inline">Open PDF in Browser</span>
+                    <span className="sm:hidden">Open PDF</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop: Inline iframe */}
+            <div className="hidden lg:block w-full h-full relative">
+              {isLoadingPdf ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-white">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-blue-600" />
+                    <p className="text-sm text-gray-600">Loading PDF...</p>
+                  </div>
+                </div>
+              ) : (
+                <iframe
+                  src={pdfUrl}
+                  className="absolute inset-0 w-full h-full border-0"
+                  title="Contract PDF"
+                  style={{ minHeight: '450px' }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. Only now check if we need to handle encryption (when no working display exists)
+    const isEncrypted = isContractEncrypted();
+    
+    console.log('[ContractDetails] No existing PDF display found, checking encryption state:', {
+      isEncrypted,
+      hasDecryptedBlob: !!decryptedPdfBlob,
+      hasDecryptedUrl: !!decryptedPdfUrl,
+      isCheckingCache,
+      cacheCheckComplete,
+      hasInitialized
+    });
+
+    // **ENCRYPTED PDF HANDLING** - Only when no working display exists
     if (isEncrypted) {
       console.log('[ContractDetails] Rendering encrypted PDF content');
       
-      // Show decrypted PDF if available
-      if (decryptedPdfBlob && decryptedPdfUrl) {
+      // **NEW: Show cache checking state**
+      if (isCheckingCache) {
+        console.log('[ContractDetails] Showing cache check loading state');
         return (
           <div className="h-full flex flex-col -m-4 sm:-m-6">
-            
-
-            {/* PDF Content */}
-            <div className="flex-1 flex items-center justify-center bg-white">
-              {/* Mobile: Button to open PDF in browser */}
-              <div className="lg:hidden w-full p-3 sm:p-6">
-                <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-                  <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-purple-100 rounded-full">
-                    <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600" />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
-                      {contract.s3FileName?.replace('.encrypted.', '.') || 'Decrypted Contract'}
-                    </h3>
-                    <p className="text-xs sm:text-sm text-purple-600">
-                      Decrypted • Ready to view
-                    </p>
-                  </div>
-                  
-                  <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
-                    <span className="hidden sm:inline">
-                      Open the decrypted PDF in a new browser tab for optimal viewing.
-                    </span>
-                    <span className="sm:hidden">
-                      Tap to open decrypted PDF in your browser.
-                    </span>
-                  </p>
-                  
-                  <div className="pt-2">
-                    <Button
-                      onClick={() => window.open(decryptedPdfUrl, '_blank')}
-                      className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
-                      size="lg"
-                    >
-                      <Shield className="h-4 w-4 mr-2 flex-shrink-0" />
-                      <span className="hidden sm:inline">Open Decrypted PDF</span>
-                      <span className="sm:hidden">Open PDF</span>
-                    </Button>
-                  </div>
-                </div>
+            <div className="bg-purple-50 border-b border-purple-200 p-3 sm:p-4">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-medium text-purple-800">Encrypted PDF</span>
               </div>
-
-              {/* Desktop: Inline iframe */}
-              <div className="hidden lg:block w-full h-full relative">
-                <iframe
-                  src={decryptedPdfUrl}
-                  className="absolute inset-0 w-full h-full border-0"
-                  title="Decrypted Contract PDF"
-                  style={{ minHeight: '450px' }}
-                />
+            </div>
+            <div className="flex-1 flex items-center justify-center bg-white">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 rounded-full">
+                  <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 animate-spin" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900">Checking Cache</h3>
+                  <p className="text-xs sm:text-sm text-blue-600">Looking for cached decrypted PDF...</p>
+                </div>
               </div>
             </div>
           </div>
         );
       }
 
-      // Show auto-decryption component
-      return (
-        <div className="h-full flex flex-col -m-4 sm:-m-6">
-          <div className="bg-purple-50 border-b border-purple-200 p-3 sm:p-4">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-purple-600" />
-              <span className="text-sm font-medium text-purple-800">Encrypted PDF</span>
+      // **UPDATED: Only show AutoDecryptionView if cache check is complete and no cached PDF found**
+      if (cacheCheckComplete && !decryptedPdfBlob) {
+        console.log('[ContractDetails] Cache check complete, no cached PDF found, showing AutoDecryptionView');
+        return (
+          <div className="h-full flex flex-col -m-4 sm:-m-6">
+            <div className="bg-purple-50 border-b border-purple-200 p-3 sm:p-4">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-medium text-purple-800">Encrypted PDF</span>
+              </div>
+            </div>
+            <div className="flex-1">
+              <AutoDecryptionView 
+                contract={contract}
+                onDecrypted={handleDecryptionSuccess}
+              />
             </div>
           </div>
-          <div className="flex-1">
-            <AutoDecryptionView 
-              contract={contract}
-              onDecrypted={handleDecryptionSuccess}
-            />
+        );
+      }
+
+      // **NEW: Show waiting state if cache check hasn't completed yet**
+      if (!cacheCheckComplete) {
+        console.log('[ContractDetails] Cache check not complete yet, showing waiting state');
+        return (
+          <div className="h-full flex flex-col -m-4 sm:-m-6">
+            <div className="bg-purple-50 border-b border-purple-200 p-3 sm:p-4">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-purple-600" />
+                <span className="text-sm font-medium text-purple-800">Encrypted PDF</span>
+              </div>
+            </div>
+            <div className="flex-1 flex items-center justify-center bg-white">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full">
+                  <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-gray-600" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900">Preparing Encrypted PDF</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">Initializing decryption...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    // 4. Handle loading states for regular PDFs
+    if (isLoadingPdf) {
+      return (
+        <div className="h-full flex flex-col -m-4 sm:-m-6">
+          <div className="flex-1 flex items-center justify-center bg-white">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-blue-600" />
+              <p className="text-sm text-gray-600">Loading PDF...</p>
+            </div>
           </div>
         </div>
       );
     }
 
-    // **REGULAR PDF HANDLING**
+    // 5. Fallback: No PDF available
     return (
       <div className="h-full flex flex-col -m-4 sm:-m-6">
-        {/* PDF content starts directly here */}
         <div className="flex-1 flex items-center justify-center bg-white">
-          {/* Mobile: Button to open PDF in browser */}
-          <div className="lg:hidden w-full p-3 sm:p-6">
-            <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-              <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-red-100 rounded-full">
-                <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
-              </div>
-              
-              <div className="space-y-2">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
-                  {contract.s3FileName}
-                </h3>
-                {contract.s3FileSize && (
-                  <p className="text-xs sm:text-sm text-gray-600">
-                    File size: {(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB
-                  </p>
-                )}
-              </div>
-              
-              <p className="text-xs sm:text-sm text-gray-600 leading-relaxed px-2">
-                <span className="hidden sm:inline">
-                  Open the PDF in a new browser tab for optimal viewing on your device.
-                </span>
-                <span className="sm:hidden">
-                  Tap to open PDF in your browser for better viewing.
-                </span>
-              </p>
-              
-              <div className="pt-2">
-                <Button
-                  onClick={async () => {
-                    try {
-                      const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
-                      if (response.ok) {
-                        const blob = await response.blob();
-                        const url = URL.createObjectURL(blob);
-                        window.open(url, '_blank');
-                        setTimeout(() => URL.revokeObjectURL(url), 1000);
-                      } else {
-                        throw new Error('Failed to load PDF');
-                      }
-                    } catch (error) {
-                      console.error('Error opening PDF:', error);
-                      toast({
-                        title: "Error",
-                        description: "Failed to open PDF. Please try again.",
-                        variant: "destructive",
-                      });
-                    }
-                  }}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:px-8 sm:py-3 text-sm sm:text-base font-medium min-h-[44px] touch-manipulation"
-                  size="lg"
-                >
-                  <FileText className="h-4 w-4 mr-2 flex-shrink-0" />
-                  <span className="hidden sm:inline">Open PDF in Browser</span>
-                  <span className="sm:hidden">Open PDF</span>
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Desktop: Inline iframe */}
-          <div className="hidden lg:block w-full h-full relative">
-            {isLoadingPdf ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-white">
-                <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-blue-600" />
-                  <p className="text-sm text-gray-600">Loading PDF...</p>
-                </div>
-              </div>
-            ) : pdfUrl ? (
-              <iframe
-                src={pdfUrl}
-                className="absolute inset-0 w-full h-full border-0"
-                title="Contract PDF"
-                style={{ minHeight: '450px' }}
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center bg-white">
-                <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
-                  <p className="text-sm text-gray-600 mb-3">Failed to load PDF</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.location.reload()}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Retry
-                  </Button>
-                </div>
-              </div>
-            )}
+          <div className="text-center">
+            <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
+            <p className="text-sm text-gray-600 mb-3">No PDF available</p>
           </div>
         </div>
       </div>
@@ -884,7 +1027,7 @@ export default function ContractDetails({
   )
 }
 
-// **NEW: Auto-Decryption Component (same as PDFEditor)**
+// **AutoDecryptionView component remains the same as before**
 const AutoDecryptionView = ({ 
   contract, 
   onDecrypted 
@@ -1239,12 +1382,9 @@ const AutoDecryptionView = ({
   return (
     <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
       <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-        {/* Decryption Icon */}
         <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-purple-100 rounded-full">
           <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600 animate-spin" />
         </div>
-        
-        {/* File Info */}
         <div className="space-y-2">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words px-2">
             Auto-Decrypting PDF
@@ -1253,15 +1393,12 @@ const AutoDecryptionView = ({
             {getStepMessage()}
           </p>
         </div>
-        
-        {/* Progress Bar */}
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div 
             className="bg-purple-600 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
-        
         <div className="pt-2 text-xs text-gray-500 leading-relaxed">
           Decryption happens entirely on your device - the file never leaves encrypted
         </div>

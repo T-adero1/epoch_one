@@ -3,11 +3,12 @@
 - [Introduction](README.md)
 - [Seal Design](Design.md)
 - [Security Best Practices and Risk Mitigations](SecurityBestPractices.md)
+- [Pricing](Pricing.md)
 - [Seal Beta Terms of Service](TermsOfService.md)
 
 # Using Seal
 
-## For Dapp Developers
+## For dapp developers
 
 **Access control management**
 
@@ -15,7 +16,7 @@ Packages should define `seal_approve*` functions in their modules to control acc
 - A package can include multiple `seal_approve*` functions, each implementing different access control logic and accepting different input parameters.
 - The first parameter must be the requested identity, excluding the package ID prefix. For example: `id: vector<u8>`.
 - If access is not granted, the function should abort without returning a value.
-- To support future upgrades and maintain backward compatibility, define `seal_approve*` functions as non-public `entry` functions whenever possible.
+- To support future upgrades and maintain backward compatibility, define `seal_approve*` functions as non-public `entry` functions when possible, and either version your shared objects or use a shared global object with the latest version (see [whitelist](./move/patterns/sources/whitelist.move) and [subscription](./move/patterns/sources/subscription.move) examples).
 
 See [move/patterns](./move/patterns) for examples and useful patterns.
 
@@ -24,7 +25,7 @@ Building and publishing the code can be done using the [`Sui CLI`](https://docs.
 ```shell
 cd examples/move
 sui move build
-sui client publish --gas-budget 100000000
+sui client publish
 ```
 
 **Limitations**
@@ -68,18 +69,25 @@ A key server may be used multiple times to enable weighting, which allows the ap
 > [!IMPORTANT]
 > Anyone can create an onchain `KeyServer` object that references a known URL (such as `seal.mystenlabs.com`) but uses a different public key. To prevent impersonation, the SDK performs a verification step: it fetches the object ID from the server’s `/v1/service` endpoint and compares it with the object ID registered onchain.
 
-Apps can retrieve a list of trusted (allowlisted) Seal key servers using the `getAllowlistedKeyServers()` function, or use a custom app-defined or user-defined list.
+Apps can retrieve a list of trusted (allowlisted) Seal key servers using the `getAllowlistedKeyServers()` function, or use a custom app-defined or user-defined list. See list of object IDs of available key servers in [this section](Pricing.md#testnet).
 
 Next, the app should create a `SealClient` object for the selected key servers.
 ```typescript
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
+
+// Replace this with a list of custom key server object IDs.
+const serverObjectIds = getAllowlistedKeyServers('testnet');
+
 const client = new SealClient({
-    suiClient,
-    serverObjectIds: keyServerIds.map((id) => [id, 1]),
-    verifyKeyServers: false,
+  suiClient,
+  serverConfigs: serverObjectIds.map((id) => ({
+    objectId: id,
+    weight: 1,
+  })),
+  verifyKeyServers: false,
 });
 ```
-The `serverObjectIds` is a list of tuples, where each tuple contains a key server object ID and its weight. Recall that the weight indicates how many times the key server can contribute towards reaching the decryption threshold. In this case, all key servers are given equal weight 1.
+The `serverConfigs` is a list of objects, where each object contains a key server object ID and its weight. Recall that the weight indicates how many times the key server can contribute towards reaching the decryption threshold. In this example, all key servers are given equal weight 1. The object may contain also the fields `apiKeyName` and `apiKey` for sending the HTTP header `apiKeyName: apiKey` in case a key server expects an API key.
 
 Set `verifyKeyServers` to `true` if the app or user needs to confirm that the provided URLs correctly correspond to the claimed key servers, as described above. Note that enabling verification introduces additional round-trip requests to the key servers. For best performance, use this option primarily when verifying key servers at app startup. Set `verifyKeyServers` to `false` when verification is not required.
 
@@ -116,10 +124,11 @@ Decryption involves a few additional steps:
 Once initialized, the session key can be used to retrieve multiple decryption keys for the specified package without requiring further user confirmation.
 
 ```typescript
-const sessionKey = new SessionKey({
+const sessionKey = await SessionKey.create({
     address: suiAddress,
     packageId: fromHEX(packageId),
     ttlMin: 10, // TTL of 10 minutes
+    suiClient: new SuiClient({ url: getFullnodeUrl('testnet') }),
 });
 const message = sessionKey.getPersonalMessage();
 const { signature } = await keypair.signPersonalMessage(message); // User confirms in wallet
@@ -128,8 +137,9 @@ sessionKey.setPersonalMessageSignature(signature); // Initialization complete
 
 > [!NOTE]
 > Notes on Session Key
-> 1. You can also optioanlly initialize a `SessionKey` with a passed in Signer in the constructor. This is useful for classes that extend `Signer`, e.g. `EnokiSigner`. 
-> 2. You can optionally store the `SessionKey` object in [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API) instead of localStorage if you would like to persist the SessionKey across tabs. See usage for `import` and `export` methods in the SessionKey class. 
+> 1. You can also optionally initialize a `SessionKey` with a passed in Signer in the constructor. This is useful for classes that extend `Signer`, e.g. `EnokiSigner`.
+> 2. You can optionally set an `mvr_name` value in the `SessionKey`. This should be the [Move Package Registry](https://www.moveregistry.com/) name for the package. Seal requires the MVR name to be registered to the first version of the package for this to work. If this is set, the message shown to the user in the wallet would use the much more readable MVR package name instead of `packageId`.
+> 3. You can optionally store the `SessionKey` object in [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API) instead of localStorage if you would like to persist the SessionKey across tabs. See usage for `import` and `export` methods in the SessionKey class. 
 
 The simplest way to perform decryption is to call the client’s `decrypt` function. This function expects a `Transaction` object that invokes the relevant `seal_approve*` functions. The transaction must meet the following requirements:
 - It may only call `seal_approve*` functions.
@@ -176,67 +186,238 @@ On-chain decryption in Move is supported using derived keys. For an example, see
 > [!TIP]
 > If a key server request fails with an `InvalidParameter` error, the cause may be a recently created on-chain object in the PTB input. The key server's full node may not have indexed it yet. Wait a few seconds and retry the request, as subsequent attempts should succeed once the node is in sync.
 
-**Mysten Labs Key Servers**
-
-Mysten Labs maintains a set of key servers for the Seal project:
-- mysten-testnet-1: https://seal-key-server-testnet-1.mystenlabs.com
-- mysten-testnet-2: https://seal-key-server-testnet-2.mystenlabs.com
-
-Currently, access to above key servers is permissive. However, rate limiting is planned for the future, with a target of 4–5 requests per second per user.
+> [!IMPORTANT]
+> Refer to the [verified key servers](Pricing.md#verified-key-servers) for a list of available key servers in different environments.
 
 ## For key server operators
 
-### Setup
-Use the `seal-cli` tool to generate a new master key using `cargo run --bin seal-cli genkey`.
+A Seal key server can operate in one of two modes: `Open` or `Permissioned`.
+- **Open mode**: In open mode, the key server accepts decryption requests for any onchain package. It uses a single master key to serve all access policies across packages. This mode is suitable for public or general-purpose deployments where package-level isolation is not required.
+- **Permissioned mode**: In permissioned mode, the key server restricts access to a manually approved list of packages associated with specific clients or applications. Each client is served using a dedicated master key.
+  - This mode also supports importing or exporting the client-specific key if needed, for purposes such as disaster recovery or key server rotation.
 
-Key servers can be registered onchain to enable discoverability. To register a key server, call the `create_and_transfer_v1` function in the `seal::key_server` module. For example:
+You can choose the mode that best fits your deployment model and security requirements. The following sections provide more details on both options.
 
-```shell
-sui client call --function create_and_transfer_v1 --module key_server --package 0x62c79dfeb0a2ca8c308a56bde530ccf3846535e1623949d45c90d23128afff52 --args mysten-dev-1 https://seal-key-server-testnet-1.mystenlabs.com 0 0xa023acbf600401017ee17bf918106ea9911914ca017aa3ab9ab5c64beb9bb5236fd9d4d5b5645dc3bc0d4f732ed04fc60d14b9f37987fe5eeb4db07fc0982904ce1ed0b07607ae2e99086e141f6c6a1df6def5f5d434ca7c09856a3750c92969 --gas-budget 10000000
+### Open mode
+
+In `Open` mode, the key server allows decryption requests for Seal policies from any package. This mode is ideal for testing or for deployments where the key server is operated as a best-effort service without direct user liability.
+
+Before starting the key server, you must generate a BLS master key pair. This command outputs both the master secret key and the public key.
+
+```
+cargo run --bin seal-cli genkey
+Master key: <MASTER_KEY>
+Public key: <MASTER_PUBKEY>
 ```
 
-Run the server using `cargo run --bin key-server` with environment variables:
-- `MASTER_KEY` is the master secret key generated by the `seal-cli` tool.
-- `KEY_SERVER_OBJECT_ID` is the object id of the registered key server.
-- `NETWORK` specifies the network to connect to, such as `testnet`, `mainnet`, or other supported environments. To use a custom full node, set `NETWORK` to `custom`. When using the `custom` option, you must also set the `NODE_URL` and `GRAPHQL_URL` environment variables with the URLs of your full node and GraphQL endpoint, respectively. Note that the GraphQL support is deprecated and will be removed in a future release.
+To make the key server discoverable by Seal clients, register it on-chain.
+Call the `create_and_transfer_v1` function from the `seal::key_server` module like following:
 
-Example:
 ```shell
-export MASTER_KEY="KYinoC5hVWeWqOUU9dw7PVHiROYFWB/nQZ55Kmytjig="
-export KEY_SERVER_OBJECT_ID="0x1ee708e0d09c31593a60bee444f8f36a5a3ce66f1409a9dfb12eb11ab254b06b"
-export NETWORK="testnet"
-cargo run --bin key-server
+sui client call --function create_and_transfer_v1 --module key_server --package 0xe3d7e7a08ec189788f24840d27b02fee45cf3afc0fb579d6e3fd8450c5153d26 --args <YOUR_SERVER_NAME> https://<YOUR_URL> 0 <MASTER_PUBKEY>
 ```
 
-Alternatively, Docker can be used to run the key server. For example:
+To start the key server in `Open` mode, run the command `cargo run --bin key-server`,
+but before running the server, set the following environment variables:
+- `MASTER_KEY`: The master secret key generated using the `seal-cli` tool.
+- `CONFIG_PATH`: The path to a .yaml configuration file that specifies key server settings. For the configuration file format, see the [example config](crates/key-server/key-server-config.yaml).
+
+In the config file, make sure to:
+- Set the mode to `Open`.
+- Set the `key_server_object_id` field to the ID of the key server object you registered on-chain.
+
+```
+CONFIG_PATH=crates/key-server/key-server-config.yaml MASTER_KEY=<MASTER_KEY> cargo run --bin key-server
+```
+
+Alternatively, run with docker:
 
 ```shell
-docker build -t seal-key-server .
-docker run -p 2024:2024 -e MASTER_KEY="KYinoC5hVWeWqOUU9dw7PVHiROYFWB/nQZ55Kmytjig=" -e KEY_SERVER_OBJECT_ID="0x1ee708e0d09c31593a60bee444f8f36a5a3ce66f1409a9dfb12eb11ab254b06b" -e NETWORK="testnet" seal-key-server
+docker build -t seal-key-server . --build-arg GIT_REVISION="$(git describe --always --abbrev=12 --dirty --exclude '*')" 
+
+docker run -p 2024:2024 -v $(pwd)/crates/key-server/key-server-config.yaml:/config/key-server-config.yaml \
+  -e CONFIG_PATH=/config/key-server-config.yaml \
+   -e MASTER_KEY=<MASTER_KEY> \
+   seal-key-server
 ```
 <!-- 
 Example of a request:
 ```
 curl http://0.0.0.0:2024/health
 
-curl http://0.0.0.0:2024/v1/service
-
-curl -H 'Content-Type: application/json' -d '{"ptb":"AwAgv7n4Pj/owIGk+nMEXJ4KbXvVytgdurspb4BZJ8RdY6MAISDAbM35ybJGgprxCy0H1MuWKsGvRO5zQfk4jn+oAcufAwEBwGzN+cmyRoKa8QstB9TLlirBr0Tuc0H5OI5/qAHLnwOtCKsRAAAAAAABAG0lMvMLkGCIOUyRinodOfXWx1Bxm0JCFS/6RhBLoEUxCXdoaXRlbGlzdAtrbXNfYXBwcm92ZQADAQAAAQEAAQIA","enc_key":"lR69cNXFuB3zyjDI12syH1XC4sfaTo63Ylms/I8yO39OTvuDmngPln8pMTJEwq9v","request_signature":"Ut6iy+f+l/FeMgcim+s3jkQO86nxgqhWweOfqFWwQGi3gercjBnzhoMmzrb0i0Z79iXUwE56GwM/2mgHDRz+CA==","certificate":{"session_vk":"w+xC1R2fZDJeQW4lERxYsd3XVAYy7wOx5sKsIWdwlWw=","creation_time":1737671115293,"ttl_min":9,"signature":"APDPqXOr+HqHMw48qNwDMPezgvwDzojcIaBztBdOYuTaomY2pWBVyXbaFyNN+huz5f44ZgMG1D6PnF/H/OGgkADgFHRr36qyRWIXLGJ/iArkqpw1lMzlikMeDlBjTOheIw=="}}' -X POST http://0.0.0.0:2024/v1/fetch_key
+curl --header "Client-Sdk-Version: x.x.x" http://0.0.0.0:2024/v1/service # lastest sdk version from https://www.npmjs.com/package/@mysten/seal
 ``` -->
 
-Key servers expose a set of metrics via a Prometheus server running on port 9184. They can be viewed in raw form by calling
+### Permissioned mode
+
+In `Permissioned` mode, the key server only allows decryption requests for Seal policies from explicitly allowlisted packages. This is the recommended mode for B2B deployments where tighter access control and client-specific key separation are required.
+
+Start by generating a master seed for the key server. Use the `seal-cli` tool as `cargo run --bin seal-cli gen-seed`. This command outputs the secret master seed which should be stored securely.
+
 ```shell
-curl http://0.0.0.0:9184
+cargo run --bin seal-cli gen-seed
+Seed: <MASTER_SEED>
 ```
-or used in a data visualization and analytics tool like Grafana.
+
+Next, create a configuration file in .yaml format following the instructions in the [example config](crates/key-server/key-server-config.yaml) and with the following properties:
+
+- Set the mode to `Permissioned`.
+- Initialize with an empty client configs (clients can be added later).
+
+```yaml
+  server_mode: !Permissioned
+    client_configs:
+```
+
+Set the environment variable `MASTER_SEED` to the master secret seed generated by the `seal-cli` tool, and the environment variable `CONFIG_PATH` pointing to a .yaml configuration file. Run the server using `cargo run --bin key-server`. It should abort after printing a list of unassigned derived public keys (search for logs with the text `Unassigned derived public key`).
+
+```shell
+MASTER_SEED=<MASTER_SEED> CONFIG_PATH=crates/key-server/key-server-config.yaml cargo run --bin key-server 
+
+MASTER_SEED=0x680d7268095510940a3cce0d0cfdbd82b3422f776e6da46c90eb36f25ce2b30e CONFIG_PATH=crates/key-server/key-server-config.yaml cargo run --bin key-server 
+```
+
+```
+2025-06-15T02:02:56.303459Z  INFO key_server: Unassigned derived public key with index 0: "<PUBKEY_0>"
+2025-06-15T02:02:56.303957Z  INFO key_server: Unassigned derived public key with index 1: "<PUBKEY_1>"
+2025-06-15T02:02:56.304418Z  INFO key_server: Unassigned derived public key with index 2: "<PUBKEY_2>"
+```
+
+Each supported client must have a registered on-chain key server object to enable discovery and policy validation.
+
+#### Register a client
+
+- Register a new key server on-chain by calling the `create_and_transfer_v1` function from the `seal::key_server` module with an unassigned derived public key. 
+  - The derivation index for first client is `0` and its derived public key placeholder is `<PUBKEY_0>`. Similarly, the derivation index for nth client is `n-1` and its derived public key placeholder is `<PUBKEY_n-1>`.
+
+```shell
+-- Replace `0` with the appropriate derivation index and derived public key for the nth client.
+
+sui client call --function create_and_transfer_v1 --module key_server --package 0xe3d7e7a08ec189788f24840d27b02fee45cf3afc0fb579d6e3fd8450c5153d26 --args <YOUR_SERVER_NAME> https://<YOUR_URL> 0 <PUBKEY_0>
+
+# outputs object of type key_server::KeyServer <KEY_SERVER_OBJECT_ID_0> and object of type key_server::Cap <KEY_SERVER_CAP_ID_0>
+```
+
+- Add an entry in config file:
+  - Set `client_master_key` to type `Derived` with `derivation_index` as `n-1` for the nth client. 
+  - Set <KEY_SERVER_OBJECT_ID_0> from the output above. 
+  - Include the list of packages this client will use.
+
+For example: 
+
+```yaml
+    - name: "alice"
+      client_master_key: !Derived
+        derivation_index: 0
+      key_server_object_id: "<KEY_SERVER_OBJECT_ID_0>"
+      package_ids:
+        - "0x1111111111111111111111111111111111111111111111111111111111111111"
+```
+
+- Restart the key server to apply the config changes.
+
+```shell
+MASTER_SEED=<MASTER_SEED> CONFIG_PATH=crates/key-server/key-server-config.yaml cargo run --bin key-server 
+```
+
+Or with Docker:
+
+```
+docker run -p 2024:2024 \
+  -v $(pwd)/crates/key-server/key-server-config.yaml:/config/key-server-config.yaml \
+  -e CONFIG_PATH=/config/key-server-config.yaml \
+  -e MASTER_SEED=<MASTER_SEED> \
+  seal-key-server
+```
+
+To add more clients, repeat the above steps with unassigned public keys, e.g `<PUBKEY_1>, <PUBKEY_2>`.
+
+#### Export / Import Keys
+
+In rare cases where you need to export a client key:
+
+- Use the `seal-cli` tool as `cargo run --bin seal-cli derive-key --seed $MASTER_SEED --index X`. Replace `X` with the `derivation_index` of the key you want to export. The tool will output the corresponding master key, which can be imported by another key server if needed.
+
+Here's an example command assuming the key server owner is exporting the key at index 0:
+
+```shell
+cargo run --bin seal-cli derive-key --seed <MASTER_SEED> --index 0
+
+Master key: <CLIENT_MASTER_KEY>
+Public key: <CLIENT_MASTER_PUBKEY>
+```
+
+- Disable this key on the current server:
+  - Change the client's `client_master_key` type to `Exported`.
+  - Set the `deprecated_derivation_index` field with the appropriate index.
+
+For example: 
+
+```yaml
+     - name: "bob"
+       client_master_key: !Exported
+         deprecated_derivation_index: 0
+```
+
+- To import the client master key into a new key server, transfer the previous key server cap object to the new key server owner. The new key server owner can now update to its own URL using the cap. 
+
+Here's an example `Sui CLI` command assuming we are exporting <KEY_SERVER_OBJECT_ID_0>:
+
+```shell
+sui transfer --object-id <KEY_SERVER_CAP_ID_0> --to <NEW_OWNER_ADDRESS>
+```
+
+The owner of <NEW_OWNER_ADDRESS> can now run:
+
+```shell
+sui client call --function update --module key_server --package 0xe3d7e7a08ec189788f24840d27b02fee45cf3afc0fb579d6e3fd8450c5153d26 --args <KEY_SERVER_OBJECT_ID_0> <KEY_SERVER_CAP_ID_0> https://<NEW_URL>
+```
+
+- The new key server owner can now add it to their config file:
+  - `client_master_key` set to type `Imported`.
+  - The name of the environment variable containing the key, e.g. `BOB_BLS_KEY`. This name will be used later.
+  - The key server object registered on-chain for this client earlier, e.g. <KEY_SERVER_OBJECT_ID_0>.
+  - The list of packages associated with the client.
+
+For example: 
+
+```yaml
+     - name: "bob"
+       client_master_key: !Imported
+         env_var: "BOB_BLS_KEY"
+       key_server_object_id: "<KEY_SERVER_OBJECT_ID_0>"
+       package_ids:
+         - "0x2222222222222222222222222222222222222222222222222222222222222222"
+```
+
+- Run the key server using the client master key as the configured environment variable. 
+
+```shell
+CONFIG_PATH=crates/key-server/key-server-config.yaml BOB_BLS_KEY=<CLIENT_MASTER_KEY> MASTER_SEED=<MASTER_SEED> cargo run --bin key-server
+```
+
+Or run with docker: 
+
+```shell
+docker run -p 2024:2024 \
+  -v $(pwd)/crates/key-server/key-server-config.yaml:/config/key-server-config.yaml \
+  -e CONFIG_PATH=/config/key-server-config.yaml \
+  -e BOB_BLS_KEY=<CLIENT_MASTER_KEY> \
+  -e MASTER_SEED=<MASTER_SEED> \
+  seal-key-server
+```
 
 ### Infrastructure requirements
 
 The key server is a lightweight, stateless service that does not require persistent storage. Its stateless design supports horizontal scalability. The service must have access to a trusted full node, ideally one located nearby to reduce latency.
 
-The key server is initialized with an IBE master key, which must be securely stored and accessible only to the service, for example, using a cloud-based key management system (KMS), or a self-managed software or hardware vault.
+The key server is initialized with a short key, which must be securely stored and accessible only to the service. You may use a cloud-based key management system (KMS), or a self-managed software or hardware vault. Any imported keys should also be securely stored in a similar manner.
 
 To protect the service against denial-of-service (DoS) attacks, implement standard mitigations such as rate limiting at the API gateway layer.
+
+The key server exposes a set of metrics via a Prometheus server running on port 9184. Those metrics can be viewed in raw form by calling `curl http://0.0.0.0:9184` or used in a data visualization and analytics tool like Grafana.
+
+Similarly, the key server exposes a health check endpoint that can be called using `curl http://0.0.0.0:2024/health`.
 
 ## The CLI
 

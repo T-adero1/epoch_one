@@ -1,26 +1,19 @@
 import { Contract, ContractStatus, SignatureStatus } from '@prisma/client';
 
 export interface ContractWithRelations extends Contract {
-  owner: {
-    id: string;
-    name: string | null;
-    email: string;
-  };
   signatures: {
     id: string;
     status: SignatureStatus;
     signedAt: Date | null;
-    user: {
-      id: string;
-      name: string | null;
-      email: string;
-    };
+    userGoogleIdHash: string;
+    email: string | null;
+    walletAddress: string;
   }[];
 }
 
-export const getContracts = async (userId?: string, status?: ContractStatus) => {
+export const getContracts = async (userGoogleIdHash: string, status?: ContractStatus) => {
   const params = new URLSearchParams();
-  if (userId) params.append('userId', userId);
+  params.append('userGoogleIdHash', userGoogleIdHash);
   if (status) params.append('status', status);
 
   const response = await fetch(`/api/contracts?${params.toString()}`);
@@ -32,15 +25,25 @@ export const createContract = async (data: {
   title: string;
   description?: string;
   content: string;
-  ownerId: string;
+  ownerGoogleIdHash: string; // Already hashed
+  signerGoogleIdHashes?: string[]; // Already hashed Google IDs
   metadata?: {
-    signers?: string[];
+    [key: string]: any;
   };
 }) => {
   const response = await fetch('/api/contracts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      title: data.title,
+      description: data.description,
+      content: data.content,
+      ownerGoogleIdHash: data.ownerGoogleIdHash,
+      metadata: {
+        ...data.metadata,
+        signers: data.signerGoogleIdHashes || [], // Store hashed Google IDs in signers array
+      },
+    }),
   });
   if (!response.ok) throw new Error('Failed to create contract');
   return response.json() as Promise<ContractWithRelations>;

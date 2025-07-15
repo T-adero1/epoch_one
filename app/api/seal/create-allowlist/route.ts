@@ -4,7 +4,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { PrismaClient } from '@prisma/client';
 import { bech32 } from 'bech32';
-import { generatePredeterminedWallet } from '@/app/utils/predeterminedWallet';
+import { generatePredeterminedWalletForAllowlist } from '@/app/utils/predeterminedWallet';
 
 // Add Prisma client
 const prisma = new PrismaClient();
@@ -20,10 +20,13 @@ function isValidSuiAddress(address: string): boolean {
   return /^0x[a-fA-F0-9]{64}$/.test(address);
 }
 
-// Helper function to check if a string is a valid email
-function isValidEmail(email: string): boolean {
-  return email.includes('@') && email.includes('.');
+// Helper function to check if a string looks like a hashed identifier
+function isHashedIdentifier(input: string): boolean {
+  // Hashed identifiers will be long hex-like strings that aren't valid Sui addresses
+  return input.length > 40 && !isValidSuiAddress(input) && !input.includes('@');
 }
+
+
 
 // Function to verify objects exist before proceeding
 async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAttempts = 10) {
@@ -125,86 +128,73 @@ export async function POST(req: NextRequest) {
     }
     
     console.log('[API] Creating allowlist for contract:', contractId);
-    console.log('[API] Signer inputs:', signerAddresses);
+    console.log('[API] Signer inputs (privacy-preserving):', signerAddresses.map(addr => addr.substring(0, 8) + '...'));
     
-    // ENHANCED: Separate emails and wallet addresses, then resolve
+    // ENHANCED: Separate hashed emails and wallet addresses, then resolve
     const walletAddresses: string[] = [];
-    const addressSources: { input: string; type: 'email' | 'wallet'; source: 'database' | 'predetermined' | 'direct'; address: string }[] = [];
+    const addressSources: { input: string; type: 'hashed_email' | 'wallet'; source: 'predetermined' | 'direct'; address: string }[] = [];
     
     if (signerAddresses.length > 0) {
       console.log('[API] Processing signer inputs...');
       
-      // Separate emails from wallet addresses
-      const emails: string[] = [];
+      // Separate hashed emails from wallet addresses
+      const hashedEmails: string[] = [];
       const directWalletAddresses: string[] = [];
       
       for (const input of signerAddresses) {
         if (isValidSuiAddress(input)) {
-          console.log(`[API] Detected wallet address: ${input}`);
+          console.log(`[API] Detected wallet address: ${input.substring(0, 8)}...`);
           directWalletAddresses.push(input);
           walletAddresses.push(input);
           addressSources.push({ input, type: 'wallet', source: 'direct', address: input });
-        } else if (isValidEmail(input)) {
-          console.log(`[API] Detected email: ${input}`);
-          emails.push(input);
+        } else if (isHashedIdentifier(input)) {
+          console.log(`[API] Detected hashed email identifier: ${input.substring(0, 8)}...`);
+          hashedEmails.push(input);
         } else {
-          console.warn(`[API] Invalid input (not email or wallet): ${input}`);
+          console.warn(`[API] Invalid input (not hashed email or wallet): ${input.substring(0, 8)}...`);
         }
       }
       
-      // Process emails if any
-      if (emails.length > 0) {
-        console.log('[API] Looking up wallet addresses for emails...');
+      // Process hashed emails if any
+      if (hashedEmails.length > 0) {
+        console.log('[API] Generating predetermined wallets for hashed email identifiers...');
         
-        // Query database for users with matching emails
-        const users = await prisma.user.findMany({
-          where: {
-            email: {
-              in: emails
-            }
-          },
-          select: {
-            email: true,
-            walletAddress: true
-          }
-        });
-        
-        console.log('[API] Found users in database:', users.length);
-        
-        // Create a map for quick lookup
-        const emailToWalletMap = new Map(
-          users.map(user => [user.email, user.walletAddress])
-        );
-        
-        // Process each email
-        for (const email of emails) {
-          const dbWalletAddress = emailToWalletMap.get(email);
-          
-          if (dbWalletAddress) {
-            // Use address from database
-            walletAddresses.push(dbWalletAddress);
-            addressSources.push({ input: email, type: 'email', source: 'database', address: dbWalletAddress });
-            console.log(`[API] Found in DB: ${email} -> ${dbWalletAddress}`);
-          } else {
-            // Generate predetermined wallet address
-            try {
-              console.log(`[API] Generating predetermined wallet for: ${email}`);
-              const predeterminedResult = await generatePredeterminedWallet(email);
-              const predeterminedAddress = predeterminedResult.predeterminedAddress;
-              
-              walletAddresses.push(predeterminedAddress);
-              addressSources.push({ input: email, type: 'email', source: 'predetermined', address: predeterminedAddress });
-              console.log(`[API] Generated predetermined: ${email} -> ${predeterminedAddress}`);
-            } catch (predeterminedError) {
-              console.error(`[API] Failed to generate predetermined wallet for ${email}:`, predeterminedError);
-              console.warn(`[API] Skipping ${email} due to predetermined wallet generation failure`);
-            }
+        // Generate predetermined wallets for each hashed email
+        for (const hashedEmail of hashedEmails) {
+          try {
+            console.log(`[API] Generating predetermined wallet for hashed identifier: ${hashedEmail.substring(0, 8)}...`);
+            
+            // **UPDATED: Use hashed email as the identifier for predetermined wallet generation**
+            const predeterminedResult = generatePredeterminedWalletForAllowlist(
+              hashedEmail, // Use hashed email as identifier
+              contractId, 
+              'allowlist-creation'
+            );
+            const predeterminedAddress = predeterminedResult.predeterminedAddress;
+            
+            walletAddresses.push(predeterminedAddress);
+            addressSources.push({ 
+              input: hashedEmail, 
+              type: 'hashed_email', 
+              source: 'predetermined', 
+              address: predeterminedAddress,
+              context: 'allowlist-creation' // Track context
+            });
+            console.log(`[API] Generated predetermined wallet: ${hashedEmail.substring(0, 8)}... -> ${predeterminedAddress.substring(0, 8)}...`);
+          } catch (predeterminedError) {
+            console.error(`[API] Failed to generate predetermined wallet for hashed identifier ${hashedEmail.substring(0, 8)}...:`, predeterminedError);
+            console.warn(`[API] Skipping hashed identifier due to predetermined wallet generation failure`);
           }
         }
       }
       
-      console.log('[API] Final wallet addresses for allowlist:', walletAddresses);
-      console.log('[API] Address sources:', addressSources);
+      console.log('[API] Final wallet addresses for allowlist:', walletAddresses.map(addr => addr.substring(0, 8) + '...'));
+      console.log('[API] Address sources:', addressSources.map(source => ({
+        type: source.type,
+        source: source.source,
+        inputPreview: source.input.substring(0, 8) + '...',
+        addressPreview: source.address.substring(0, 8) + '...'
+      })));
     }
     
     // Get admin private key from environment
@@ -344,11 +334,15 @@ export async function POST(req: NextRequest) {
       name: allowlistName,
       signerCount: walletAddresses.length,
       walletAddresses,
-      addressSources,
+      addressSources: addressSources.map(source => ({
+        type: source.type,
+        source: source.source,
+        inputPreview: source.input.substring(0, 8) + '...',
+        addressPreview: source.address.substring(0, 8) + '...'
+      })),
       summary: {
-        emails: addressSources.filter(s => s.type === 'email').length,
+        hashedEmails: addressSources.filter(s => s.type === 'hashed_email').length,
         wallets: addressSources.filter(s => s.type === 'wallet').length,
-        database: addressSources.filter(s => s.source === 'database').length,
         predetermined: addressSources.filter(s => s.source === 'predetermined').length,
         direct: addressSources.filter(s => s.source === 'direct').length,
         total: addressSources.length

@@ -6,53 +6,46 @@ import { log } from '@/app/utils/logger';
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const userEmail = searchParams.get('userId'); // This is actually the email
+    const userGoogleIdHash = searchParams.get('userGoogleIdHash'); // Only hashed Google ID
     const status = searchParams.get('status');
 
-    log.info('Fetching contracts', { userEmail, status });
+    log.info('Fetching contracts', { 
+      userGoogleIdHash: userGoogleIdHash?.substring(0, 8) + '...', 
+      status 
+    });
 
-    // First find the user by email
-    let userId;
-    if (userEmail) {
-      const user = await prisma.user.findUnique({
-        where: { email: userEmail },
-        select: { id: true }
+    if (!userGoogleIdHash) {
+      log.warn('Missing required parameters', { 
+        hasUserGoogleIdHash: Boolean(userGoogleIdHash)
       });
-
-      log.info('User lookup result:', {
-        email: userEmail,
-        found: !!user
-      });
-
-      if (!user) {
-        return NextResponse.json([]);  // Return empty array if user not found
-      }
-      userId = user.id;
+      return NextResponse.json(
+        { error: 'Hashed Google ID is required' },
+        { status: 400 }
+      );
     }
 
     // Build the where clause to include:
-    // 1. Contracts owned by the user (all statuses)
-    // 2. Contracts where user is a signer and status is not DRAFT
+    // 1. Contracts owned by the user (by hashed Google ID)
+    // 2. Contracts where user has already signed (by hashed Google ID in signatures)
+    // 3. Contracts where user's hashed Google ID is in metadata signers
     const where = {
       OR: [
-        // User's own contracts (all statuses)
-        { ownerId: userId },
-        // Contracts where user is a signer (any non-DRAFT status)
-        // This includes PENDING contracts (whether they've signed or not)
+        // User's own contracts - match by ownerGoogleIdHash
+        { ownerGoogleIdHash: userGoogleIdHash },
+        // Contracts where user has already signed
         {
-          AND: [
-            {
-              metadata: {
-                path: ['signers'],
-                array_contains: userEmail
-              }
-            },
-            {
-              status: {
-                not: 'DRAFT' // Show everything except DRAFT
-              }
+          signatures: {
+            some: {
+              userGoogleIdHash: userGoogleIdHash
             }
-          ]
+          }
+        },
+        // Contracts where user is invited (hashed Google ID in signers)
+        {
+          metadata: {
+            path: ['signers'],
+            array_contains: userGoogleIdHash
+          }
         }
       ],
       // Apply status filter if provided
@@ -62,22 +55,16 @@ export async function GET(request: Request) {
     const contracts = await prisma.contract.findMany({
       where,
       include: {
-        owner: true,
-        signatures: {
-          include: {
-            user: true,
-          },
-        },
+        signatures: true
       },
       orderBy: {
-        createdAt: 'desc',
-      },
+        createdAt: 'desc'
+      }
     });
 
     log.info('Successfully fetched contracts', { 
       count: contracts.length,
-      userEmail,
-      userId 
+      userGoogleIdHash: userGoogleIdHash.substring(0, 8) + '...'
     });
     
     return NextResponse.json(contracts);
@@ -99,108 +86,35 @@ export async function POST(request: Request) {
     log.info('Contracts API: Starting contract creation request');
     
     const body = await request.json();
-    const { title, description, content, ownerId: ownerEmail, metadata } = body;
+    const { title, description, content, ownerGoogleIdHash, metadata } = body;
 
     log.info('Contracts API: Request payload', {
       title,
-      ownerEmail,
+      ownerGoogleIdHash: ownerGoogleIdHash?.substring(0, 8) + '...',
       hasDescription: !!description,
       hasContent: !!content,
       hasMetadata: !!metadata,
       metadataKeys: metadata ? Object.keys(metadata) : []
     });
 
-    if (!title || !ownerEmail) {
+    if (!title || !ownerGoogleIdHash) {
       log.warn('Contracts API: Missing required fields', {
         hasTitle: !!title,
-        hasOwnerEmail: !!ownerEmail
+        hasOwnerGoogleIdHash: !!ownerGoogleIdHash
       });
       return NextResponse.json(
-        { error: 'Title and owner email are required' },
+        { error: 'Title and hashed Google ID are required' },
         { status: 400 }
       );
     }
 
-    // Detailed user lookup with timing
-    const startLookup = Date.now();
-    log.info('Contracts API: Looking up user', { email: ownerEmail });
-    
-    const user = await prisma.user.findUnique({
-      where: { email: ownerEmail },
-      select: { id: true, email: true, walletAddress: true }
-    });
-    
-    const lookupDuration = Date.now() - startLookup;
-    log.info('Contracts API: User lookup completed', {
-      email: ownerEmail,
-      found: !!user,
-      lookupDurationMs: lookupDuration,
-      userData: user ? {
-        id: user.id,
-        hasWalletAddress: !!user.walletAddress
-      } : null
-    });
-
-    if (!user) {
-      log.error('Contracts API: User not found in database', {
-        email: ownerEmail,
-        action: 'Attempting to create user automatically'
-      });
-      
-      // Try to create the user automatically
-      try {
-        const createUserResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/users`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            email: ownerEmail,
-            walletAddress: 'placeholder-' + Date.now(), // Temporary placeholder
-            name: ownerEmail.split('@')[0] // Simple name from email
-          })
-        });
-        
-        if (createUserResponse.ok) {
-          const newUser = await createUserResponse.json();
-          log.info('Contracts API: Created missing user automatically', {
-            id: newUser.id,
-            email: newUser.email
-          });
-          
-          // Use the newly created user
-          user = newUser;
-        } else {
-          const errorData = await createUserResponse.json();
-          log.error('Contracts API: Failed to create user automatically', {
-            statusCode: createUserResponse.status,
-            error: errorData
-          });
-          
-          return NextResponse.json(
-            { error: 'Owner not found and could not be created automatically' },
-            { status: 404 }
-          );
-        }
-      } catch (userCreateError) {
-        log.error('Contracts API: Error during automatic user creation', {
-          error: userCreateError instanceof Error ? userCreateError.message : String(userCreateError)
-        });
-        
-        return NextResponse.json(
-          { error: 'User not found' },
-          { status: 404 }
-        );
-      }
-    }
-
     log.info('Contracts API: Creating contract', {
       title,
-      ownerId: user.id,
-      ownerEmail
+      ownerGoogleIdHash: ownerGoogleIdHash.substring(0, 8) + '...',
+      hasSigners: !!(metadata?.signers?.length)
     });
 
-    // Now create the contract
+    // Create the contract
     const startContractCreate = Date.now();
     try {
       const contract = await withTransaction(async (tx) => {
@@ -209,17 +123,12 @@ export async function POST(request: Request) {
             title,
             description,
             content,
-            ownerId: user.id,
+            ownerGoogleIdHash,
             status: 'DRAFT',
             metadata,
           },
           include: {
-            owner: true,
-            signatures: {
-              include: {
-                user: true,
-              },
-            },
+            signatures: true
           },
         });
         
@@ -230,7 +139,8 @@ export async function POST(request: Request) {
       log.info('Contracts API: Contract created successfully', {
         contractId: contract.id,
         title: contract.title,
-        ownerId: contract.ownerId,
+        ownerGoogleIdHash: ownerGoogleIdHash.substring(0, 8) + '...',
+        signerCount: metadata?.signers?.length || 0,
         createDurationMs: createDuration
       });
       
@@ -280,12 +190,7 @@ export async function PUT(request: Request) {
           metadata,
         },
         include: {
-          owner: true,
-          signatures: {
-            include: {
-              user: true,
-            },
-          },
+          signatures: true
         },
       });
     });
@@ -301,7 +206,7 @@ export async function PUT(request: Request) {
   }
 }
 
-// DELETE /api/contracts - Delete a contract
+// DELETE /api/contracts - Delete a contract  
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);

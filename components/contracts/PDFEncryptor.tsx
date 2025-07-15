@@ -5,6 +5,7 @@ import { SealClient, getAllowlistedKeyServers } from '@mysten/seal';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromHEX, toHEX } from '@mysten/sui/utils';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
+import { hashGoogleId } from '@/app/utils/privacy'; // Add this import
 
 interface PDFEncryptorProps {
   file: File;
@@ -51,13 +52,27 @@ export default function PDFEncryptor({
       setStatus('encrypting');
       onProgress?.(10);
 
+      // Hash any email addresses for privacy before sending to API
+      const hashedSignerAddresses = await Promise.all(
+        signerAddresses.map(async (address) => {
+          // Check if it's an email (contains @) and hash it
+          if (address.includes('@')) {
+            const hashedEmail = await hashGoogleId(`email_${address}`);
+            console.log(`[PDFEncryptor] Hashed email for privacy: ${address.substring(0, 5)}...`);
+            return hashedEmail;
+          }
+          // If it's already a wallet address, return as-is
+          return address;
+        })
+      );
+
       // Include user's wallet address in signers
       const allSignerAddresses = [
-        ...signerAddresses,
+        ...hashedSignerAddresses, // Now contains hashed emails
         ...(userAddress ? [userAddress] : [])
       ].filter((addr, index, arr) => arr.indexOf(addr) === index); // Remove duplicates
 
-      console.log('[PDFEncryptor] Creating allowlist with addresses:', allSignerAddresses);
+      console.log('[PDFEncryptor] Creating allowlist with hashed addresses:', allSignerAddresses.map(addr => addr.substring(0, 8) + '...'));
 
       // Create allowlist with user's wallet address included
       const allowlistResponse = await fetch('/api/seal/create-allowlist', {
