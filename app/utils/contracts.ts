@@ -26,7 +26,7 @@ export const createContract = async (data: {
   description?: string;
   content: string;
   ownerGoogleIdHash: string; // Already hashed
-  signerGoogleIdHashes?: string[]; // Already hashed Google IDs
+  //signerGoogleIdHashes?: string[]; // Already hashed Google IDs
   metadata?: {
     [key: string]: any;
   };
@@ -41,7 +41,7 @@ export const createContract = async (data: {
       ownerGoogleIdHash: data.ownerGoogleIdHash,
       metadata: {
         ...data.metadata,
-        signers: data.signerGoogleIdHashes || [], // Store hashed Google IDs in signers array
+        
       },
     }),
   });

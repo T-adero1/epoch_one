@@ -94,7 +94,11 @@ export async function POST(request: Request) {
       hasDescription: !!description,
       hasContent: !!content,
       hasMetadata: !!metadata,
-      metadataKeys: metadata ? Object.keys(metadata) : []
+      metadataKeys: metadata ? Object.keys(metadata) : [],
+      // ✅ ADD: Log encrypted email info
+      hasEncryptedEmails: !!(metadata?.encryptedSignerEmails),
+      encryptedEmailCount: metadata?.encryptedSignerEmails?.length || 0,
+      signerCount: metadata?.signers?.length || 0
     });
 
     if (!title || !ownerGoogleIdHash) {

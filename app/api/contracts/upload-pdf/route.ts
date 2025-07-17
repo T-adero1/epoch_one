@@ -16,6 +16,10 @@ export async function POST(request: NextRequest) {
     const documentId = formData.get('documentId') as string;
     const capId = formData.get('capId') as string;
     const isEncrypted = formData.get('isEncrypted') === 'true';
+    
+    // ✅ ADD THIS - Get authorized wallet addresses
+    const authorizedUsersStr = formData.get('authorizedUsers') as string;
+    const authorizedUsers = authorizedUsersStr ? JSON.parse(authorizedUsersStr) : [];
 
     if (!contractId) {
       return NextResponse.json(
@@ -46,7 +50,7 @@ export async function POST(request: NextRequest) {
       // Upload encrypted file to S3
       uploadResult = await uploadToS3(encryptedFile, contractId);
 
-      // Update contract with encryption metadata
+      // ✅ UPDATE THIS - Include authorizedUsers in the database update
       const updatedContract = await prisma.contract.update({
         where: { id: contractId },
         data: {
@@ -62,9 +66,11 @@ export async function POST(request: NextRequest) {
           sealCapId: capId,
           isEncrypted: true,
           originalFileName: file?.name || `${contractId}.pdf`,
+          // ✅ ADD THIS - Store authorized wallet addresses
+          authorizedUsers: authorizedUsers,
         },
         include: {
-          signatures: true // Only include signatures, no user data
+          signatures: true
         },
       });
 
@@ -75,7 +81,8 @@ export async function POST(request: NextRequest) {
         encryption: {
           allowlistId,
           documentId,
-          capId
+          capId,
+          authorizedUsers // ✅ ADD THIS - Return in response
         }
       });
       

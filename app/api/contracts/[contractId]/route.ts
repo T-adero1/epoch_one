@@ -20,12 +20,8 @@ export async function GET(
     const contract = await prisma.contract.findUnique({
       where: { id: contractId },
       include: {
-        owner: true,
-        signatures: {
-          include: {
-            user: true,
-          },
-        },
+        // ✅ REMOVED: owner relation (doesn't exist in privacy schema)
+        signatures: true, // ✅ SIMPLIFIED: no user relation needed
       },
     });
     
@@ -44,17 +40,22 @@ export async function GET(
       contractId,
       title: contract.title,
       status: contract.status,
-      ownerEmail: contract.owner.email,
+      ownerGoogleIdHash: contract.ownerGoogleIdHash?.substring(0, 8) + '...', // ✅ UPDATED
       signatureCount: contract.signatures.length,
-      signers: contract.metadata?.signers || []
+      // ✅ ADD: Log encrypted email info
+      hasEncryptedEmails: !!(contract.metadata as any)?.encryptedSignerEmails,
+      encryptedEmailCount: (contract.metadata as any)?.encryptedSignerEmails?.length || 0,
+      signers: (contract.metadata as any)?.signers || []
     });
     
     log.debug('Detailed contract data', {
       contractId,
       content: contract.content ? `${contract.content.substring(0, 50)}...` : 'No content',
+      metadata: contract.metadata, // ✅ ADD: Log full metadata
       signatures: contract.signatures.map(sig => ({
         id: sig.id,
-        userEmail: sig.user.email,
+        userGoogleIdHash: sig.userGoogleIdHash?.substring(0, 8) + '...', // ✅ UPDATED
+        email: sig.email, // This might be null in privacy schema
         status: sig.status,
         signedAt: sig.signedAt
       }))
@@ -95,11 +96,7 @@ export async function PATCH(
     const existingContract = await prisma.contract.findUnique({
       where: { id: contractId },
       include: {
-        signatures: {
-          include: {
-            user: true,
-          },
-        },
+        signatures: true, // ✅ SIMPLIFIED: removed user relation
       }
     });
     
@@ -121,7 +118,10 @@ export async function PATCH(
       title: existingContract.title,
       status: existingContract.status,
       signatureCount: existingContract.signatures.length,
-      signers: existingContract.metadata?.signers || []
+      // ✅ UPDATED: Log encrypted email info
+      hasEncryptedEmails: !!(existingContract.metadata as any)?.encryptedSignerEmails,
+      encryptedEmailCount: (existingContract.metadata as any)?.encryptedSignerEmails?.length || 0,
+      signers: (existingContract.metadata as any)?.signers || []
     });
     
     // Special handling for status updates
@@ -134,12 +134,15 @@ export async function PATCH(
       
       // If changing from DRAFT to PENDING, make sure it has signers
       if (body.status === 'PENDING' && existingContract.status === 'DRAFT') {
-        const signers = existingContract.metadata?.signers || [];
-        if (signers.length === 0) {
+        const signers = (existingContract.metadata as any)?.signers || [];
+        const encryptedEmails = (existingContract.metadata as any)?.encryptedSignerEmails || [];
+        
+        if (signers.length === 0 && encryptedEmails.length === 0) {
           const errorResponse = { error: 'Cannot send contract for signatures without adding signers' };
           log.warn('Cannot set contract to PENDING without signers', { 
             contractId,
             signers,
+            encryptedEmails: encryptedEmails.length,
             response: errorResponse
           });
           return NextResponse.json(
@@ -150,7 +153,7 @@ export async function PATCH(
         log.debug('Contract has signers, status change allowed', {
           contractId,
           signerCount: signers.length,
-          signers
+          encryptedEmailCount: encryptedEmails.length
         });
       }
     }
@@ -160,11 +163,20 @@ export async function PATCH(
     
     // Handle metadata field if present
     if (body.metadata) {
-      // Merge with existing metadata to preserve fields
+      // Merge with existing metadata to preserve fields (including encrypted emails)
       updateData.metadata = {
-        ...(existingContract.metadata || {}),
+        ...(existingContract.metadata as Record<string, any> || {}),
         ...body.metadata
       };
+      
+      // ✅ ADD: Log metadata update
+      log.debug('Updating metadata', {
+        contractId,
+        existingMetadataKeys: Object.keys(existingContract.metadata as Record<string, any> || {}),
+        newMetadataKeys: Object.keys(body.metadata),
+        mergedMetadataKeys: Object.keys(updateData.metadata),
+        hasEncryptedEmails: !!updateData.metadata.encryptedSignerEmails
+      });
     }
     
     // Handle standard fields
@@ -179,13 +191,14 @@ export async function PATCH(
       }
     });
     
-    // Only try to update Walrus fields if they exist in the schema
-    // This is important because the Python script sends these fields
-    const walrusFields = [
-      'walrusBlobId', 'allowlistId', 'documentId', 'authorizedUsers', 'encryptionInfo'
+    // Handle additional schema fields
+    const additionalFields = [
+      'walrusBlobId', 'allowlistId', 'documentId', 'authorizedUsers', 
+      'encryptionInfo', 'sealAllowlistId', 'sealDocumentId', 'sealCapId', 
+      'isEncrypted', 'originalFileName'
     ];
     
-    walrusFields.forEach(field => {
+    additionalFields.forEach(field => {
       if (body[field] !== undefined) {
         updateData[field] = body[field];
       }
@@ -195,181 +208,27 @@ export async function PATCH(
       contractId,
       updateDataFields: Object.keys(updateData),
       hasMetadata: !!updateData.metadata,
-      hasWalrusFields: walrusFields.some(f => f in updateData)
+      hasEncryptedEmails: !!(updateData.metadata?.encryptedSignerEmails)
     });
     
-    try {
     const updatedContract = await prisma.contract.update({
       where: { id: contractId },
-        data: updateData,
+      data: updateData,
       include: {
-        owner: true,
-        signatures: {
-          include: {
-            user: true,
-          },
-        },
+        signatures: true, // ✅ SIMPLIFIED: removed user relation
       },
     });
     
     log.info('Contract updated successfully', { 
       contractId,
       title: updatedContract.title,
-      newStatus: updatedContract.status
+      newStatus: updatedContract.status,
+      // ✅ ADD: Log encrypted email info
+      hasEncryptedEmails: !!(updatedContract.metadata as any)?.encryptedSignerEmails,
+      encryptedEmailCount: (updatedContract.metadata as any)?.encryptedSignerEmails?.length || 0
     });
     
     return NextResponse.json(updatedContract);
-    } catch (prismaError) {
-      // If Prisma validation fails, try a fallback approach with just metadata
-      log.warn('Prisma update failed, attempting fallback with metadata only', {
-        contractId,
-        error: prismaError instanceof Error ? prismaError.message : String(prismaError),
-      });
-      
-      // Extract Walrus data from body and put it all in metadata
-      const walrusMetadata = existingContract.metadata 
-        ? typeof existingContract.metadata === 'object' 
-          ? { ...existingContract.metadata as Record<string, any> } 
-          : {}
-        : {};
-      
-      if (body.metadata?.walrus) {
-        walrusMetadata.walrus = body.metadata.walrus;
-      }
-      
-      // Special handling for Walrus fields
-      const walrusBlobId = body.walrusBlobId || body.metadata?.walrus?.storage?.blobId || null;
-      const allowlistId = body.allowlistId || body.metadata?.walrus?.encryption?.allowlistId || null;
-      const documentId = body.documentId || body.metadata?.walrus?.encryption?.documentId || null;
-      const authorizedUsers = body.authorizedUsers || body.metadata?.walrus?.authorizedWallets || [];
-      
-      log.debug('Extracted Walrus fields for fallback update', {
-        walrusBlobId,
-        allowlistId,
-        documentId,
-        hasAuthorizedUsers: Array.isArray(authorizedUsers) && authorizedUsers.length > 0
-      });
-      
-      // First try with just metadata which seems to work
-      try {
-        const metadataOnlyContract = await prisma.contract.update({
-          where: { id: contractId },
-          data: { metadata: walrusMetadata },
-          include: {
-            owner: true,
-            signatures: {
-              include: {
-                user: true,
-              },
-            },
-          },
-        });
-        
-        log.info('Contract metadata updated successfully, now trying Walrus fields', { 
-          contractId,
-          walrusBlobId: walrusBlobId?.substring(0, 10) + '...'
-        });
-        
-        // Now try to update each individual field one at a time
-        if (walrusBlobId) {
-          try {
-            // Cast to any to bypass type checking since we know these fields exist in the actual database
-            await prisma.$executeRaw`UPDATE "Contract" SET "walrusBlobId" = ${walrusBlobId} WHERE id = ${contractId}`;
-            log.info('Updated walrusBlobId successfully via raw query', { contractId });
-          } catch (walrusErr) {
-            log.error('Failed to update walrusBlobId', { 
-              error: walrusErr instanceof Error ? walrusErr.message : String(walrusErr),
-              contractId
-            });
-          }
-        }
-        
-        if (allowlistId) {
-          try {
-            await prisma.$executeRaw`UPDATE "Contract" SET "allowlistId" = ${allowlistId} WHERE id = ${contractId}`;
-            log.info('Updated allowlistId successfully via raw query', { contractId });
-          } catch (allowErr) {
-            log.error('Failed to update allowlistId', { 
-              error: allowErr instanceof Error ? allowErr.message : String(allowErr),
-              contractId
-            });
-          }
-        }
-        
-        if (documentId) {
-          try {
-            await prisma.$executeRaw`UPDATE "Contract" SET "documentId" = ${documentId} WHERE id = ${contractId}`;
-            log.info('Updated documentId successfully via raw query', { contractId });
-          } catch (docErr) {
-            log.error('Failed to update documentId', { 
-              error: docErr instanceof Error ? docErr.message : String(docErr),
-              contractId
-            });
-          }
-        }
-        
-        if (Array.isArray(authorizedUsers) && authorizedUsers.length > 0) {
-          try {
-            // For array types, we need to convert to JSON string
-            const authorizedUsersJson = JSON.stringify(authorizedUsers);
-            await prisma.$executeRaw`UPDATE "Contract" SET "authorizedUsers" = ${authorizedUsersJson}::jsonb WHERE id = ${contractId}`;
-            log.info('Updated authorizedUsers successfully via raw query', { contractId });
-          } catch (authErr) {
-            log.error('Failed to update authorizedUsers', { 
-              error: authErr instanceof Error ? authErr.message : String(authErr),
-              contractId
-            });
-          }
-        }
-        
-        // Get the updated contract with all fields to return
-        try {
-          const finalContract = await prisma.contract.findUnique({
-            where: { id: contractId },
-            include: {
-              owner: true,
-              signatures: {
-                include: {
-                  user: true,
-                },
-              },
-            },
-          });
-          
-          if (!finalContract) {
-            throw new Error('Contract not found after update');
-          }
-          
-          log.info('Retrieved final contract state after all updates', { 
-            contractId,
-            hasWalrusBlobId: !!(finalContract as any).walrusBlobId,
-            hasAllowlistId: !!(finalContract as any).allowlistId,
-            hasDocumentId: !!(finalContract as any).documentId,
-            authorizedUsersCount: (finalContract as any).authorizedUsers?.length || 0
-          });
-          
-          return NextResponse.json(finalContract);
-        } catch (finalFetchErr) {
-          log.warn('Failed to fetch final contract state, returning metadata-only contract', {
-            error: finalFetchErr instanceof Error ? finalFetchErr.message : String(finalFetchErr),
-            contractId
-          });
-          // Return the updated contract with just metadata for now
-          return NextResponse.json(metadataOnlyContract);
-        }
-      } catch (metadataErr) {
-        log.error('Failed to update even the metadata', {
-          error: metadataErr instanceof Error ? metadataErr.message : String(metadataErr),
-          contractId
-        });
-        
-        const errorResponse = { error: 'Failed to update contract' };
-        return NextResponse.json(
-          errorResponse,
-          { status: 500 }
-        );
-      }
-    }
   } catch (error) {
     const errorResponse = { error: 'Failed to update contract' };
     log.error('Error updating contract', {

@@ -417,7 +417,7 @@ class PDFCache {
             if (deletedCount > 0) {
               console.log(`[PDF_CACHE] Cleaned up ${deletedCount} expired session keys`);
             }
-            resolve();
+          resolve();
           }
         };
       });
@@ -532,7 +532,7 @@ class PDFCache {
         completedCount++;
         if (completedCount === 3) {
           console.log('[PDF_CACHE] Cleared all cached data');
-          resolve();
+        resolve();
         }
       };
       

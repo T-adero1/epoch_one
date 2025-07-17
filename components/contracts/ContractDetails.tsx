@@ -35,6 +35,9 @@ import { Avatar, AvatarFallback} from '@/components/ui/avatar'
 import { generateSigningLink, areAllSignaturesDone } from '@/app/utils/signatures'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { toast } from '@/components/ui/use-toast'
+import EncryptedEmailDisplay from '@/components/contracts/EncryptedEmailDisplay';
+// **NEW: Import email decryption utilities**
+import { decryptSignerEmails, canDecryptEmails } from '@/app/utils/emailEncryption';
 
 // Define interface for the contract used in this component
 interface ContractSignature {
@@ -68,6 +71,8 @@ interface Contract {
         capId?: string;
       };
     };
+    encryptedSignerEmails?: string[]; // Add this field
+    ownerGoogleIdHash?: string; // Add this field
   } | null;
   owner?: {
     id: string;
@@ -799,6 +804,83 @@ export default function ContractDetails({
     );
   };
 
+  // **NEW: Add state for managing decrypted emails**
+  const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
+  const [isDecryptingSigners, setIsDecryptingSigners] = useState(false);
+  const [canDecryptSigners, setCanDecryptSigners] = useState(false);
+  const [signersDecrypted, setSignersDecrypted] = useState(false);
+
+  // **NEW: Helper function to detect if emails are encrypted**
+  const areEmailsEncrypted = (emails: string[]): boolean => {
+    if (!emails || emails.length === 0) return false;
+    
+    // Check if emails look like encrypted data (base64-like strings, not email format)
+    return emails.some(email => {
+      // Encrypted emails will be base64 strings, much longer than typical emails
+      // and won't contain @ symbol or common email patterns
+      return email.length > 50 && 
+             !email.includes('@') && 
+             /^[A-Za-z0-9+/=]+$/.test(email);
+    });
+  };
+
+  // **NEW: Check if current user can decrypt emails**
+  useEffect(() => {
+    const checkDecryptPermissions = async () => {
+      if (!user?.googleId || !contract.ownerGoogleIdHash) {
+        setCanDecryptSigners(false);
+        return;
+      }
+
+      try {
+        const allowed = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
+        setCanDecryptSigners(allowed);
+      } catch (error) {
+        console.error('[ContractDetails] Error checking decrypt permissions:', error);
+        setCanDecryptSigners(false);
+      }
+    };
+
+    checkDecryptPermissions();
+  }, [user?.googleId, contract.ownerGoogleIdHash]);
+
+  // **NEW: Auto-decrypt emails if user is owner and emails are encrypted**
+  useEffect(() => {
+    const autoDecryptSigners = async () => {
+      const signers = contract.metadata?.signers || [];
+      
+      if (!signers.length || !canDecryptSigners || signersDecrypted) return;
+      
+      // Check if emails look encrypted
+      if (!areEmailsEncrypted(signers)) {
+        // Emails are not encrypted, use them as-is
+        setDecryptedSigners(signers);
+        setSignersDecrypted(true);
+        return;
+      }
+
+      // Emails are encrypted, attempt to decrypt
+      if (user?.googleId) {
+        setIsDecryptingSigners(true);
+        try {
+          console.log('[ContractDetails] Auto-decrypting signer emails...');
+          const decrypted = await decryptSignerEmails(signers, user.googleId);
+          setDecryptedSigners(decrypted);
+          setSignersDecrypted(true);
+          console.log('[ContractDetails] Successfully decrypted', decrypted.length, 'signer emails');
+        } catch (error) {
+          console.error('[ContractDetails] Auto-decryption failed:', error);
+          // Keep encrypted emails to show encrypted state
+          setDecryptedSigners([]);
+        } finally {
+          setIsDecryptingSigners(false);
+        }
+      }
+    };
+
+    autoDecryptSigners();
+  }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
+
   return (
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4 px-4 sm:px-6">
@@ -880,60 +962,181 @@ export default function ContractDetails({
           <TabsContent value="signers" className="min-h-[400px] sm:min-h-[500px]">
             <div className="border rounded-md p-4 sm:p-6 min-h-[400px] sm:min-h-[500px] bg-white">
               <h3 className="text-base sm:text-lg font-medium mb-4">Signers</h3>
-              {contract.metadata?.signers?.length ? (
-                <div className="space-y-3 sm:space-y-4">
-                  {contract.metadata.signers.map((signer: string, i: number) => {
-                    const signature = contract.signatures?.find(
-                      (sig: ContractSignature) => sig.user.email.toLowerCase() === signer.toLowerCase()
-                    );
-                    const hasSigned = signature?.status === 'SIGNED';
-                    
-                    return (
-                      <div key={i} className="border rounded-md p-3 sm:p-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8 flex-shrink-0">
-                              <AvatarFallback className="bg-blue-100 text-blue-600">
-                                {signer.slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium text-sm sm:text-base truncate">{signer}</p>
-                              <p className="text-xs sm:text-sm text-gray-500">
-                                {hasSigned 
-                                  ? `Signed on ${format(new Date(signature.signedAt!), 'MMM dd, yyyy')}`
-                                  : 'Pending signature'}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between sm:justify-end gap-2">
-                            {hasSigned ? (
-                              <Badge variant="outline" className="text-green-600 bg-green-50 text-xs">
-                                Signed
-                              </Badge>
-                            ) : (
-                              <>
-                                <Badge variant="outline" className="text-yellow-600 bg-yellow-50 text-xs">
-                                  Pending
-                                </Badge>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => copySigningLink(signer)}
-                                  className="text-xs sm:text-sm"
-                                >
-                                  <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                                  <span className="hidden sm:inline">Share Link</span>
-                                  <span className="sm:hidden">Share</span>
-                                </Button>
-                              </>
-                            )}
-                          </div>
+              
+              {/* **NEW: Show loading state while decrypting** */}
+              {isDecryptingSigners ? (
+                <div className="flex items-center justify-center h-[200px]">
+                  <div className="text-center">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2 text-blue-600" />
+                    <p className="text-sm text-gray-600">Decrypting signer emails...</p>
+                  </div>
+                </div>
+              ) : contract.metadata?.signers?.length ? (
+                <div className="space-y-4">
+                  {/* **NEW: Show encryption status** */}
+                  {areEmailsEncrypted(contract.metadata.signers) && (
+                    <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <Shield className="h-4 w-4 text-purple-600 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm">
+                          <p className="font-medium text-purple-800">Encrypted Signer Emails</p>
+                          <p className="text-purple-700 mt-1">
+                            {canDecryptSigners 
+                              ? 'Signer emails have been decrypted below as you are the contract owner.'
+                              : 'Signer emails are encrypted. Only the contract owner can view them.'
+                            }
+                          </p>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  )}
+
+                  {/* **UPDATED: Use decrypted emails if available, otherwise show encrypted state** */}
+                  {canDecryptSigners && signersDecrypted && decryptedSigners.length > 0 ? (
+                    // **Show decrypted emails for contract owner**
+                    <div className="space-y-3 sm:space-y-4">
+                      {decryptedSigners.map((signer: string, i: number) => {
+                        const signature = contract.signatures?.find(
+                          (sig: ContractSignature) => sig.user.email.toLowerCase() === signer.toLowerCase()
+                        );
+                        const hasSigned = signature?.status === 'SIGNED';
+                        
+                        return (
+                          <div key={i} className="border rounded-md p-3 sm:p-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8 flex-shrink-0">
+                                  <AvatarFallback className="bg-blue-100 text-blue-600">
+                                    {signer.slice(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium text-sm sm:text-base truncate">{signer}</p>
+                                  <p className="text-xs sm:text-sm text-gray-500">
+                                    {hasSigned 
+                                      ? `Signed on ${format(new Date(signature.signedAt!), 'MMM dd, yyyy')}`
+                                      : 'Pending signature'}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center justify-between sm:justify-end gap-2">
+                                {hasSigned ? (
+                                  <Badge variant="outline" className="text-green-600 bg-green-50 text-xs">
+                                    Signed
+                                  </Badge>
+                                ) : (
+                                  <>
+                                    <Badge variant="outline" className="text-yellow-600 bg-yellow-50 text-xs">
+                                      Pending
+                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => copySigningLink(signer)}
+                                      className="text-xs sm:text-sm"
+                                    >
+                                      <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                      <span className="hidden sm:inline">Share Link</span>
+                                      <span className="sm:hidden">Share</span>
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : areEmailsEncrypted(contract.metadata.signers) ? (
+                    // **Show encrypted state for non-owners or when decryption failed**
+                    <div className="space-y-3 sm:space-y-4">
+                      {contract.metadata.signers.map((_, i: number) => (
+                        <div key={i} className="border rounded-md p-3 sm:p-4 bg-gray-50">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-8 w-8 flex-shrink-0">
+                                <AvatarFallback className="bg-gray-100 text-gray-500">
+                                  <Lock className="h-4 w-4" />
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-sm sm:text-base text-gray-600">
+                                  Encrypted Signer Email
+                                </p>
+                                <p className="text-xs sm:text-sm text-gray-500">
+                                  {canDecryptSigners ? 'Decryption failed' : 'View not authorized'}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center justify-between sm:justify-end gap-2">
+                              <Badge variant="outline" className="text-gray-600 bg-gray-100 text-xs">
+                                <Lock className="h-3 w-3 mr-1" />
+                                Encrypted
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    // **Show non-encrypted emails (backward compatibility)**
+                    <div className="space-y-3 sm:space-y-4">
+                      {contract.metadata.signers.map((signer: string, i: number) => {
+                        const signature = contract.signatures?.find(
+                          (sig: ContractSignature) => sig.user.email.toLowerCase() === signer.toLowerCase()
+                        );
+                        const hasSigned = signature?.status === 'SIGNED';
+                        
+                        return (
+                          <div key={i} className="border rounded-md p-3 sm:p-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8 flex-shrink-0">
+                                  <AvatarFallback className="bg-blue-100 text-blue-600">
+                                    {signer.slice(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium text-sm sm:text-base truncate">{signer}</p>
+                                  <p className="text-xs sm:text-sm text-gray-500">
+                                    {hasSigned 
+                                      ? `Signed on ${format(new Date(signature.signedAt!), 'MMM dd, yyyy')}`
+                                      : 'Pending signature'}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center justify-between sm:justify-end gap-2">
+                                {hasSigned ? (
+                                  <Badge variant="outline" className="text-green-600 bg-green-50 text-xs">
+                                    Signed
+                                  </Badge>
+                                ) : (
+                                  <>
+                                    <Badge variant="outline" className="text-yellow-600 bg-yellow-50 text-xs">
+                                      Pending
+                                    </Badge>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => copySigningLink(signer)}
+                                      className="text-xs sm:text-sm"
+                                    >
+                                      <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                      <span className="hidden sm:inline">Share Link</span>
+                                      <span className="sm:hidden">Share</span>
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-[300px] sm:h-[400px] text-gray-400">
@@ -948,12 +1151,16 @@ export default function ContractDetails({
                 </div>
               )}
               
+              {/* **UPDATED: Show status based on decrypted emails** */}
               <div className="mt-6 p-3 sm:p-4 border rounded-md bg-gray-50">
                 <h4 className="font-medium mb-2 text-sm sm:text-base">Contract Status</h4>
                 <p className="text-xs sm:text-sm text-gray-600">
-                  {areAllSignaturesDone(contract.metadata?.signers || [], contract.signatures)
+                  {areAllSignaturesDone(
+                    signersDecrypted ? decryptedSigners : (contract.metadata?.signers || []), 
+                    contract.signatures
+                  )
                     ? "All signatures collected! The contract is now complete."
-                    : `Waiting for ${contract.metadata?.signers?.length || 0 - (contract.signatures?.length || 0)} more signatures.`
+                    : `Waiting for ${(signersDecrypted ? decryptedSigners.length : (contract.metadata?.signers?.length || 0)) - (contract.signatures?.length || 0)} more signatures.`
                   }
                 </p>
               </div>

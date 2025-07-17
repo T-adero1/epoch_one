@@ -346,7 +346,8 @@ export async function POST(req: NextRequest) {
         predetermined: addressSources.filter(s => s.source === 'predetermined').length,
         direct: addressSources.filter(s => s.source === 'direct').length,
         total: addressSources.length
-      }
+      },
+      authorizedUsers: walletAddresses
     });
     
   } catch (error: any) {

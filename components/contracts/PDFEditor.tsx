@@ -413,7 +413,7 @@ export default function PDFEditor({
       // **UPDATED: Only reload if not encrypted**
       if (!isContractEncrypted(contract)) {
         console.log('[PDFEditor] Reloading PDF URL after replacement');
-        await loadPdfUrl();
+      await loadPdfUrl();
       } else {
         console.log('[PDFEditor] Skipping PDF URL reload for encrypted contract');
       }
@@ -797,8 +797,8 @@ export default function PDFEditor({
           showAIPanel ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'
         }`}>
           {renderPDFViewer()}
-        </div>
-
+                </div>
+                
         {/* AI Panel - (existing AI panel code unchanged) */}
         <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
           showAIPanel ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
@@ -954,7 +954,7 @@ export default function PDFEditor({
       )}
     </div>
   );
-}
+} 
 
 // AutoDecryptionView component (unchanged)
 const AutoDecryptionView = ({ 

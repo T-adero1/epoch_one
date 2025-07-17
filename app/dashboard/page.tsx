@@ -182,12 +182,17 @@ interface ContractWithRelations {
   description: string | null;
   content: string;
   status: string;
-  ownerId: string;
+  ownerGoogleIdHash: string;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
   metadata: { 
     signers?: string[],
+    // ✅ ADD: New encrypted email fields
+    encryptedSignerEmails?: string[],
+    signerCount?: number,
+    encryptedAt?: string,
+    // Existing fields
     walrus?: {
       storage?: {
         blobId?: string;
@@ -204,25 +209,35 @@ interface ContractWithRelations {
       lastUpdated?: string;
     }
   } | null;
-  owner: {
-    id: string;
-    name: string | null;
-    email: string;
-  };
+  // ✅ Removed owner relation - doesn't exist in current schema
   signatures: {
     id: string;
     status: string;
     signedAt: Date | null;
-    user: {
-      id: string;
-      name: string | null;
-      email: string;
-    };
+    userGoogleIdHash: string; // ✅ Matches actual Signature model
+    email: string | null;
+    walletAddress: string;
   }[];
   s3FileName?: string;
   s3FileSize?: number;
   s3ContentType?: string;
   s3FileKey?: string;
+  // ✅ Add additional fields from actual Contract model
+  allowlistId?: string;
+  authorizedUsers?: string[];
+  documentId?: string;
+  encryptionInfo?: any;
+  networkInfo?: string;
+  walrusBlobId?: string;
+  startDate?: Date;
+  endDate?: Date;
+  s3Bucket?: string;
+  s3UploadedAt?: Date;
+  sealAllowlistId?: string;
+  sealDocumentId?: string;
+  sealCapId?: string;
+  isEncrypted?: boolean;
+  originalFileName?: string;
 }
 
 // Add this component near the top of your file (after imports):
@@ -386,7 +401,7 @@ export default function DashboardPage() {
   
   // Helper function to check if current user is a signer (not owner) of a contract
   const isUserASignerNotOwner = (contract: ContractWithRelations): boolean => {
-    const isOwner = contract.ownerId === user?.id || contract.owner?.email === user?.email;
+    const isOwner = contract.ownerGoogleIdHash === user?.googleId;
     const isSigner = contract.metadata?.signers?.includes(user?.email || '');
     return isSigner && !isOwner;
   };
@@ -394,7 +409,7 @@ export default function DashboardPage() {
   // Helper function to check if current user has signed the contract
   const hasUserSigned = (contract: ContractWithRelations): boolean => {
     return contract.signatures?.some(sig => 
-      (sig.user?.email === user?.email || sig.user?.id === user?.id) && 
+      (sig.email === user?.email || sig.userGoogleIdHash === user?.googleId) && 
       sig.status === 'SIGNED'
     ) || false;
   };
@@ -402,7 +417,7 @@ export default function DashboardPage() {
   // Helper function to check if the owner has signed
   const hasOwnerSigned = (contract: ContractWithRelations): boolean => {
     return contract.signatures?.some(sig => 
-      (sig.user?.email === contract.owner?.email || sig.user?.id === contract.ownerId) && 
+      (sig.email === user?.email || sig.userGoogleIdHash === user?.googleId) && 
       sig.status === 'SIGNED'
     ) || false;
   };
@@ -411,14 +426,14 @@ export default function DashboardPage() {
   const hasAnyoneSigned = (contract: ContractWithRelations): boolean => {
     return contract.signatures?.some(sig => 
       sig.status === 'SIGNED' && 
-      sig.user?.email !== contract.owner?.email && 
-      sig.user?.id !== contract.ownerId
+      sig.email !== user?.email && 
+      sig.userGoogleIdHash !== user?.googleId
     ) || false;
   };
 
   // Helper function to check if current user is the owner
   const isUserOwner = (contract: ContractWithRelations): boolean => {
-    return contract.ownerId === user?.id || contract.owner?.email === user?.email;
+    return contract.ownerGoogleIdHash === user?.googleId;
   };
 
   // Helper function to get display status for contracts
@@ -432,10 +447,9 @@ export default function DashboardPage() {
       hasAnyoneSigned: hasAnyoneSigned(contract),
       hasOwnerSigned: hasOwnerSigned(contract),
       signatures: contract.signatures,
-      ownerId: contract.ownerId,
-      ownerEmail: contract.owner?.email,
+      ownerGoogleIdHash: contract.ownerGoogleIdHash,
       currentUserEmail: user?.email,
-      currentUserId: user?.id
+      currentUserId: user?.googleId
     });
 
     // If user is a signer (not owner)
@@ -886,16 +900,30 @@ export default function DashboardPage() {
       // Hash the owner's Google ID
       const ownerGoogleIdHash = await hashGoogleId(user.googleId);
       
-      // Hash signer Google IDs (for now, we'll use email as placeholder since we don't have signer Google IDs)
-      // In a real implementation, you'd need to get the Google IDs of the signers somehow
-      // For now, we'll hash the emails as a temporary solution
-      const signerGoogleIdHashes = await Promise.all(
-        validSigners.map(async (email) => {
-          // This is a temporary solution - in reality you'd need the actual Google IDs
-          // For now, we'll create a deterministic hash based on email
-          return await hashGoogleId(`email_placeholder_${email}`);
-        })
-      );
+      // ✅ NEW: Encrypt signer emails using owner's Google ID
+      let encryptedSignerEmails: string[] = [];
+      let signerGoogleIdHashes: string[] = [];
+      
+      if (validSigners.length > 0) {
+        console.log('[DASHBOARD] Processing', validSigners.length, 'signer emails');
+        
+        // Import email encryption utility
+        const { encryptSignerEmails } = await import('@/app/utils/emailEncryption');
+        
+        // Encrypt the signer emails using owner's Google ID
+        encryptedSignerEmails = await encryptSignerEmails(validSigners, user.googleId);
+        console.log('[DASHBOARD] Successfully encrypted signer emails:', {
+          original: validSigners,
+          encrypted: encryptedSignerEmails,
+          encryptedCount: encryptedSignerEmails.length
+        });
+        
+        // Also create hashed Google ID placeholders for discovery
+        signerGoogleIdHashes = await Promise.all(
+          validSigners.map(email => hashGoogleId(`email_placeholder_${email}`))
+        );
+        console.log('[DASHBOARD] Created', signerGoogleIdHashes.length, 'hashed signer identifiers');
+      }
       
       // Create the contract in database
       const actualContract = await createContract({
@@ -903,11 +931,22 @@ export default function DashboardPage() {
         description: newContract.description,
         content: newContract.content || '',
         ownerGoogleIdHash, // Use hashed Google ID
-        signerGoogleIdHashes, // Use hashed signer identifiers
         metadata: {
-          signerEmails: validSigners, // Keep emails in metadata for display/invite purposes
-          // NO PDF metadata here - we'll add it after encryption
+          // ✅ UPDATED: Store encrypted emails under existing 'signers' field for backwards compatibility
+          signers: encryptedSignerEmails, // This replaces the hashed Google IDs with encrypted emails
+          // Additional metadata for debugging/auditing
+          signerCount: validSigners.length,
+          encryptedAt: new Date().toISOString(),
+          // ✅ OPTIONAL: Keep hashed IDs separately for contract discovery if needed
+          // hashedSignerIds: signerGoogleIdHashes, // Only if you need this for discovery
         },
+      });
+
+      console.log('[DASHBOARD] Contract created with encrypted signer emails:', {
+        contractId: actualContract.id,
+        encryptedEmailCount: encryptedSignerEmails.length,
+        signers: encryptedSignerEmails, // These are now encrypted emails
+        metadata: actualContract.metadata
       });
 
       // Create contract object for immediate display with local PDF data
@@ -987,7 +1026,9 @@ export default function DashboardPage() {
     try {
       console.log(`[BACKGROUND] Starting PDF encryption and upload for contract ${contractId}`);
       
-      // Get signer addresses from the contract and hash any emails
+      // ✅ UPDATED: Get signer addresses from the stored encrypted emails instead of form data
+      // Since the form is reset, we need to get the emails from the contract metadata
+      // For now, we'll reconstruct from the original form data stored before reset
       const rawSignerAddresses = newContract.signers
         .filter(s => s.trim() !== '')
         .map(s => s.trim().toLowerCase());
@@ -1006,12 +1047,13 @@ export default function DashboardPage() {
         })
       );
       
-      // Define the encryption result type explicitly
+      // Define the encryption result type to include authorizedUsers
       type EncryptionResult = {
         encryptedBytes: Uint8Array;
         allowlistId: string;
         documentId: string;
         capId: string;
+        authorizedUsers: string[]; 
       };
       
       // Create a ref to hold the encryption result
@@ -1020,12 +1062,29 @@ export default function DashboardPage() {
       // Encrypt the PDF function
       const encryptPDF = async (): Promise<void> => {
         try {
-          // Create allowlist with user's wallet address included
+          // Create allowlist with user's contract-specific wallet address
+          const userAddress = user?.address; // Original address for comparison
+          // Hash the user's Google ID first for privacy
+        
+          
+          const { generateContractSpecificUserWallet } = await import('@/app/utils/contractWallet');
+          const contractSpecificUserAddress = await generateContractSpecificUserWallet(
+            user?.googleId!, 
+            contractId
+          );
+          
+          console.log('[BACKGROUND] Generated contract-specific user address:', {
+            originalAddress: userAddress?.substring(0, 8) + '...',
+            contractSpecificAddress: contractSpecificUserAddress.substring(0, 8) + '...',
+            contractId
+          });
+          
+
           // Use the existing user data from the component's useZkLogin hook
-          const userAddress = user?.address; // Get from component level
+           // Get from component level
           const allSignerAddresses = [
             ...signerAddresses, // Now contains hashed emails
-            ...(userAddress ? [userAddress] : [])
+            ...(contractSpecificUserAddress ? [contractSpecificUserAddress] : [])
           ].filter((addr, index, arr) => arr.indexOf(addr) === index);
 
           console.log('[BACKGROUND] Creating allowlist with hashed addresses:', allSignerAddresses.map(addr => addr.substring(0, 8) + '...'));
@@ -1043,7 +1102,14 @@ export default function DashboardPage() {
             throw new Error(`Failed to create allowlist: ${allowlistResponse.status}`);
           }
 
-          const { allowlistId, capId } = await allowlistResponse.json();
+          const { allowlistId, capId, authorizedUsers } = await allowlistResponse.json(); // ✅ Get authorizedUsers
+
+          console.log('[BACKGROUND] Received authorized users:', {
+            count: authorizedUsers.length,
+            users: authorizedUsers,
+            allowlistId,
+            capId
+          });
 
           // Initialize SEAL client
           const { SealClient, getAllowlistedKeyServers } = await import('@mysten/seal');
@@ -1082,23 +1148,33 @@ export default function DashboardPage() {
           const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
             '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
 
-          console.log('[BACKGROUND] Encrypting PDF with SEAL...');
+          console.log('[BACKGROUND] Encrypting PDF with SEAL...', {
+            documentId: documentIdHex,
+            allowlistId,
+            authorizedUserCount: authorizedUsers.length
+          });
+
           const { encryptedObject: encryptedBytes } = await sealClient.encrypt({
             threshold: 1,
             packageId: SEAL_PACKAGE_ID,
             id: documentIdHex,
             data: fileBytes
           });
-
-          // Assign the result with explicit typing
+         
+          // Assign the result with explicit typing INCLUDING authorizedUsers
           encryptionResult = {
             encryptedBytes,
             allowlistId,
             documentId: documentIdHex,
-            capId
+            capId,
+            authorizedUsers // ✅ ADD THIS
           };
 
-          console.log('[BACKGROUND] PDF encrypted successfully');
+          console.log('[BACKGROUND] PDF encrypted successfully', {
+            encryptedBytesLength: encryptedBytes.length,
+            authorizedUsers: authorizedUsers.map(u => u.substring(0, 8) + '...'),
+            documentId: documentIdHex
+          });
 
         } catch (error) {
           console.error('[BACKGROUND] Encryption failed:', error);
@@ -1120,7 +1196,10 @@ export default function DashboardPage() {
       // Convert encrypted bytes to base64 safely (no stack overflow)
       const base64EncryptedBytes = Buffer.from(typedEncryptionResult.encryptedBytes).toString('base64');
       
-      console.log('[BACKGROUND] Converted to base64, length:', base64EncryptedBytes.length);
+      console.log('[BACKGROUND] Converted to base64', {
+        length: base64EncryptedBytes.length,
+        authorizedUsers: typedEncryptionResult.authorizedUsers.map(u => u.substring(0, 8) + '...')
+      });
       
       // Upload encrypted PDF using existing endpoint
       const formData = new FormData();
@@ -1131,8 +1210,16 @@ export default function DashboardPage() {
       formData.append('documentId', typedEncryptionResult.documentId);
       formData.append('capId', typedEncryptionResult.capId);
       formData.append('isEncrypted', 'true');
+      // ✅ ADD THIS - Pass authorized users
+      formData.append('authorizedUsers', JSON.stringify(typedEncryptionResult.authorizedUsers));
 
-      console.log('[BACKGROUND] Uploading encrypted PDF...');
+      console.log('[BACKGROUND] Uploading encrypted PDF...', {
+        contractId,
+        allowlistId: typedEncryptionResult.allowlistId,
+        documentId: typedEncryptionResult.documentId,
+        authorizedUsers: typedEncryptionResult.authorizedUsers.map(u => u.substring(0, 8) + '...')
+      });
+
       const response = await fetch('/api/contracts/upload-pdf', {
         method: 'POST',
         body: formData,
@@ -1159,7 +1246,11 @@ export default function DashboardPage() {
             isEncrypted: true
           }
         );
-        console.log('[BACKGROUND] Cached encrypted PDF in IndexDB');
+        console.log('[BACKGROUND] Cached encrypted PDF in IndexDB', {
+          contractId,
+          allowlistId: typedEncryptionResult.allowlistId,
+          authorizedUsers: typedEncryptionResult.authorizedUsers.map(u => u.substring(0, 8) + '...')
+        });
       } catch (cacheError) {
         console.warn('[BACKGROUND] Failed to cache encrypted PDF:', cacheError);
         // Don't fail the entire operation if caching fails
@@ -2412,7 +2503,7 @@ export default function DashboardPage() {
                           const matchingSignature = blockchainDetailsContract.signatures?.find(
                             sig => sig.walletAddress === wallet
                           );
-                          const correspondingEmail = matchingSignature?.user?.email;
+                          const correspondingEmail = matchingSignature?.email;
                           
                           return (
                                 <div key={index} className="bg-gray-50 rounded-lg p-3 space-y-3">
@@ -2519,14 +2610,14 @@ export default function DashboardPage() {
                                         <span className="text-sm text-gray-600 font-medium">Email:</span>
                                         <div className="flex items-center gap-2 bg-white p-2 rounded border">
                                           <span className="text-sm text-gray-900 break-all flex-1">
-                                        {signature.user.email}
+                                        {signature.email}
                                       </span>
                                       <Button
                                         size="sm"
                                         variant="outline"
                                         onClick={async () => {
                                           try {
-                                            await navigator.clipboard.writeText(signature.user.email);
+                                            await navigator.clipboard.writeText(signature.email);
                                             toast({
                                               title: "Copied!",
                                               description: "Email address copied to clipboard",

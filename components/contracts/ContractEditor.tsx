@@ -22,6 +22,8 @@ import { toast } from '@/components/ui/use-toast'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { validateSignerEmail } from '@/app/utils/email'
 import PDFEditor from './PDFEditor'
+// **NEW: Import email decryption utilities**
+import { decryptSignerEmails, canDecryptEmails } from '@/app/utils/emailEncryption'
 
 
 interface ContractEditorProps {
@@ -44,6 +46,20 @@ function isSpacingOnlyChange(group: ChangeGroup): boolean {
   const filteredOriginal = group.originalLines.filter(line => line.trim() !== '');
   const filteredNew = group.newLines.filter(line => line.trim() !== '');
   return filteredOriginal.length === 0 && filteredNew.length === 0;
+}
+
+// **NEW: Helper function to detect if emails are encrypted**
+function areEmailsEncrypted(emails: string[]): boolean {
+  if (!emails || emails.length === 0) return false;
+  
+  // Check if emails look like encrypted data (base64-like strings, not email format)
+  return emails.some(email => {
+    // Encrypted emails will be base64 strings, much longer than typical emails
+    // and won't contain @ symbol or common email patterns
+    return email.length > 50 && 
+           !email.includes('@') && 
+           /^[A-Za-z0-9+/=]+$/.test(email);
+  });
 }
 
 export default function ContractEditor({ 
@@ -94,26 +110,114 @@ export default function ContractEditor({
   // Add a state to track PDF file updates
   const [hasPdfFile, setHasPdfFile] = useState(!!contract.s3FileKey);
   
-  // Initialize values when contract changes
+  // **NEW: Add state for managing decrypted emails**
+  const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
+  const [isDecryptingSigners, setIsDecryptingSigners] = useState(false);
+  const [canDecryptSigners, setCanDecryptSigners] = useState(false);
+  const [signersDecrypted, setSignersDecrypted] = useState(false);
+  
+  // **NEW: Check if current user can decrypt emails**
+  useEffect(() => {
+    const checkDecryptPermissions = async () => {
+      if (!user?.googleId || !contract.ownerGoogleIdHash) {
+        setCanDecryptSigners(false);
+        return;
+      }
+
+      try {
+        const allowed = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
+        setCanDecryptSigners(allowed);
+      } catch (error) {
+        console.error('[ContractEditor] Error checking decrypt permissions:', error);
+        setCanDecryptSigners(false);
+      }
+    };
+
+    checkDecryptPermissions();
+  }, [user?.googleId, contract.ownerGoogleIdHash]);
+
+  // **NEW: Auto-decrypt emails if user is owner and emails are encrypted**
+  useEffect(() => {
+    const autoDecryptSigners = async () => {
+      const contractSigners = contract.metadata?.signers || [];
+      
+      if (!contractSigners.length || !canDecryptSigners || signersDecrypted) return;
+      
+      // Check if emails look encrypted
+      if (!areEmailsEncrypted(contractSigners)) {
+        // Emails are not encrypted, use them as-is
+        setDecryptedSigners(contractSigners);
+        setSignersDecrypted(true);
+        return;
+      }
+
+      // Emails are encrypted, attempt to decrypt
+      if (user?.googleId) {
+        setIsDecryptingSigners(true);
+        try {
+          console.log('[ContractEditor] Auto-decrypting signer emails...');
+          const decrypted = await decryptSignerEmails(contractSigners, user.googleId);
+          setDecryptedSigners(decrypted);
+          setSignersDecrypted(true);
+          console.log('[ContractEditor] Successfully decrypted', decrypted.length, 'signer emails');
+        } catch (error) {
+          console.error('[ContractEditor] Auto-decryption failed:', error);
+          // Fallback to encrypted emails for display (though they won't be usable for editing)
+          setDecryptedSigners([]);
+        } finally {
+          setIsDecryptingSigners(false);
+        }
+      }
+    };
+
+    autoDecryptSigners();
+  }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
+  
+  // **UPDATED: Initialize values when contract changes - use decrypted emails when available**
   useEffect(() => {
     setContent(contract.content || '')
     setTitle(contract.title || '')
     setDescription(contract.description || '')
     setHasPdfFile(!!contract.s3FileKey)
     
-    // Initialize signers from contract metadata
-    const contractSigners = contract.metadata?.signers || []
+    // **UPDATED: Use decrypted signers if available, otherwise use original**
+    const contractSigners = signersDecrypted && decryptedSigners.length > 0 
+      ? decryptedSigners 
+      : contract.metadata?.signers || []
+      
     setSigners(contractSigners.length ? [...contractSigners] : [''])
     
+    // **UPDATED: Use decrypted signers for original values too**
     setOriginalValues({
       content: contract.content || '',
       title: contract.title || '',
       description: contract.description || '',
-      signers: contractSigners
+      signers: signersDecrypted && decryptedSigners.length > 0 
+        ? decryptedSigners 
+        : contract.metadata?.signers || []
     })
     
     setHasChanges(false)
-  }, [contract])
+  }, [contract, signersDecrypted, decryptedSigners])
+  
+  // **UPDATED: Also update signers when decryption completes**
+  useEffect(() => {
+    if (signersDecrypted && decryptedSigners.length > 0) {
+      // Only update if signers are currently empty or contain encrypted data
+      const currentSignersLookEncrypted = areEmailsEncrypted(signers);
+      
+      if (signers.length === 0 || currentSignersLookEncrypted || (signers.length === 1 && signers[0] === '')) {
+        console.log('[ContractEditor] Updating signers with decrypted emails');
+        setSigners([...decryptedSigners]);
+        
+        // Update original values to use decrypted emails
+        setOriginalValues(prev => ({
+          ...prev,
+          signers: [...decryptedSigners]
+        }));
+      }
+    }
+  }, [signersDecrypted, decryptedSigners]);
   
   // Check for changes whenever form values change
   useEffect(() => {
@@ -241,7 +345,35 @@ export default function ContractEditor({
         return;
       }
       
-      const filteredSigners = Array.from(emailSet) as string[];
+      const validSigners = Array.from(emailSet) as string[];
+      
+      // **NEW: Encrypt signer emails before saving**
+      let encryptedSignerEmails: string[] = [];
+      
+      if (validSigners.length > 0 && user?.googleId) {
+        console.log('[ContractEditor] Encrypting', validSigners.length, 'signer emails before save');
+        
+        try {
+          // Import email encryption utility
+          const { encryptSignerEmails } = await import('@/app/utils/emailEncryption');
+          
+          // Encrypt the signer emails using owner's Google ID
+          encryptedSignerEmails = await encryptSignerEmails(validSigners, user.googleId);
+          
+          console.log('[ContractEditor] Successfully encrypted signer emails:', {
+            originalCount: validSigners.length,
+            encryptedCount: encryptedSignerEmails.length
+          });
+        } catch (encryptionError) {
+          console.error('[ContractEditor] Email encryption failed:', encryptionError);
+          toast({
+            title: "Encryption Error",
+            description: "Failed to encrypt signer emails. Please try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
       
       const updatedContract = await updateContract(contract.id, {
         title,
@@ -249,16 +381,22 @@ export default function ContractEditor({
         content,
         metadata: {
           ...contract.metadata,
-          signers: filteredSigners
+          // **UPDATED: Store encrypted emails instead of plain text**
+          signers: encryptedSignerEmails.length > 0 ? encryptedSignerEmails : validSigners,
+          // **NEW: Add metadata for consistency with dashboard**
+          ...(encryptedSignerEmails.length > 0 && {
+            signerCount: validSigners.length,
+            encryptedAt: new Date().toISOString(),
+          })
         }
       });
       
-      // Update original values after successful save
+      // **UPDATED: Update original values to use decrypted emails for change detection**
       setOriginalValues({
         content,
         title,
         description,
-        signers: filteredSigners
+        signers: validSigners // Keep decrypted emails for UI state
       });
       
       setHasChanges(false);
@@ -266,7 +404,7 @@ export default function ContractEditor({
       
       toast({
         title: "Contract Saved",
-        description: `Contract saved with ${filteredSigners.length} signer(s).`,
+        description: `Contract saved with ${validSigners.length} encrypted signer(s).`,
         variant: "success",
       });
     } catch (error) {
