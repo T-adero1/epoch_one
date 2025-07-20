@@ -44,14 +44,17 @@ interface ContractSignature {
   id: string;
   status: SignatureStatus;
   signedAt: Date | null;
-  user: {
+  userGoogleIdHash: string; // ✅ Fix: was userId
+  email: string | null;
+  walletAddress: string;
+  user: {  // ✅ Add user object
     id: string;
     name: string | null;
     email: string;
   };
 }
 
-// Updated Contract interface to include encryption fields
+// Update the Contract interface to match what's actually used
 interface Contract {
   id: string;
   title: string;
@@ -59,6 +62,7 @@ interface Contract {
   content: string;
   status: ContractStatus;
   ownerId: string;
+  ownerGoogleIdHash: string; // ✅ Add this missing property
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
@@ -71,8 +75,7 @@ interface Contract {
         capId?: string;
       };
     };
-    encryptedSignerEmails?: string[]; // Add this field
-    ownerGoogleIdHash?: string; // Add this field
+    encryptedSignerEmails?: string[];
   } | null;
   owner?: {
     id: string;
@@ -103,6 +106,9 @@ interface ContractDetailsProps {
     blob: Blob;
     fileName: string;
   } | null;
+  // **ADD: SessionKey props**
+  currentSessionKey?: any;
+  setCurrentSessionKey?: (sessionKey: any) => void;
 }
 
 export default function ContractDetails({ 
@@ -111,7 +117,9 @@ export default function ContractDetails({
   onUpdate, 
   defaultTab = "content",
   onSend,
-  uploadedFileData
+  uploadedFileData,
+  currentSessionKey,
+  setCurrentSessionKey
 }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [copySuccess, setCopySuccess] = useState('')
@@ -136,12 +144,17 @@ export default function ContractDetails({
     onUpdate(updatedContract)
   }
   
-  const copySigningLink = (email: string) => {
-    const link = generateSigningLink(contract.id)
-    navigator.clipboard.writeText(link)
-    setCopySuccess(`Link for ${email} copied!`)
-    setTimeout(() => setCopySuccess(''), 3000)
-  }
+  // **UPDATED: Fix copySigningLink to handle both signature objects and signer emails**
+  const copySigningLink = (signerIdentifier: ContractSignature | string) => {
+    
+    
+    const url = `${window.location.origin}/sign/${contract.id}`;
+    navigator.clipboard.writeText(url);
+    toast({
+      title: "Link copied!",
+      description: "Signing link copied to clipboard",
+    });
+  };
 
   // **NEW: Enhanced encryption detection**
   const isContractEncrypted = (): boolean => {
@@ -189,17 +202,17 @@ export default function ContractDetails({
     setDecryptedPdfUrl(newUrl);
     
     // Cache the decrypted PDF
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.storeDecryptedPDF(
-        contract.id,
-        new Uint8Array(await decryptedBlob.arrayBuffer()),
-        contract.s3FileName || 'decrypted-contract.pdf'
-      );
-      console.log('[ContractDetails] Cached decrypted PDF in IndexDB');
-    } catch (cacheError) {
-      console.warn('[ContractDetails] Failed to cache decrypted PDF:', cacheError);
-    }
+    // try {
+    //   const { pdfCache } = await import('@/app/utils/pdfCache');
+    //   await pdfCache.storeDecryptedPDF(
+    //     contract.id,
+    //     new Uint8Array(await decryptedBlob.arrayBuffer()),
+    //     contract.s3FileName || 'decrypted-contract.pdf'
+    //   );
+    //   console.log('[ContractDetails] Cached decrypted PDF in IndexDB');
+    // } catch (cacheError) {
+    //   console.warn('[ContractDetails] Failed to cache decrypted PDF:', cacheError);
+    // }
     
     console.log('[ContractDetails] State updated with decrypted PDF data');
     
@@ -706,6 +719,9 @@ export default function ContractDetails({
               <AutoDecryptionView 
                 contract={contract}
                 onDecrypted={handleDecryptionSuccess}
+                // **ADD: Pass SessionKey props down**
+                currentSessionKey={currentSessionKey}
+                setCurrentSessionKey={setCurrentSessionKey}
               />
             </div>
           </div>
@@ -1033,7 +1049,7 @@ export default function ContractDetails({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => copySigningLink(signer)}
+                                      onClick={() => copySigningLink(signature || signer)} // ✅ Fix: Use signer email if no signature exists
                                       className="text-xs sm:text-sm"
                                     >
                                       <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
@@ -1121,7 +1137,7 @@ export default function ContractDetails({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => copySigningLink(signer)}
+                                      onClick={() => copySigningLink(signature || signer)} // ✅ Fix: Use signer email if no signature exists
                                       className="text-xs sm:text-sm"
                                     >
                                       <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
@@ -1234,13 +1250,17 @@ export default function ContractDetails({
   )
 }
 
-// **AutoDecryptionView component remains the same as before**
+// **NEW: Add SessionKey state at the component level (like the working example)**
 const AutoDecryptionView = ({ 
   contract, 
-  onDecrypted 
+  onDecrypted,
+  currentSessionKey,
+  setCurrentSessionKey
 }: { 
   contract: any; 
-  onDecrypted: (blob: Blob) => void; 
+  onDecrypted: (blob: Blob) => void;
+  currentSessionKey?: any;
+  setCurrentSessionKey?: (sessionKey: any) => void;
 }) => {
   const [decryptionStep, setDecryptionStep] = useState<string>('loading-metadata');
   const [error, setError] = useState<string | null>(null);
@@ -1248,298 +1268,34 @@ const AutoDecryptionView = ({
 
   useEffect(() => {
     const autoDecrypt = async () => {
-      console.log('[ContractDetails:AutoDecryptionView] Starting auto-decryption...');
-      setDecryptionStep('loading-metadata');
-      setError(null);
-      setProgress(10);
-
       try {
-        // Load encryption metadata
-        console.log('[ContractDetails:AutoDecryptionView] Loading encryption metadata...');
-        let allowlistId = contract.sealAllowlistId || contract.metadata?.walrus?.encryption?.allowlistId;
-        let documentId = contract.sealDocumentId || contract.metadata?.walrus?.encryption?.documentId;
-        let capId = contract.sealCapId || contract.metadata?.walrus?.encryption?.capId;
+        // **ENTIRE LOGIC MOVED TO UTILITY!**
+        const { decryptContractPDF } = await import('@/app/utils/sealDecryption');
+        
+        const result = await decryptContractPDF({
+          contract,
+          cachedSessionKey: currentSessionKey,
+          onProgress: setProgress,
+          onStepChange: setDecryptionStep
+        });
 
-        // If missing, fetch fresh data from database
-        if (!allowlistId) {
-          console.log('[ContractDetails:AutoDecryptionView] Fetching fresh contract data...');
-          const response = await fetch(`/api/contracts/${contract.id}`);
-          if (response.ok) {
-            const freshData = await response.json();
-            allowlistId = freshData.sealAllowlistId || freshData.metadata?.walrus?.encryption?.allowlistId;
-            documentId = freshData.sealDocumentId || freshData.metadata?.walrus?.encryption?.documentId;
-            capId = freshData.sealCapId || freshData.metadata?.walrus?.encryption?.capId;
-          }
+        // Cache the SessionKey for next time
+        if (!result.wasFromCache && setCurrentSessionKey) {
+          setCurrentSessionKey(result.sessionKey);
+          console.log('[AutoDecryptionView] ✅ Cached new SessionKey for future use');
         }
 
-        if (!allowlistId || !documentId) {
-          throw new Error('Encryption metadata not found. The file may still be processing.');
-        }
-
-        setProgress(20);
-        setDecryptionStep('downloading');
-
-        // Check cache first, then download from AWS if needed
-        let encryptedData: ArrayBuffer;
-        
-        try {
-          const { pdfCache } = await import('@/app/utils/pdfCache');
-          const cachedPDF = await pdfCache.getEncryptedPDF(contract.id);
-          
-          if (cachedPDF) {
-            console.log('[ContractDetails:AutoDecryptionView] Using cached encrypted PDF');
-            encryptedData = cachedPDF.encryptedData.buffer;
-          } else {
-            throw new Error('Not in cache');
-          }
-        } catch (cacheError) {
-          // Fallback to AWS download
-          console.log('[ContractDetails:AutoDecryptionView] Cache miss, downloading from AWS');
-          const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
-          
-          if (!response.ok) {
-            throw new Error('Failed to download encrypted PDF from AWS');
-          }
-
-          encryptedData = await response.arrayBuffer();
-          
-          // Cache the downloaded encrypted data for next time
-          try {
-            const { pdfCache } = await import('@/app/utils/pdfCache');
-            await pdfCache.storeEncryptedPDF(
-              contract.id,
-              new Uint8Array(encryptedData),
-              contract.s3FileName || 'encrypted-contract.pdf',
-              {
-                allowlistId,
-                documentId,
-                capId: capId || '',
-                isEncrypted: true
-              }
-            );
-            console.log('[ContractDetails:AutoDecryptionView] Cached downloaded encrypted PDF');
-          } catch (cacheError) {
-            console.warn('[ContractDetails:AutoDecryptionView] Failed to cache downloaded PDF:', cacheError);
-          }
-        }
-
-        setProgress(40);
-        setDecryptionStep('initializing-seal');
-
-        // Initialize SEAL client
-        const { SealClient, getAllowlistedKeyServers, SessionKey } = await import('@mysten/seal');
-        const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
-        const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-        const { Transaction } = await import('@mysten/sui/transactions');
-        const { fromHEX } = await import('@mysten/sui/utils');
-        const { bech32 } = await import('bech32');
-        const { genAddressSeed, getZkLoginSignature } = await import('@mysten/sui/zklogin');
-
-        const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
-        const sealClient = new SealClient({
-          suiClient: suiClient as any,
-          serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
-            objectId: id,
-            weight: 1,
-          })),
-          verifyKeyServers: true
-        });
-
-        setProgress(50);
-        setDecryptionStep('authorizing');
-
-        // Get ephemeral keypair from session
-        const sessionData = localStorage.getItem("epochone_session");
-        if (!sessionData) {
-          throw new Error("No session data found in localStorage");
-        }
-        
-        const sessionObj = JSON.parse(sessionData);
-        const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
-        
-        if (!zkLoginState?.ephemeralKeyPair?.privateKey) {
-          throw new Error("No ephemeral key private key found in session data");
-        }
-
-        // Decode the private key
-        function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
-          if (!suiPrivateKey.startsWith('suiprivkey1')) {
-            throw new Error('Not a valid Sui bech32 private key format');
-          }
-          
-          const decoded = bech32.decode(suiPrivateKey);
-          const privateKeyBytes = Buffer.from(bech32.fromWords(decoded.words));
-          const secretKey = privateKeyBytes.slice(1); // Remove the first byte (flag)
-          
-          if (secretKey.length !== 32) {
-            throw new Error(`Expected 32 bytes after removing flag, got ${secretKey.length}`);
-          }
-          
-          return new Uint8Array(secretKey);
-        }
-
-        const privateKeyBytes = decodeSuiPrivateKey(zkLoginState.ephemeralKeyPair.privateKey);
-        const ephemeralKeypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
-        const ephemeralAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
-
-        // Get user address from session
-        const userAddress = sessionObj.user?.address || sessionObj.userAddress;
-        if (!userAddress) {
-          throw new Error('User address not found');
-        }
-
-        setProgress(60);
-        setDecryptionStep('creating-session');
-
-        // Create session key
-        const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
-          '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-        const TTL_MIN = 30;
-
-        // Format document ID
-        const docId = documentId.startsWith('0x') ? documentId.substring(2) : documentId;
-
-        // Authorize ephemeral key with sponsored transaction
-        const sponsorResponse = await fetch('/api/auth/sponsor', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sender: userAddress,
-            allowlistId,
-            ephemeralAddress,
-            documentId: docId,
-            validityMs: 60 * 60 * 1000 // 1 hour
-          })
-        });
-
-        if (!sponsorResponse.ok) {
-          const errorText = await sponsorResponse.text();
-          throw new Error(`Sponsorship failed: ${sponsorResponse.status} ${errorText}`);
-        }
-        
-        const { sponsoredTxBytes } = await sponsorResponse.json();
-        
-        // Sign the sponsored bytes with ephemeral key
-        const { fromB64 } = await import('@mysten/sui/utils');
-        const txBlock = Transaction.from(fromB64(sponsoredTxBytes));
-        const { signature: userSignature } = await txBlock.sign({
-          client: suiClient,
-          signer: ephemeralKeypair
-        });
-        
-        // Create zkLogin signature
-        const salt = zkLoginState.salt;
-        if (!salt) {
-          throw new Error("No salt found in zkLoginState!");
-        }
-        
-        const jwt = zkLoginState.jwt;
-        const jwtBody = JSON.parse(atob(jwt.split('.')[1]));
-        const addressSeed = genAddressSeed(
-          BigInt(salt),
-          'sub',
-          jwtBody.sub,
-          jwtBody.aud
-        ).toString();
-        
-        const zkLoginSignature = getZkLoginSignature({
-          inputs: {
-            ...zkLoginState.zkProofs,
-            addressSeed,
-          },
-          maxEpoch: zkLoginState.maxEpoch,
-          userSignature,
-        });
-        
-        // Execute authorization
-        const executeResponse = await fetch('/api/auth/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sponsoredTxBytes,
-            zkLoginSignature
-          })
-        });
-        
-        if (!executeResponse.ok) {
-          const errorText = await executeResponse.text();
-          throw new Error(`Execution failed: ${executeResponse.status} ${errorText}`);
-        }
-        
-        const { digest } = await executeResponse.json();
-        
-        // Wait for transaction confirmation
-        await suiClient.waitForTransaction({
-          digest: digest,
-          options: { showEffects: true }
-        });
-
-        setProgress(70);
-        setDecryptionStep('fetching-keys');
-
-        // Create session key for decryption
-        const sessionKey = new SessionKey({
-          address: ephemeralAddress,
-          packageId: SEAL_PACKAGE_ID,
-          ttlMin: TTL_MIN,
-          signer: ephemeralKeypair,
-          suiClient: suiClient as any
-        });
-        
-        // Sign personal message
-        const personalMessage = sessionKey.getPersonalMessage();
-        const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
-        await sessionKey.setPersonalMessageSignature(signature.signature);
-        
-        // Create seal_approve transaction
-        const tx = new Transaction();
-        tx.setSender(ephemeralAddress);
-        
-        const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
-        const documentIdBytes = fromHEX(rawId);
-
-        tx.moveCall({
-          target: `${SEAL_PACKAGE_ID}::allowlist::seal_approve`,
-          arguments: [
-            tx.pure.vector('u8', Array.from(documentIdBytes)),
-            tx.object(allowlistId),
-            tx.object('0x6')
-          ]
-        });
-        
-        const txKindBytes = await tx.build({ 
-          client: suiClient, 
-          onlyTransactionKind: true
-        });
-
-        // Fetch keys
-        await sealClient.fetchKeys({
-          ids: [rawId],
-          txBytes: txKindBytes,
-          sessionKey,
-          threshold: 1
-        });
-
-        setProgress(90);
-        setDecryptionStep('decrypting');
-
-        // Decrypt the data
-        const decryptedData = await sealClient.decrypt({
-          data: new Uint8Array(encryptedData),
-          sessionKey: sessionKey,
-          txBytes: txKindBytes
-        });
-
-        setProgress(100);
-        setDecryptionStep('complete');
-
-        // Create blob and call success handler
-        const decryptedBlob = new Blob([decryptedData], { type: 'application/pdf' });
+        // Convert to blob and notify parent
+        const decryptedBlob = new Blob([result.decryptedData], { type: 'application/pdf' });
         onDecrypted(decryptedBlob);
 
+        if (result.wasFromCache) {
+          console.log('[AutoDecryptionView] ⚡ Lightning-fast decryption using cached SessionKey!');
+        }
+
       } catch (err) {
-        console.error('[ContractDetails:AutoDecryptionView] Auto-decryption failed:', err);
-        setError(err instanceof Error ? err.message : 'Failed to decrypt PDF automatically');
+        console.error('[AutoDecryptionView] Decryption failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to decrypt PDF');
         setDecryptionStep('error');
       }
     };

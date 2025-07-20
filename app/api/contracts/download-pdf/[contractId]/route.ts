@@ -21,7 +21,7 @@ export async function GET(
         s3FileKey: true,
         s3FileName: true,
         s3ContentType: true,
-        ownerId: true,
+        ownerGoogleIdHash: true, // Fixed: was ownerId, now ownerGoogleIdHash
       },
     });
 

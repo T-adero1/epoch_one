@@ -21,6 +21,13 @@ import {
   type ZkSignatureData 
 } from '@/app/utils/zkSignatures'
 
+import { 
+  authenticateUserForContract, 
+  getAuthorizationMessage,
+  type ContractAuthData,
+  type AuthenticationResult 
+} from '@/app/utils/signingAuth'
+
 // Define a proper interface for the contract object used in this component
 interface ContractDetail {
   id: string;
@@ -158,14 +165,15 @@ export default function ContractSigningPage() {
   
   // Fetch full contract details when authenticated
   const fetchContract = useCallback(async () => {
-    if (!user?.email) {
-      console.log('[ContractSigning] Cannot fetch contract: No user email available')
+    if (!user?.email || !user?.googleId) {
+      console.log('[ContractSigning] Cannot fetch contract: No user email or googleId available')
       return
     }
     
     console.log('[ContractSigning] Fetching full contract details for:', { 
       contractId, 
-      userEmail: user.email 
+      userEmail: user.email,
+      userGoogleId: user.googleId
     })
     
     try {
@@ -197,28 +205,34 @@ export default function ContractSigningPage() {
       
       setContract(contractData)
       
-      // Check if user can sign
-      if (user?.email) {
-        const signerEmails = contractData.metadata?.signers || []
-        console.log('[ContractSigning] Checking if user can sign:', { 
-          userEmail: user.email, 
-          contractSigners: signerEmails 
-        })
+      // ✅ UPDATED: Use the corrected authentication logic (email-based, not JWT-based)
+      if (user?.email && user?.googleId) {
+        console.log('[ContractSigning] Authenticating user with predetermined wallet logic...');
         
-        const userCanSign = canUserSignContract(user.email, signerEmails, contractData)
-        console.log('[ContractSigning] User can sign:', userCanSign)
-        setCanSign(userCanSign)
+        const authResult: AuthenticationResult = await authenticateUserForContract(
+          user.email,
+          user.googleId,
+          contractData as ContractAuthData
+        );
+        
+        console.log('[ContractSigning] Authentication result:', authResult);
+        setCanSign(authResult.canSign);
+        
+        // Store the authorization message for display
+        if (!authResult.canSign) {
+          const message = getAuthorizationMessage(authResult, user.email);
+          console.log('[ContractSigning] Authorization message:', message);
+        }
         
         // Check current signature status
-        const status = getUserSignatureStatus(user.email, contractData)
-        console.log('[ContractSigning] User signature status:', status)
-        setSignatureStatus(status)
+        const status = getUserSignatureStatus(user.email, contractData);
+        setSignatureStatus(status);
         
-        // If this contract has specific required signers, save the first one
-        if (!userCanSign && signerEmails.length > 0) {
-          console.log('[ContractSigning] User cannot sign, required email is:', signerEmails[0])
-          setRequiredEmail(signerEmails[0])
-          setShowLoginModal(true)
+        // If user cannot sign, show appropriate message
+        if (!authResult.canSign) {
+          console.log('[ContractSigning] User cannot sign - reason:', authResult.reason);
+          setRequiredEmail('authorized_email'); // Generic placeholder for display
+          setShowLoginModal(true);
         }
       }
     } catch (err) {
@@ -228,7 +242,7 @@ export default function ContractSigningPage() {
     } finally {
       setLoading(false)
     }
-  }, [contractId, user, setLoading, setContract, setCanSign, setSignatureStatus, setRequiredEmail, setShowLoginModal, setError])
+  }, [contractId, user]); // Removed zkLoginState dependency
   
   // Load contract data and check if login is needed
   useEffect(() => {
@@ -624,6 +638,37 @@ export default function ContractSigningPage() {
     }
   }
   
+  // Add this function near the top of the component, after the other handlers
+  const handleSwitchAccount = useCallback(async () => {
+    console.log('[ContractSigning] User requesting to switch accounts for required email:', requiredEmail);
+    
+    try {
+      // Store the current contract URL for redirect after login
+      const currentUrl = window.location.href;
+      console.log('[ContractSigning] Storing current URL for post-login redirect:', currentUrl);
+      localStorage.setItem('zkLoginRedirectPath', window.location.pathname);
+      localStorage.setItem('pendingSignatureContractId', contractId);
+      
+      // If there's a required email, store it for verification
+      if (requiredEmail) {
+        console.log('[ContractSigning] Storing required email for verification:', requiredEmail);
+        localStorage.setItem('zkLoginRequiredEmail', requiredEmail);
+      }
+      
+      // Set redirect flag
+      localStorage.setItem('zklogin_redirect_in_progress', 'true');
+      
+      console.log('[ContractSigning] Logging out current user...');
+      logout();
+      
+      // The useEffect will detect the logout and show the login modal
+      // which will then redirect to the stored path after successful login
+      
+    } catch (error) {
+      console.error('[ContractSigning] Error in switch account flow:', error);
+    }
+  }, [requiredEmail, contractId, logout]);
+
   if (isLoading || loading) {
     return (
       <div className="container mx-auto p-6 max-w-4xl">
@@ -718,7 +763,7 @@ export default function ContractSigningPage() {
             <CardTitle>Sign In Required</CardTitle>
             <CardDescription>
               {requiredEmail 
-                ? `Please sign in with ${requiredEmail} to view and sign this document`
+                ? `Please sign in with the authorized email address to view and sign this document`
                 : 'Please sign in to view and sign this document'}
             </CardDescription>
           </CardHeader>
@@ -753,7 +798,7 @@ export default function ContractSigningPage() {
             <AlertTriangle className="h-16 w-16 text-yellow-500 mb-4" />
             <p className="text-center text-gray-700 mb-6">
               {requiredEmail 
-                ? `This document must be signed with ${requiredEmail}. You are currently signed in as ${user?.email}.`
+                ? `This document must be signed with the authorized email address. You are currently signed in as ${user?.email}.`
                 : 'This contract is not addressed to you. Only authorized signers can view and sign this contract.'}
             </p>
             <div className="flex gap-4">
@@ -761,8 +806,8 @@ export default function ContractSigningPage() {
                 Back to Documents
               </Button>
               {requiredEmail && (
-                <Button onClick={logout}>
-                  Sign in with {requiredEmail}
+                <Button onClick={() => handleSwitchAccount()}>
+                  Sign in with authorized email
                 </Button>
               )}
             </div>

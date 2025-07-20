@@ -214,7 +214,7 @@ export const useZkLogin = () => useContext(ZkLoginContext);
 const SESSION_STORAGE_KEY = 'epochone_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const NETWORK = 'testnet'; // Changed from 'testnet' to 'devnet'
-const PROVER_SERVICE_URL = 'https://prover.epochone.io/v1'; // Updated to use dev endpoint
+
 
 // Add performance tracking helper
 const performanceTracker = {
@@ -698,7 +698,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         },
         randomness: generateRandomness(),
         jwt: null,
-        maxEpoch: currentEpoch + 10, // Valid for 10 epochs
+        maxEpoch: currentEpoch + 1, // Valid for 10 epochs
         zkProofs: null,
       };
       

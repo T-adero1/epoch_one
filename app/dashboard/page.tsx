@@ -305,7 +305,7 @@ export default function DashboardPage() {
   const startTime = performance.now();
   console.log(`[DASHBOARD:TIMING] Component function executing at ${Math.round(startTime)}ms`);
   
-  const { isAuthenticated, isLoading, isAuthStateResolved, logout, user } = useZkLogin();
+  const { isAuthenticated, isLoading, isAuthStateResolved, logout, user, zkLoginState } = useZkLogin();
   console.log('[DASHBOARD] Auth state:', { 
     isAuthenticated, 
     isLoading, 
@@ -376,6 +376,9 @@ export default function DashboardPage() {
     blob: Blob;
     fileName: string;
   } | null>(null);
+
+  // **NEW: Add SessionKey cache at dashboard level**
+  const [sessionKeyCache, setSessionKeyCache] = useState<Map<string, any>>(new Map());
 
   // Auto-scroll to bottom when signers are added
   useEffect(() => {
@@ -1065,12 +1068,13 @@ export default function DashboardPage() {
           // Create allowlist with user's contract-specific wallet address
           const userAddress = user?.address; // Original address for comparison
           // Hash the user's Google ID first for privacy
-        
+          const userHashedGoogleId = await hashGoogleId(user?.googleId!);
           
-          const { generateContractSpecificUserWallet } = await import('@/app/utils/contractWallet');
-          const contractSpecificUserAddress = await generateContractSpecificUserWallet(
-            user?.googleId!, 
-            contractId
+          const { getContractSpecificAddress } = await import('@/app/utils/contractWallet');
+          const contractSpecificUserAddress = await getContractSpecificAddress(
+            userHashedGoogleId, 
+            contractId,
+            zkLoginState?.jwt! // Pass the JWT from context
           );
           
           console.log('[BACKGROUND] Generated contract-specific user address:', {
@@ -1401,12 +1405,66 @@ export default function DashboardPage() {
         throw new Error('Failed to update contract status');
       }
       
-      // Send emails to signers
+      // **UPDATED: Get and decrypt signer emails before sending**
       const metadata = contract.metadata as { signers?: string[] } | null;
       const signerEmails = metadata?.signers || [];
       
       if (signerEmails.length > 0) {
         try {
+          // **NEW: Decrypt emails if they are encrypted and user is owner**
+          let emailsToSend = signerEmails;
+          
+          // Check if emails are encrypted and decrypt them
+          if (user?.googleId && contract.ownerGoogleIdHash) {
+            console.log('[DASHBOARD] Checking if signer emails need decryption');
+            
+            try {
+              // Import decryption utilities
+              const { decryptSignerEmails, canDecryptEmails } = await import('@/app/utils/emailEncryption');
+              
+              // Check if current user can decrypt (is owner)
+              const canDecrypt = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
+              
+              if (canDecrypt) {
+                // Check if emails look encrypted (base64-like, not email format)
+                const areEncrypted = signerEmails.some(email => 
+                  email.length > 50 && 
+                  !email.includes('@') && 
+                  /^[A-Za-z0-9+/=]+$/.test(email)
+                );
+                
+                if (areEncrypted) {
+                  console.log('[DASHBOARD] Decrypting signer emails before sending');
+                  emailsToSend = await decryptSignerEmails(signerEmails, user.googleId);
+                  console.log('[DASHBOARD] Successfully decrypted emails for sending:', {
+                    originalCount: signerEmails.length,
+                    decryptedCount: emailsToSend.length,
+                    decryptedEmails: emailsToSend
+                  });
+                } else {
+                  console.log('[DASHBOARD] Emails are not encrypted, using as-is');
+                }
+              } else {
+                console.warn('[DASHBOARD] User cannot decrypt emails - not the owner');
+                toast({
+                  title: "Permission Error",
+                  description: "You don't have permission to decrypt signer emails.",
+                  variant: "destructive",
+                });
+                return;
+              }
+            } catch (decryptionError) {
+              console.error('[DASHBOARD] Email decryption failed:', decryptionError);
+              toast({
+                title: "Decryption Error",
+                description: "Failed to decrypt signer emails. Cannot send invitations.",
+                variant: "destructive",
+              });
+              return;
+            }
+          }
+          
+          // **UPDATED: Use decrypted emails for sending**
           const emailResponse = await fetch('/api/email/send-contract', {
             method: 'POST',
             headers: {
@@ -1415,8 +1473,8 @@ export default function DashboardPage() {
             body: JSON.stringify({
               contractId: contract.id,
               contractTitle: contract.title,
-              ownerName: contract.owner.name || contract.owner.email,
-              signerEmails,
+              ownerName: user?.displayName || user?.email, // **FIXED: Use user from context**
+              signerEmails: emailsToSend, // **UPDATED: Use decrypted emails**
             }),
           });
           
@@ -1425,7 +1483,7 @@ export default function DashboardPage() {
           if (!emailResponse.ok) {
             console.error('Email sending failed:', emailResult);
             // Don't fail the entire operation if email fails
-      toast({
+            toast({
               title: "Contract sent with warning",
               description: "Contract status updated but some emails may not have been sent.",
               variant: "destructive",
@@ -1441,9 +1499,9 @@ export default function DashboardPage() {
             } else {
               toast({
                 title: "Contract sent successfully",
-                description: `Signing invitations sent to ${signerEmails.length} recipient(s).`,
-        variant: "success",
-      });
+                description: `Signing invitations sent to ${emailsToSend.length} recipient(s).`,
+                variant: "success",
+              });
             }
           }
         } catch (emailError) {
@@ -1526,6 +1584,15 @@ export default function DashboardPage() {
     }, 150); // Adjust timing to match your dialog animation duration
   };
 
+  // **NEW: SessionKey cache management functions**
+  const getSessionKeyForContract = (contractId: string) => {
+    return sessionKeyCache.get(contractId) || null;
+  };
+
+  const setSessionKeyForContract = (contractId: string, sessionKey: any) => {
+    setSessionKeyCache(prev => new Map(prev.set(contractId, sessionKey)));
+  };
+
   // Show loading state with skeleton
   if (isLoading || !isAuthStateResolved || (isAuthenticated && isLoadingContracts)) {
     console.log('[DASHBOARD] Rendering skeleton loading state', {
@@ -1555,9 +1622,11 @@ export default function DashboardPage() {
       <div className="container mx-auto p-6">
         <ContractDetails 
           contract={selectedContract} 
+          // **NEW: Pass SessionKey cache functions**
+          currentSessionKey={getSessionKeyForContract(selectedContract.id)}
+          setCurrentSessionKey={(sessionKey) => setSessionKeyForContract(selectedContract.id, sessionKey)}
           onBack={() => {
             setIsViewingContract(false);
-            // Clear uploaded file data when leaving the view
             setUploadedFileData(null);
           }}
           onUpdate={handleUpdateContract}

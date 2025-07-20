@@ -956,7 +956,7 @@ export default function PDFEditor({
   );
 } 
 
-// AutoDecryptionView component (unchanged)
+// **UPDATED AutoDecryptionView to match working ContractDetails.tsx approach**
 const AutoDecryptionView = ({ 
   contract, 
   onDecrypted 
@@ -970,21 +970,26 @@ const AutoDecryptionView = ({
 
   useEffect(() => {
     const autoDecrypt = async () => {
-      console.log('[AutoDecryptionView] Starting auto-decryption...');
+      console.log('[PDFEditor:AutoDecryptionView] Starting auto-decryption...');
       setDecryptionStep('loading-metadata');
       setError(null);
       setProgress(10);
 
       try {
+        // **CONSTANTS**
+        const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
+          '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+        const TTL_MIN = 30;
+
         // Load encryption metadata
-        console.log('[AutoDecryptionView] Loading encryption metadata...');
+        console.log('[PDFEditor:AutoDecryptionView] Loading encryption metadata...');
         let allowlistId = contract.sealAllowlistId || contract.metadata?.walrus?.encryption?.allowlistId;
         let documentId = contract.sealDocumentId || contract.metadata?.walrus?.encryption?.documentId;
         let capId = contract.sealCapId || contract.metadata?.walrus?.encryption?.capId;
 
         // If missing, fetch fresh data from database
         if (!allowlistId) {
-          console.log('[AutoDecryptionView] Fetching fresh contract data...');
+          console.log('[PDFEditor:AutoDecryptionView] Fetching fresh contract data...');
           const response = await fetch(`/api/contracts/${contract.id}`);
           if (response.ok) {
             const freshData = await response.json();
@@ -1009,14 +1014,14 @@ const AutoDecryptionView = ({
           const cachedPDF = await pdfCache.getEncryptedPDF(contract.id);
           
           if (cachedPDF) {
-            console.log('[AutoDecryptionView] Using cached encrypted PDF');
-            encryptedData = cachedPDF.encryptedData.buffer;
+            console.log('[PDFEditor:AutoDecryptionView] Using cached encrypted PDF');
+            encryptedData = cachedPDF.encryptedData.buffer as ArrayBuffer;
           } else {
             throw new Error('Not in cache');
           }
         } catch (cacheError) {
           // Fallback to AWS download
-          console.log('[AutoDecryptionView] Cache miss, downloading from AWS');
+          console.log('[PDFEditor:AutoDecryptionView] Cache miss, downloading from AWS');
           const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
           
           if (!response.ok) {
@@ -1039,15 +1044,17 @@ const AutoDecryptionView = ({
                 isEncrypted: true
               }
             );
-            console.log('[AutoDecryptionView] Cached downloaded encrypted PDF');
+            console.log('[PDFEditor:AutoDecryptionView] Cached downloaded encrypted PDF');
           } catch (cacheError) {
-            console.warn('[AutoDecryptionView] Failed to cache downloaded PDF:', cacheError);
+            console.warn('[PDFEditor:AutoDecryptionView] Failed to cache downloaded PDF:', cacheError);
           }
         }
 
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 40%');
         setProgress(40);
         setDecryptionStep('initializing-seal');
 
+        console.log('[PDFEditor:AutoDecryptionView] Importing required modules...');
         // Initialize SEAL client
         const { SealClient, getAllowlistedKeyServers, SessionKey } = await import('@mysten/seal');
         const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
@@ -1057,7 +1064,9 @@ const AutoDecryptionView = ({
         const { bech32 } = await import('bech32');
         const { genAddressSeed, getZkLoginSignature } = await import('@mysten/sui/zklogin');
 
+        console.log('[PDFEditor:AutoDecryptionView] Initializing SUI client...');
         const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
+        console.log('[PDFEditor:AutoDecryptionView] Initializing SEAL client...');
         const sealClient = new SealClient({
           suiClient: suiClient as any,
           serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
@@ -1067,10 +1076,15 @@ const AutoDecryptionView = ({
           verifyKeyServers: true
         });
 
+        // **STEP 4: Get Contract-Specific Wallet (Updated)**
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 50%');
         setProgress(50);
         setDecryptionStep('authorizing');
 
-        // Get ephemeral keypair
+        console.log('[PDFEditor:AutoDecryptionView] Getting contract-specific wallet for this contract...');
+
+        // Get session data for JWT and user info
+        console.log('[PDFEditor:AutoDecryptionView] Getting session data from localStorage...');
         const sessionData = localStorage.getItem("epochone_session");
         if (!sessionData) {
           throw new Error("No session data found in localStorage");
@@ -1079,58 +1093,82 @@ const AutoDecryptionView = ({
         const sessionObj = JSON.parse(sessionData);
         const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
         
-        if (!zkLoginState?.ephemeralKeyPair?.privateKey) {
-          throw new Error("No ephemeral key private key found in session data");
+        if (!zkLoginState?.jwt) {
+          throw new Error("No JWT found in session data");
         }
 
-        // Decode the private key
-        function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
-          if (!suiPrivateKey.startsWith('suiprivkey1')) {
-            throw new Error('Not a valid Sui bech32 private key format');
-          }
-          
-          const decoded = bech32.decode(suiPrivateKey);
-          const privateKeyBytes = Buffer.from(bech32.fromWords(decoded.words));
-          const secretKey = privateKeyBytes.slice(1); // Remove the first byte (flag)
-          
-          if (secretKey.length !== 32) {
-            throw new Error(`Expected 32 bytes after removing flag, got ${secretKey.length}`);
-          }
-          
-          return new Uint8Array(secretKey);
-        }
-
-        const privateKeyBytes = decodeSuiPrivateKey(zkLoginState.ephemeralKeyPair.privateKey);
-        const ephemeralKeypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
-        const ephemeralAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
-
-        // Get user address from session
+        // Get user info from session
+        console.log('[PDFEditor:AutoDecryptionView] Extracting user info from session...');
         const userAddress = sessionObj.user?.address || sessionObj.userAddress;
-        if (!userAddress) {
-          throw new Error('User address not found');
+        const userGoogleId = sessionObj.user?.googleId || sessionObj.userGoogleId;
+
+        if (!userAddress || !userGoogleId) {
+          throw new Error('User address or Google ID not found in session');
         }
 
+        // **FIX: Import what actually exists**
+        console.log('[PDFEditor:AutoDecryptionView] Importing contract wallet utilities...');
+        const { getOrCreateContractWallet } = await import('@/app/utils/contractWallet');
+
+        console.log('[PDFEditor:AutoDecryptionView] Creating/retrieving contract-specific wallet...');
+
+        // **KEY: Create contract-specific wallet with encrypted Google ID**
+        const contractWallet = await getOrCreateContractWallet(userGoogleId, contract.id, zkLoginState.jwt);
+
+        console.log('[PDFEditor:AutoDecryptionView] Contract-specific wallet ready:', {
+          contractId: contract.id,
+          walletAddress: contractWallet.address.substring(0, 8) + '...',
+          isContractSpecific: true
+        });
+
+        // ✅ FIX: Use ORIGINAL session zkLogin state for signing (not contract-specific)
+        console.log('[PDFEditor:AutoDecryptionView] Setting up zkLogin state...');
+        const originalZkState = zkLoginState; // Original session state
+
+        const originalJwt = originalZkState.jwt;
+        const originalZkProofs = originalZkState.zkProofs;
+        const originalMaxEpoch = originalZkState.maxEpoch;
+        // **UPDATED: Get the contract-specific ephemeral keypair from the wallet itself**
+        const ephemeralKeypair = contractWallet.ephemeralKeyPair;
+         // This is the real keypair instance
+
+        if (!ephemeralKeypair) {
+          throw new Error('Ephemeral keypair not found in contract wallet');
+        }
+
+        // **UPDATED: Use contract-specific address instead of general ephemeral**
+        const ephemeralAddress = contractWallet.address; // Contract-specific address
+        console.log('[PDFEditor:AutoDecryptionView] Using contract-specific ephemeral address:', ephemeralAddress);
+
+        // **Continue with authorization using contract-specific credentials**
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 60%');
         setProgress(60);
         setDecryptionStep('creating-session');
 
-        // Create session key
-        const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
-          '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-        const TTL_MIN = 30;
+        // **NEW: Get the ephemeral keypair's public key address**
+        const ephemeralPublicKeyAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
 
         // Format document ID
+        console.log('[PDFEditor:AutoDecryptionView] Formatting document ID...');
         const docId = documentId.startsWith('0x') ? documentId.substring(2) : documentId;
 
-        // Authorize ephemeral key with sponsored transaction
+        // Authorize contract-specific ephemeral key with sponsored transaction
+        console.log('[PDFEditor:AutoDecryptionView] Requesting sponsored transaction...');
+
+        // **FIX: Use correct addresses for sponsor parameters**
+        console.log('[PDFEditor:AutoDecryptionView] 🔍 Sponsor transaction addresses:');
+        console.log('[PDFEditor:AutoDecryptionView] Sender (contract-specific, on allowlist):', contractWallet.address);
+        console.log('[PDFEditor:AutoDecryptionView] EphemeralAddress (public key, for signing):', ephemeralPublicKeyAddress);
+
         const sponsorResponse = await fetch('/api/auth/sponsor', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sender: userAddress,
+            sender: contractWallet.address,           // ✅ Contract-specific address (on allowlist)
             allowlistId,
-            ephemeralAddress,
+            ephemeralAddress: ephemeralPublicKeyAddress, // ✅ Ephemeral public key address (for signing)
             documentId: docId,
-            validityMs: 60 * 60 * 1000 // 1 hour
+            validityMs: 60 * 60 * 1000
           })
         });
 
@@ -1140,40 +1178,48 @@ const AutoDecryptionView = ({
         }
         
         const { sponsoredTxBytes } = await sponsorResponse.json();
+        console.log('[PDFEditor:AutoDecryptionView] Got sponsored transaction bytes');
         
         // Sign the sponsored bytes with ephemeral key
+        console.log('[PDFEditor:AutoDecryptionView] Signing sponsored transaction...');
         const { fromB64 } = await import('@mysten/sui/utils');
         const txBlock = Transaction.from(fromB64(sponsoredTxBytes));
         const { signature: userSignature } = await txBlock.sign({
           client: suiClient,
-          signer: ephemeralKeypair
+          signer: ephemeralKeypair  // Contract-specific ephemeral keypair (same as session)
         });
         
-        // Create zkLogin signature
-        const salt = zkLoginState.salt;
-        if (!salt) {
-          throw new Error("No salt found in zkLoginState!");
+        // ✅ FIX: Use contract-specific salt for address seed (matches the address being used)
+        const contractZkState = contractWallet.zkLoginState;
+        const contractSalt = contractZkState.salt;
+        const contractZkProofs = contractZkState.zkProofs; // Contract-specific salt   
+
+        if (!contractSalt || !originalJwt || !contractZkProofs || !originalMaxEpoch) {
+          throw new Error("Missing zkLogin state data");
         }
         
-        const jwt = zkLoginState.jwt;
-        const jwtBody = JSON.parse(atob(jwt.split('.')[1]));
+        // ✅ Create address seed using CONTRACT-SPECIFIC salt (matches ephemeralAddress)
+        console.log('[PDFEditor:AutoDecryptionView] Generating address seed...');
+        const jwtBody = JSON.parse(atob(originalJwt.split('.')[1]));
         const addressSeed = genAddressSeed(
-          BigInt(salt),
+          BigInt(contractSalt),      // ✅ Contract-specific salt (matches contractWallet.address)
           'sub',
-          jwtBody.sub,
+          jwtBody.sub,              // ✅ Original subject (matches zkProofs)
           jwtBody.aud
         ).toString();
         
+        console.log('[PDFEditor:AutoDecryptionView] Generating zkLogin signature...');
         const zkLoginSignature = getZkLoginSignature({
           inputs: {
-            ...zkLoginState.zkProofs,
-            addressSeed,
+            ...contractZkProofs,     // ✅ Contract-specific zkProofs (generated with contract salt)
+            addressSeed,             // ✅ Address seed from contract salt
           },
-          maxEpoch: zkLoginState.maxEpoch,
+          maxEpoch: originalMaxEpoch,
           userSignature,
         });
         
         // Execute authorization
+        console.log('[PDFEditor:AutoDecryptionView] Executing authorization...');
         const executeResponse = await fetch('/api/auth/execute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1191,20 +1237,59 @@ const AutoDecryptionView = ({
         const { digest } = await executeResponse.json();
         
         // Wait for transaction confirmation
+        console.log('[PDFEditor:AutoDecryptionView] Waiting for transaction confirmation...');
         await suiClient.waitForTransaction({
           digest: digest,
           options: { showEffects: true }
         });
 
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 70%');
         setProgress(70);
         setDecryptionStep('fetching-keys');
 
-        // **UPDATED: Use cached session key**
-        const sessionKey = await createOrGetSessionKey(allowlistId, userAddress);
+        // Create session key with contract-specific credentials
+        console.log('[PDFEditor:AutoDecryptionView] Creating session key...');
 
-        // Create seal_approve transaction
+        console.log('[PDFEditor:AutoDecryptionView] 🔍 Address debugging:');
+        console.log('[PDFEditor:AutoDecryptionView] Contract-specific zkLogin address:', ephemeralAddress);
+        console.log('[PDFEditor:AutoDecryptionView] Ephemeral keypair public key address:', ephemeralPublicKeyAddress);
+        console.log('[PDFEditor:AutoDecryptionView] Using for SessionKey:', ephemeralPublicKeyAddress);
+
+        console.log('[PDFEditor:AutoDecryptionView] Creating new SessionKey with params:', {
+          address: ephemeralPublicKeyAddress,  // ✅ Use ephemeral public key address
+          packageId: SEAL_PACKAGE_ID,
+          ttlMin: TTL_MIN,
+          hasKeypair: !!ephemeralKeypair,
+          hasSuiClient: !!suiClient
+        });
+
+        // ✅ FIX: Use ephemeral keypair's public key address for SessionKey
+        const sessionKey = new SessionKey({
+          address: ephemeralPublicKeyAddress,  // This will match signer.getPublicKey().toSuiAddress()
+          packageId: SEAL_PACKAGE_ID,
+          ttlMin: TTL_MIN,
+          signer: ephemeralKeypair,           // Same ephemeral keypair
+          suiClient: suiClient as any
+        });
+
+        console.log('[PDFEditor:AutoDecryptionView] SessionKey created successfully:', {
+          address: sessionKey.getAddress(),
+          packageId: sessionKey.getPackageId(),
+          creationTime: new Date(sessionKey.export().creationTimeMs).toISOString(),
+          ttlMin: sessionKey.export().ttlMin,
+          isExpired: sessionKey.isExpired()
+        });
+        
+        // Sign personal message with contract-specific key
+        console.log('[PDFEditor:AutoDecryptionView] Signing personal message...');
+        const personalMessage = sessionKey.getPersonalMessage();
+        const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
+        await sessionKey.setPersonalMessageSignature(signature.signature);
+        
+        // Create seal_approve transaction with contract-specific address
+        console.log('[PDFEditor:AutoDecryptionView] Creating seal_approve transaction...');
         const tx = new Transaction();
-        tx.setSender(sessionKey.address); // Use session key address
+        tx.setSender(ephemeralAddress);  // Contract-specific address as sender
         
         const rawId = docId.startsWith('0x') ? docId.substring(2) : docId;
         const documentIdBytes = fromHEX(rawId);
@@ -1223,7 +1308,8 @@ const AutoDecryptionView = ({
           onlyTransactionKind: true
         });
 
-        // **OPTIMIZED: Use cached session key, SEAL client will cache the actual keys**
+        // Fetch keys
+        console.log('[PDFEditor:AutoDecryptionView] Fetching decryption keys...');
         await sealClient.fetchKeys({
           ids: [rawId],
           txBytes: txKindBytes,
@@ -1231,25 +1317,29 @@ const AutoDecryptionView = ({
           threshold: 1
         });
 
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 90%');
         setProgress(90);
         setDecryptionStep('decrypting');
 
-        // Decrypt the data  
+        // Decrypt the data
+        console.log('[PDFEditor:AutoDecryptionView] Decrypting data...');
         const decryptedData = await sealClient.decrypt({
           data: new Uint8Array(encryptedData),
           sessionKey: sessionKey,
           txBytes: txKindBytes
         });
 
+        console.log('[PDFEditor:AutoDecryptionView] Setting progress to 100%');
         setProgress(100);
         setDecryptionStep('complete');
 
         // Create blob and call success handler
+        console.log('[PDFEditor:AutoDecryptionView] Creating decrypted blob...');
         const decryptedBlob = new Blob([decryptedData], { type: 'application/pdf' });
         onDecrypted(decryptedBlob);
 
       } catch (err) {
-        console.error('[AutoDecryptionView] Auto-decryption failed:', err);
+        console.error('[PDFEditor:AutoDecryptionView] Auto-decryption failed:', err);
         setError(err instanceof Error ? err.message : 'Failed to decrypt PDF automatically');
         setDecryptionStep('error');
       }

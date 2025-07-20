@@ -43,7 +43,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
     });
 
     if (isAuthenticated && user?.email && requiredEmail && user.email.toLowerCase() !== requiredEmail.toLowerCase()) {
-      const errorMsg = `This document must be signed with ${requiredEmail}. Please sign out and sign in with the correct email.`;
+      const errorMsg = `This document must be signed with the authorized email address. Please sign out and sign in with the correct email.`;
       console.log('[SignZkLoginModal] Email mismatch:', {
         userEmail: user.email,
         requiredEmail,
@@ -167,7 +167,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
           <DialogTitle>Sign in to view and sign document</DialogTitle>
           <DialogDescription>
             {requiredEmail 
-              ? `Please sign in with ${requiredEmail} to access this document.`
+              ? `Please sign in with the authorized email address to access this document.`
               : 'Authentication is required to view and sign this document.'}
           </DialogDescription>
         </DialogHeader>
