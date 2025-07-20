@@ -8,10 +8,10 @@ datasource db {
 }
 
 model User {
-  walletAddress String        @id @unique
-  email         String        @unique
+  email         String   @unique
+  walletAddress String   @id @unique
   name          String?
-  createdAt     DateTime      @default(now())
+  createdAt     DateTime @default(now())
 }
 
 model Contract {
@@ -20,7 +20,6 @@ model Contract {
   description       String?
   content           String?
   status            ContractStatus @default(DRAFT)
-  ownerGoogleIdHash String         // Hashed Google ID for privacy
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   expiresAt         DateTime?
@@ -29,42 +28,38 @@ model Contract {
   authorizedUsers   String[]
   documentId        String?
   encryptionInfo    Json?
-  networkInfo       String?
-  walrusBlobId      String?
-  startDate         DateTime?
   endDate           DateTime?
-  
-  // AWS S3 fields
-  s3FileKey       String?        // S3 object key
-  s3Bucket        String?        // S3 bucket name
-  s3FileName      String?        // Original filename
-  s3FileSize      Int?           // File size in bytes
-  s3ContentType   String?        // MIME type
-  s3UploadedAt    DateTime?      // Upload timestamp
-  
-  // Encryption fields
-  sealAllowlistId   String?
-  sealDocumentId    String?
-  sealCapId         String?
-  isEncrypted       Boolean @default(false)
+  networkInfo       String?
+  startDate         DateTime?
+  walrusBlobId      String?
+  s3Bucket          String?
+  s3ContentType     String?
+  s3FileKey         String?
+  s3FileName        String?
+  s3FileSize        Int?
+  s3UploadedAt      DateTime?
+  isEncrypted       Boolean        @default(false)
   originalFileName  String?
-  
-  signatures      Signature[]
+  sealAllowlistId   String?
+  sealCapId         String?
+  sealDocumentId    String?
+  ownerGoogleIdHash String
+  signatures        Signature[]
 }
 
 model Signature {
-  id                String          @id @default(cuid())
-  contractId        String
-  userGoogleIdHash  String          // Hashed Google ID for privacy
-  signedAt          DateTime?
-  status            SignatureStatus @default(PENDING)
-  walletAddress     String
-  signature         String?         // Base64 signature image
-  zkLoginData       Json?           // zkLogin signature data
-  email             String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  contract          Contract        @relation(fields: [contractId], references: [id])
+  id               String          @id @default(cuid())
+  contractId       String
+  signedAt         DateTime?
+  status           SignatureStatus @default(PENDING)
+  walletAddress    String
+  signature        String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  email            String?
+  zkLoginData      Json?
+  userGoogleIdHash String
+  contract         Contract        @relation(fields: [contractId], references: [id])
 }
 
 enum ContractStatus {

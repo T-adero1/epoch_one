@@ -13,7 +13,8 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Save, X,  Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check, AlertCircle, Info } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Save, X, Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check, AlertCircle, Info, Square, RotateCcw, Pen, MapPin } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 import { detectGroupedChanges, applyGroupedChanges, ChangeGroup } from '@/app/utils/textDiff'
 import AIChangesReview from './AIChangesReview'
@@ -24,7 +25,18 @@ import { validateSignerEmail } from '@/app/utils/email'
 import PDFEditor from './PDFEditor'
 // **NEW: Import email decryption utilities**
 import { decryptSignerEmails, canDecryptEmails } from '@/app/utils/emailEncryption'
+// ✅ ADD: Import for hashing and wallet generation
+import { hashGoogleId } from '@/app/utils/privacy'
 
+// ✅ ADD: SignaturePosition interface (moved to top)
+interface SignaturePosition {
+  signerWallet: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface ContractEditorProps {
   contract: ContractWithRelations;
@@ -73,6 +85,16 @@ export default function ContractEditor({
   const [title, setTitle] = useState(contract.title || '')
   const [description, setDescription] = useState(contract.description || '')
   const [signers, setSigners] = useState<string[]>([])
+  
+  // ✅ ADD: Missing save loading state
+  const [saveLoading, setSaveLoading] = useState(false);
+  
+  // ✅ ADD ALL THESE MISSING STATE VARIABLES:
+  // Signature positioning state
+  const [signaturePositions, setSignaturePositions] = useState<SignaturePosition[]>([])
+  const [signerWallets, setSignerWallets] = useState<string[]>([])
+  const [selectedSignerWallet, setSelectedSignerWallet] = useState<string>('')
+  const [isSignatureBoxMode, setIsSignatureBoxMode] = useState(false)
   
   // Track original values to detect changes with proper typing
   const [originalValues, setOriginalValues] = useState<OriginalValues>({
@@ -300,120 +322,75 @@ export default function ContractEditor({
     }, 500); // 500ms debounce
   };
 
+  // ✅ MODIFY: Update save function to include positions
   const handleSave = async () => {
+    // Prevent saving if there are validation errors
+    const hasValidationErrors = signerErrors.some(error => error !== '');
+    if (hasValidationErrors) {
+      toast({
+        title: "Validation Error", 
+        description: "Please fix all validation errors before saving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      // Get all non-empty signers
-      const nonEmptySigners = signers.filter(s => s.trim() !== '');
+      console.log('[ContractEditor] Starting save operation');
       
-      // Validate all signers
-      const validationResults = nonEmptySigners.map(signer => 
-        validateSignerEmail(signer.trim(), user?.email)
-      );
-      
-      // Check for validation errors
-      const hasValidationErrors = validationResults.some(result => !result.isValid);
-      const hasUIErrors = signerErrors.some(error => error !== '');
-      
-      if (hasValidationErrors || hasUIErrors) {
-        toast({
-          title: "Validation Error",
-          description: "Please fix all email validation errors before saving.",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      // Check for duplicates
-      const emailSet = new Set();
-      const duplicates = [];
-      
-      for (const signer of nonEmptySigners) {
-        const lowerEmail = signer.trim().toLowerCase();
-        if (emailSet.has(lowerEmail)) {
-          duplicates.push(signer);
-        } else {
-          emailSet.add(lowerEmail);
-        }
-      }
-      
-      if (duplicates.length > 0) {
-        toast({
-          title: "Duplicate Emails",
-          description: `Please remove duplicate email addresses: ${duplicates.join(', ')}`,
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      const validSigners = Array.from(emailSet) as string[];
-      
-      // **NEW: Encrypt signer emails before saving**
-      let encryptedSignerEmails: string[] = [];
-      
-      if (validSigners.length > 0 && user?.googleId) {
-        console.log('[ContractEditor] Encrypting', validSigners.length, 'signer emails before save');
-        
-        try {
-          // Import email encryption utility
-          const { encryptSignerEmails } = await import('@/app/utils/emailEncryption');
-          
-          // Encrypt the signer emails using owner's Google ID
-          encryptedSignerEmails = await encryptSignerEmails(validSigners, user.googleId);
-          
-          console.log('[ContractEditor] Successfully encrypted signer emails:', {
-            originalCount: validSigners.length,
-            encryptedCount: encryptedSignerEmails.length
-          });
-        } catch (encryptionError) {
-          console.error('[ContractEditor] Email encryption failed:', encryptionError);
-          toast({
-            title: "Encryption Error",
-            description: "Failed to encrypt signer emails. Please try again.",
-            variant: "destructive",
-          });
-          return;
-        }
-      }
-      
-      const updatedContract = await updateContract(contract.id, {
-        title,
-        description,
-        content,
-        metadata: {
-          ...contract.metadata,
-          // **UPDATED: Store encrypted emails instead of plain text**
-          signers: encryptedSignerEmails.length > 0 ? encryptedSignerEmails : validSigners,
-          // **NEW: Add metadata for consistency with dashboard**
-          ...(encryptedSignerEmails.length > 0 && {
-            signerCount: validSigners.length,
-            encryptedAt: new Date().toISOString(),
-          })
-        }
+      // ✅ ADD: Debug signature positions before save
+      console.log('[ContractEditor] DEBUG - Signature positions to save:', {
+        positionsCount: signaturePositions.length,
+        positions: signaturePositions,
+        hasPositions: signaturePositions.length > 0,
+        positionsJSON: JSON.stringify(signaturePositions)
       });
       
-      // **UPDATED: Update original values to use decrypted emails for change detection**
+      setSaveLoading(true);
+      
+      // ✅ FIXED: Use computed logic instead of undefined variable
+      const shouldUseDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
+      
+      // ✅ UPDATED: Store signature positions in allowlistId
+      const updatedContract = await updateContract(contract.id, {
+        title,
+        description: description || undefined,
+        content,
+        allowlistId: JSON.stringify(signaturePositions), // ✅ Store positions here
+        metadata: {
+          ...contract.metadata,
+          signers: shouldUseDecryptedEmails ? signers : (contract.metadata?.signers || [])
+        },
+      });
+
+      console.log('[ContractEditor] Contract updated successfully');
+      console.log('[ContractEditor] DEBUG - Updated contract allowlistId:', updatedContract.allowlistId);
+      
+      // Reset change tracking
       setOriginalValues({
         content,
         title,
         description,
-        signers: validSigners // Keep decrypted emails for UI state
+        signers
       });
-      
       setHasChanges(false);
-      onSave(updatedContract);
-      
+
       toast({
-        title: "Contract Saved",
-        description: `Contract saved with ${validSigners.length} encrypted signer(s).`,
+        title: "Contract saved",
+        description: `Your changes have been saved successfully. ${signaturePositions.length} signature boxes saved.`,
         variant: "success",
       });
+
+      onSave(updatedContract);
     } catch (error) {
-      console.error('Error updating contract:', error);
+      console.error('Failed to save contract:', error);
       toast({
-        title: "Save Error",
+        title: "Error",
         description: "Failed to save contract. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -550,6 +527,193 @@ export default function ContractEditor({
     });
   };
 
+  // ✅ ADD: Load existing positions from database
+  useEffect(() => {
+    if (contract.allowlistId) {
+      try {
+        const positions = JSON.parse(contract.allowlistId) as SignaturePosition[];
+        setSignaturePositions(positions);
+      } catch (error) {
+        console.error('Failed to parse signature positions:', error);
+        setSignaturePositions([]);
+      }
+    }
+  }, [contract.allowlistId]);
+
+  // ✅ ADD: New state to track wallet-to-email mapping
+  const [walletEmailMap, setWalletEmailMap] = useState<Map<string, string>>(new Map());
+
+  // ✅ MODIFY: Update the generateActualSignerWallets function
+  useEffect(() => {
+    const generateActualSignerWallets = async () => {
+      if (!user?.googleId) {
+        console.log('[ContractEditor] No user Google ID, skipping wallet generation');
+        setSignerWallets([]);
+        setWalletEmailMap(new Map());
+        return;
+      }
+
+      try {
+        console.log('[ContractEditor] Generating actual signer wallets that match allowlist...');
+        
+        // **STEP 1: Get decrypted signer emails**
+        let actualSignerEmails = signers;
+        
+        // Check if emails are encrypted and decrypt them if user is owner
+        if (signers.length > 0 && areEmailsEncrypted(signers)) {
+          console.log('[ContractEditor] Signers appear to be encrypted, attempting to decrypt...');
+          
+          try {
+            const canDecrypt = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
+            if (canDecrypt) {
+              actualSignerEmails = await decryptSignerEmails(signers, user.googleId);
+              console.log('[ContractEditor] Successfully decrypted signer emails:', actualSignerEmails);
+            } else {
+              console.warn('[ContractEditor] User cannot decrypt emails - not the owner');
+              setSignerWallets([]);
+              setWalletEmailMap(new Map());
+              return;
+            }
+          } catch (decryptError) {
+            console.error('[ContractEditor] Failed to decrypt signer emails:', decryptError);
+            setSignerWallets([]);
+            setWalletEmailMap(new Map());
+            return;
+          }
+        }
+
+        // **STEP 2: Create wallet-to-email mapping**
+        const newWalletEmailMap = new Map<string, string>();
+
+        if (actualSignerEmails.length === 0) {
+          console.log('[ContractEditor] No signer emails available');
+          setSignerWallets([]);
+          setWalletEmailMap(newWalletEmailMap);
+          return;
+        }
+
+        // **STEP 3: Generate predetermined wallets for each signer (same as allowlist creation)**
+        console.log('[ContractEditor] Generating predetermined wallets for', actualSignerEmails.length, 'signers...');
+        
+        const signerWalletPromises = actualSignerEmails.map(async (email) => {
+          try {
+            // Hash the email using the same method as allowlist creation
+            const hashedEmail = await hashGoogleId(`email_${email}`);
+            console.log(`[ContractEditor] Hashed email for predetermined wallet: ${email.substring(0, 5)}...`);
+            
+            // Call the predetermined wallet API to get the actual wallet address
+            const response = await fetch('/api/contracts/predetermined-wallet', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                emailHash: hashedEmail,
+                contractId: contract.id,
+                context: 'signature-position-editor'
+              }),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Predetermined wallet API failed: ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log(`[ContractEditor] Generated predetermined wallet for ${email.substring(0, 5)}...:`, result.predeterminedAddress.substring(0, 8) + '...');
+            
+            return {
+              email,
+              wallet: result.predeterminedAddress
+            };
+          } catch (error) {
+            console.error(`[ContractEditor] Failed to generate predetermined wallet for ${email}:`, error);
+            return null;
+          }
+        });
+
+        const signerWalletResults = await Promise.all(signerWalletPromises);
+        const validSignerWallets = signerWalletResults.filter(result => result !== null);
+
+        // **STEP 4: Get owner's contract-specific wallet**
+        let ownerWallet: string | null = null;
+        try {
+          console.log('[ContractEditor] Getting owner contract-specific wallet...');
+          
+          // Get the owner's contract-specific wallet address
+          const { getContractSpecificAddress } = await import('@/app/utils/contractWallet');
+          const hashedOwnerGoogleId = await hashGoogleId(user.googleId);
+          
+          // Get JWT from session
+          const sessionData = localStorage.getItem("epochone_session");
+          if (sessionData) {
+            const sessionObj = JSON.parse(sessionData);
+            const jwt = sessionObj.zkLoginState?.jwt || sessionObj.user?.zkLoginState?.jwt;
+            
+            if (jwt) {
+              ownerWallet = await getContractSpecificAddress(hashedOwnerGoogleId, contract.id, jwt);
+              console.log('[ContractEditor] Owner contract-specific wallet:', ownerWallet.substring(0, 8) + '...');
+            }
+          }
+        } catch (ownerWalletError) {
+          console.error('[ContractEditor] Failed to get owner contract-specific wallet:', ownerWalletError);
+        }
+
+        // **STEP 5: Build wallet-to-email mapping**
+        if (ownerWallet && user.email) {
+          newWalletEmailMap.set(ownerWallet, user.email);
+        }
+        
+        validSignerWallets.forEach(result => {
+          if (result) {
+            newWalletEmailMap.set(result.wallet, result.email);
+          }
+        });
+
+        // **STEP 6: Combine all wallets (owner + signers)**
+        const allWallets = [
+          ...(ownerWallet ? [ownerWallet] : []),
+          ...validSignerWallets.map(result => result!.wallet)
+        ];
+
+        console.log('[ContractEditor] Generated wallets for signature positions:', {
+          ownerWallet: ownerWallet ? ownerWallet.substring(0, 8) + '...' : 'none',
+          ownerEmail: user.email,
+          signerWallets: validSignerWallets.map(r => r!.wallet.substring(0, 8) + '...'),
+          signerEmails: validSignerWallets.map(r => r!.email),
+          totalWallets: allWallets.length,
+          emailMapping: Array.from(newWalletEmailMap.entries()).map(([wallet, email]) => ({
+            wallet: wallet.substring(0, 8) + '...',
+            email
+          }))
+        });
+
+        setSignerWallets(allWallets);
+        setWalletEmailMap(newWalletEmailMap);
+
+      } catch (error) {
+        console.error('[ContractEditor] Failed to generate actual signer wallets:', error);
+        setSignerWallets([]);
+        setWalletEmailMap(new Map());
+      }
+    };
+    
+    generateActualSignerWallets();
+  }, [signers, contract.id, contract.ownerGoogleIdHash, user?.googleId, user?.email]);
+
+  // ✅ ENHANCED: Handle signature position changes with debugging
+  const handleSignaturePositionsChange = (positions: SignaturePosition[]) => {
+    console.log('[ContractEditor] DEBUG - Signature positions changed:', {
+      newPositionsCount: positions.length,
+      positions: positions,
+      previousCount: signaturePositions.length
+    });
+    
+    setSignaturePositions(positions);
+    // Mark contract as modified
+    setHasChanges(true);
+  };
+
+  // ✅ ADD: Computed value for whether emails are decrypted
+  const hasDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
+
   return (
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4">
@@ -589,21 +753,17 @@ export default function ContractEditor({
             {/* Conditional rendering based on whether contract has PDF */}
             {hasPdfFile ? (
               // Show PDF Editor when PDF exists
-              <PDFEditor
-                contract={{
-                  id: contract.id,
-                  title: contract.title,
-                  s3FileKey: contract.s3FileKey,
-                  s3FileName: contract.s3FileName,
-                  s3FileSize: contract.s3FileSize,
-                  s3ContentType: contract.s3ContentType,
-                }}
-                onFileUpdate={handlePdfFileUpdate}
-                startWithAI={false}
-                showDownloadButton={false}
-                showReplaceButton={false}
-                showAIButton={false}
-              />
+              <div className="space-y-6">
+                <PDFEditor
+                  contract={contract}
+                  signatureMode="edit"
+                  signerWallets={signerWallets}
+                  walletEmailMap={walletEmailMap} // ✅ ADD: Pass email mapping
+                  onPositionsChange={handleSignaturePositionsChange} // ✅ Make sure this is passed
+                  showAIButton={false}
+                  onFileUpdate={handlePdfFileUpdate}
+                />
+              </div>
             ) : (
               // Show existing text editor when no PDF
             <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
@@ -1125,11 +1285,20 @@ export default function ContractEditor({
           </Button>
           <Button 
             onClick={handleSave} 
-            disabled={!hasChanges}
-            className={!hasChanges ? 'opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}
+            disabled={!hasChanges || saveLoading}
+            className={(!hasChanges || saveLoading) ? 'opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}
           >
-            <Save className="h-4 w-4 mr-2" />
-            Save Changes
+            {saveLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
+              </>
+            )}
           </Button>
         </div>
       </CardFooter>

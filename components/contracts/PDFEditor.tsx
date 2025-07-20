@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { 
@@ -12,15 +12,30 @@ import {
   Wand2, 
   FileText, 
   Lightbulb,
-  X,
-  ChevronLeft,
+
   RefreshCw,
   AlertTriangle,
   Shield,
   ExternalLink,
-  RotateCcw
+  RotateCcw,
+  Pen,
+  Square,
+  MapPin,
+  Users,
+  Trash2,
+  User
 } from 'lucide-react'
 import { toast } from '@/components/ui/use-toast'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+
+interface SignaturePosition {
+  signerWallet: string;
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface PDFEditorProps {
   contract: {
@@ -49,6 +64,10 @@ interface PDFEditorProps {
   showDownloadButton?: boolean;
   showReplaceButton?: boolean;
   showAIButton?: boolean;
+  signatureMode?: 'view' | 'edit';  // New prop for annotation mode
+  signerWallets?: string[];         // Available signer wallets
+  walletEmailMap?: Map<string, string>; // ✅ ADD: Email mapping
+  onPositionsChange?: (positions: SignaturePosition[]) => void;
 }
 
 // **IMPROVED: More reliable encryption detection**
@@ -148,8 +167,12 @@ export default function PDFEditor({
   onFileUpdate, 
   startWithAI = false,
   showDownloadButton = true,
-  showReplaceButton = true,
-  showAIButton = true
+  showReplaceButton = false,
+  showAIButton = true,
+  signatureMode = 'view',
+  signerWallets = [],
+  walletEmailMap = new Map(), // ✅ ADD: Default empty map
+  onPositionsChange
 }: PDFEditorProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
@@ -166,6 +189,13 @@ export default function PDFEditor({
   const [isCheckingCache, setIsCheckingCache] = useState(false);
   const [cacheCheckComplete, setCacheCheckComplete] = useState(false);
   
+  // ✅ ADD: Signature box drawing state
+  const [signaturePositions, setSignaturePositions] = useState<SignaturePosition[]>([]);
+  const [isDrawingSignatureBox, setIsDrawingSignatureBox] = useState(false);
+  const [currentDrawingBox, setCurrentDrawingBox] = useState<Partial<SignaturePosition> | null>(null);
+  const [selectedSignerWallet, setSelectedSignerWallet] = useState<string>('');
+  const [isSignatureBoxMode, setIsSignatureBoxMode] = useState(false);
+  
   // AI functionality state
   const [showAIPanel, setShowAIPanel] = useState(startWithAI);
   const [aiQuery, setAiQuery] = useState('');
@@ -178,6 +208,347 @@ export default function PDFEditor({
     "Convert to a more formal contract layout",
     "Add legal disclaimers and terms"
   ]);
+
+  // ✅ ADD: State to track PDF scroll position
+  const [pdfScrollPosition, setPdfScrollPosition] = useState({ x: 0, y: 0 });
+
+  // ✅ ADD: Function to handle iframe scroll events
+  const handleIframeScroll = useCallback((iframe: HTMLIFrameElement) => {
+    try {
+      // Access the iframe's content window and document
+      const iframeWindow = iframe.contentWindow;
+      const iframeDocument = iframe.contentDocument;
+      
+      if (iframeWindow && iframeDocument) {
+        const scrollListener = () => {
+          const scrollX = iframeWindow.scrollX || iframeDocument.documentElement.scrollLeft || 0;
+          const scrollY = iframeWindow.scrollY || iframeDocument.documentElement.scrollTop || 0;
+          
+          setPdfScrollPosition({ x: scrollX, y: scrollY });
+        };
+        
+        // Add scroll listener to the iframe content
+        iframeWindow.addEventListener('scroll', scrollListener);
+        iframeDocument.addEventListener('scroll', scrollListener);
+        
+        // Also listen for resize events that might affect scroll
+        iframeWindow.addEventListener('resize', scrollListener);
+        
+        return () => {
+          iframeWindow.removeEventListener('scroll', scrollListener);
+          iframeDocument.removeEventListener('scroll', scrollListener);
+          iframeWindow.removeEventListener('resize', scrollListener);
+        };
+      }
+    } catch (error) {
+      // Cross-origin restrictions might prevent access to iframe content
+      console.warn('[PDFEditor] Unable to track iframe scroll due to cross-origin restrictions');
+    }
+  }, []);
+
+  // ✅ ADD: Effect to set up iframe scroll tracking
+  useEffect(() => {
+    const iframe = document.querySelector('#pdf-iframe') as HTMLIFrameElement;
+    if (iframe) {
+      // Wait for iframe to load
+      const setupScrollTracking = () => {
+        const cleanup = handleIframeScroll(iframe);
+        return cleanup;
+      };
+      
+      if (iframe.contentDocument?.readyState === 'complete') {
+        return setupScrollTracking();
+      } else {
+        iframe.addEventListener('load', setupScrollTracking);
+        return () => {
+          iframe.removeEventListener('load', setupScrollTracking);
+        };
+      }
+    }
+  }, [decryptedPdfUrl, pdfUrl, handleIframeScroll]);
+
+  // ✅ ADD: Signature box drawing handlers
+  const handleMouseDown = (e: React.MouseEvent, pageNumber: number) => {
+    console.log('[PDFEditor] Mouse down:', { isSignatureBoxMode, selectedSignerWallet, signatureMode });
+    if (!isSignatureBoxMode || !selectedSignerWallet || signatureMode !== 'edit') return;
+    
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    // ✅ FIXED: Add scroll position to coordinates
+    const x = e.clientX - rect.left + pdfScrollPosition.x;
+    const y = e.clientY - rect.top + pdfScrollPosition.y;
+    
+    console.log('[PDFEditor] Starting signature box draw at:', { 
+      x, 
+      y, 
+      pageNumber, 
+      scrollX: pdfScrollPosition.x, 
+      scrollY: pdfScrollPosition.y 
+    });
+    
+    setIsDrawingSignatureBox(true);
+    setCurrentDrawingBox({
+      signerWallet: selectedSignerWallet,
+      page: pageNumber,
+      x,
+      y,
+      width: 0,
+      height: 0
+    });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDrawingSignatureBox || !currentDrawingBox) return;
+    
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    // ✅ FIXED: Add scroll position to coordinates
+    const currentX = e.clientX - rect.left + pdfScrollPosition.x;
+    const currentY = e.clientY - rect.top + pdfScrollPosition.y;
+    
+    setCurrentDrawingBox(prev => ({
+      ...prev!,
+      width: currentX - prev!.x!,
+      height: currentY - prev!.y!
+    }));
+  };
+
+  // ✅ ENHANCED: Add debugging to handleMouseUp
+  const handleMouseUp = () => {
+    if (!isDrawingSignatureBox || !currentDrawingBox || 
+        !currentDrawingBox.width || !currentDrawingBox.height ||
+        Math.abs(currentDrawingBox.width) < 20 || Math.abs(currentDrawingBox.height) < 10) {
+      console.log('[PDFEditor] DEBUG - Signature box creation cancelled:', {
+        isDrawing: isDrawingSignatureBox,
+        hasCurrentBox: !!currentDrawingBox,
+        width: currentDrawingBox?.width,
+        height: currentDrawingBox?.height
+      });
+      setIsDrawingSignatureBox(false);
+      setCurrentDrawingBox(null);
+      return;
+    }
+    
+    const newPosition: SignaturePosition = {
+      signerWallet: currentDrawingBox.signerWallet!,
+      page: currentDrawingBox.page!,
+      x: Math.min(currentDrawingBox.x!, currentDrawingBox.x! + currentDrawingBox.width!),
+      y: Math.min(currentDrawingBox.y!, currentDrawingBox.y! + currentDrawingBox.height!),
+      width: Math.abs(currentDrawingBox.width!),
+      height: Math.abs(currentDrawingBox.height!)
+    };
+    
+    const updatedPositions = [...signaturePositions, newPosition];
+    
+    console.log('[PDFEditor] DEBUG - New signature box created:', {
+      newPosition,
+      totalPositions: updatedPositions.length,
+      allPositions: updatedPositions,
+      hasCallback: !!onPositionsChange
+    });
+    
+    setSignaturePositions(updatedPositions);
+    
+    // ✅ CRITICAL: Make sure callback is called
+    if (onPositionsChange) {
+      console.log('[PDFEditor] DEBUG - Calling onPositionsChange callback with:', updatedPositions);
+      onPositionsChange(updatedPositions);
+    } else {
+      console.warn('[PDFEditor] WARNING - onPositionsChange callback is not provided!');
+    }
+    
+    setIsDrawingSignatureBox(false);
+    setCurrentDrawingBox(null);
+    
+    toast({
+      title: "Signature Box Added",
+      description: `Added signature box for ${selectedSignerWallet.substring(0, 8)}... (Total: ${updatedPositions.length})`,
+      variant: "success",
+    });
+  };
+
+  // ✅ ENHANCED: Add debugging to removeSignatureBox
+  const removeSignatureBox = (index: number) => {
+    const updatedPositions = signaturePositions.filter((_, i) => i !== index);
+    
+    console.log('[PDFEditor] DEBUG - Signature box removed:', {
+      removedIndex: index,
+      remainingPositions: updatedPositions.length,
+      allPositions: updatedPositions,
+      hasCallback: !!onPositionsChange
+    });
+    
+    setSignaturePositions(updatedPositions);
+    
+    // ✅ CRITICAL: Make sure callback is called for removals too
+    if (onPositionsChange) {
+      console.log('[PDFEditor] DEBUG - Calling onPositionsChange callback after removal with:', updatedPositions);
+      onPositionsChange(updatedPositions);
+    } else {
+      console.warn('[PDFEditor] WARNING - onPositionsChange callback is not provided for removal!');
+    }
+  };
+
+  // ✅ ADD: Props from parent component
+  useEffect(() => {
+    if (signerWallets.length > 0 && !selectedSignerWallet) {
+      setSelectedSignerWallet(signerWallets[0]);
+    }
+  }, [signerWallets, selectedSignerWallet]);
+
+  // ✅ ADD: Signature box rendering function with improved visuals
+  const renderSignatureBoxes = (pageNumber: number) => (
+    <>
+      {/* Existing signature boxes with enhanced styling */}
+      {signaturePositions
+        .filter(pos => pos.page === pageNumber)
+        .map((position, index) => {
+          const email = walletEmailMap.get(position.signerWallet);
+          const displayLabel = email ? email.split('@')[0] : position.signerWallet.substring(0, 8) + '...';
+          
+          // ✅ NEW: Different color schemes for different signers
+          const colorSchemes = [
+            { border: 'border-emerald-400', bg: 'bg-emerald-50', label: 'bg-emerald-500', text: 'text-emerald-700', shadow: 'shadow-emerald-200' },
+            { border: 'border-blue-400', bg: 'bg-blue-50', label: 'bg-blue-500', text: 'text-blue-700', shadow: 'shadow-blue-200' },
+            { border: 'border-purple-400', bg: 'bg-purple-50', label: 'bg-purple-500', text: 'text-purple-700', shadow: 'shadow-purple-200' },
+            { border: 'border-rose-400', bg: 'bg-rose-50', label: 'bg-rose-500', text: 'text-rose-700', shadow: 'shadow-rose-200' },
+            { border: 'border-amber-400', bg: 'bg-amber-50', label: 'bg-amber-500', text: 'text-amber-700', shadow: 'shadow-amber-200' }
+          ];
+          
+          const colorScheme = colorSchemes[index % colorSchemes.length];
+          const isFirstSigner = index === 0; // Owner is usually first
+          
+          return (
+            <div
+              key={index}
+              className={`absolute pointer-events-auto group transition-all duration-300 hover:scale-105 ${
+                signatureMode === 'edit' 
+                  ? 'hover:shadow-lg cursor-pointer' 
+                  : 'hover:shadow-md'
+              }`}
+              style={{
+                // ✅ FIXED: Subtract scroll position to keep boxes aligned with PDF content
+                left: position.x - pdfScrollPosition.x,
+                top: position.y - pdfScrollPosition.y,
+                width: position.width,
+                height: position.height,
+              }}
+            >
+              {/* ✅ ENHANCED: Main signature box with gradient border and shadow */}
+              <div className={`
+                relative w-full h-full rounded-lg transition-all duration-300 group-hover:scale-[1.02]
+                ${colorScheme.border} ${colorScheme.bg} ${colorScheme.shadow}
+                border-2 border-dashed shadow-md bg-opacity-60
+                backdrop-blur-sm
+              `}>
+                
+                {/* ✅ NEW: Signature icon and placeholder text */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
+                  <div className={`flex items-center gap-1 ${colorScheme.text} opacity-75`}>
+                    {isFirstSigner ? (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H16a1 1 0 110 2h-1.92l-1 4H15a1 1 0 110 2h-2.38l-.56 2.242a1 1 0 11-1.94-.485L10.47 14H7.53l-.56 2.242a1 1 0 11-1.94-.485L5.47 14H4a1 1 0 110-2h1.92l1-4H5a1 1 0 110-2h2.38l.56-2.243a1 1 0 011.213-.727zM9.53 8l-1 4h2.94l1-4H9.53z" clipRule="evenodd" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.828 2.828 0 114 4L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    )}
+                    <span className="text-xs font-medium hidden group-hover:inline">
+                      {isFirstSigner ? 'Your signature' : 'Your client\'s signature'}
+                    </span>
+                  </div>
+                  
+                  {/* ✅ NEW: Decorative signature line */}
+                  <div className={`mt-1 w-full max-w-[80%] h-px ${colorScheme.border.replace('border-', 'bg-')} opacity-50`}></div>
+                </div>
+                
+                {/* ✅ NEW: Corner indicator for signer type */}
+                {isFirstSigner && (
+                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-full border border-white shadow-sm">
+                    <div className="absolute inset-0.5 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-full"></div>
+                  </div>
+                )}
+              </div>
+              
+              {/* ✅ ENHANCED: Label with improved styling and animations */}
+              <div className="absolute -top-1 left-0 transform -translate-y-full">
+                <div className={`
+                  ${colorScheme.label} text-white text-xs px-3 py-1.5 rounded-t-lg rounded-br-lg
+                  font-medium shadow-sm flex items-center gap-2 whitespace-nowrap
+                  transition-all duration-300 group-hover:shadow-md
+                  ${signatureMode === 'edit' ? 'group-hover:-translate-y-0.5' : ''}
+                `}>
+                  {/* ✅ NEW: User avatar/icon */}
+                  <div className="w-4 h-4 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                    {isFirstSigner ? (
+                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H16a1 1 0 110 2h-1.92l-1 4H15a1 1 0 110 2h-2.38l-.56 2.242a1 1 0 11-1.94-.485L10.47 14H7.53l-.56 2.242a1 1 0 11-1.94-.485L5.47 14H4a1 1 0 110-2h1.92l1-4H5a1 1 0 110-2h2.38l.56-2.243a1 1 0 011.213-.727zM9.53 8l-1 4h2.94l1-4H9.53z" clipRule="evenodd" />
+                      </svg>
+                    ) : (
+                      <User className="w-2.5 h-2.5 text-white" />
+                    )}
+                  </div>
+                  
+                  <span className="font-medium">{displayLabel}</span>
+                  
+                  {/* ✅ ENHANCED: Delete button with improved styling */}
+                  {signatureMode === 'edit' && (
+                    <button
+                      onClick={() => removeSignatureBox(signaturePositions.indexOf(position))}
+                      className="ml-1 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-white hover:bg-opacity-20 rounded p-0.5"
+                      title="Remove signature box"
+                    >
+                      <Trash2 className="h-3 w-3 text-white" />
+                    </button>
+                  )}
+                </div>
+                
+                {/* ✅ NEW: Small connection line from label to box */}
+                <div className={`absolute top-full left-3 w-px h-1 ${colorScheme.label}`}></div>
+              </div>
+            </div>
+          );
+        })}
+      
+      {/* ✅ ENHANCED: Currently drawing box with scroll compensation */}
+      {isDrawingSignatureBox && currentDrawingBox && currentDrawingBox.page === pageNumber && (
+        <div
+          className="absolute pointer-events-none transition-all duration-150"
+          style={{
+            // ✅ FIXED: Subtract scroll position for drawing box too
+            left: Math.min(currentDrawingBox.x!, currentDrawingBox.x! + (currentDrawingBox.width || 0)) - pdfScrollPosition.x,
+            top: Math.min(currentDrawingBox.y!, currentDrawingBox.y! + (currentDrawingBox.height || 0)) - pdfScrollPosition.y,
+            width: Math.abs(currentDrawingBox.width || 0),
+            height: Math.abs(currentDrawingBox.height || 0),
+          }}
+        >
+          {/* ✅ NEW: Animated drawing preview with gradient border */}
+          <div className="relative w-full h-full">
+            {/* Outer glow effect */}
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg blur-sm opacity-30 animate-pulse"></div>
+            
+            {/* Main drawing box */}
+            <div className="relative w-full h-full border-2 border-dashed border-blue-500 bg-gradient-to-br from-blue-100 to-purple-100 bg-opacity-60 rounded-lg backdrop-blur-sm">
+              {/* Drawing indicator */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex items-center gap-2 text-blue-600 opacity-75">
+                  <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.828 2.828 0 114 4L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  <span className="text-xs font-medium">Drawing...</span>
+                </div>
+              </div>
+              
+              {/* Animated corner indicators */}
+              <div className="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-blue-500 animate-pulse"></div>
+              <div className="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-blue-500 animate-pulse"></div>
+              <div className="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-blue-500 animate-pulse"></div>
+              <div className="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-blue-500 animate-pulse"></div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   // **UPDATED: Single initialization effect to prevent double loading**
   useEffect(() => {
@@ -542,19 +913,193 @@ export default function PDFEditor({
     
     // **ENCRYPTED PDF HANDLING** - Only path for encrypted contracts
     if (isEncrypted) {
-      console.log('[PDFEditor] Rendering encrypted PDF section');
+      
       
       // Show inline decrypted PDF viewer
       if (decryptedPdfBlob && decryptedPdfUrl) {
-        console.log('[PDFEditor] Rendering inline decrypted PDF viewer');
+        
         return (
-          <div className="h-full bg-gray-100">
-            <iframe
-              src={decryptedPdfUrl}
-              className="w-full h-full border-0"
-              title="Decrypted PDF Viewer"
-              style={{ minHeight: '400px' }}
-            />
+          <div className="h-full bg-gray-100 space-y-3">
+            {/* ✅ NEW: Integrated header with signature controls */}
+            <div className={`p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 transition-all ${
+              isSignatureBoxMode 
+                ? 'bg-blue-50 border-blue-200' 
+                : 'bg-white border-gray-200'  // ✅ CHANGED: bg-white instead of bg-gray-50
+            }`}>
+              {/* Left side - existing title and status */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-red-600" />  {/* ✅ CHANGED: text-red-600 to match original */}
+                  <span className="font-normal text-gray-500">PDF Editor</span>  {/* ✅ CHANGED: font-normal and text-gray-500 to match original */}
+                </div>
+                
+                {isContractEncrypted(contract) && (
+                  <div className="flex items-center gap-1 ml-2">  {/* ✅ CHANGED: ml-2 to match original spacing */}
+                    <Shield className="h-3 w-3 text-purple-500" />
+                    <span className="text-xs text-purple-600">Encrypted</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* Right side - ALL controls in one row */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* ✅ ADD: Signature controls FIRST (when in edit mode) */}
+                {signatureMode === 'edit' && signerWallets.length > 0 && (
+                  <>
+                    {/* ✅ ENLARGED: Combined selector + button with increased width for descriptive text */}
+                    <div className="flex items-center h-8 border border-blue-200 rounded-md bg-white hover:bg-blue-50 transition-colors w-80">
+                      {/* ✅ ADJUSTED: Left part - Signer selector with adjusted width */}
+                      <div className="flex-1 min-w-0 w-52">
+                        <Select value={selectedSignerWallet} onValueChange={setSelectedSignerWallet}>
+                          <SelectTrigger className="h-full px-3 text-xs border-0 bg-transparent hover:bg-transparent w-full rounded-none">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <User className="h-3 w-3 text-blue-600 flex-shrink-0" />
+                              <span className="truncate flex-1 text-left">
+                                {(() => {
+                                  const email = walletEmailMap.get(selectedSignerWallet);
+                                  const displayText = email ? email : `Select Signer`;
+                                  return displayText;
+                                })()}
+                              </span>
+                            </div>
+                          </SelectTrigger>
+                          <SelectContent className="w-84">
+                            {/* ✅ UPDATED: Dropdown width to match container */}
+                            {signerWallets.map((wallet, index) => {
+                              const email = walletEmailMap.get(wallet);
+                              const displayText = email ? email : `Unknown User`;
+                              const isFirstWallet = index === 0;
+                              
+                              return (
+                                <SelectItem key={wallet} value={wallet} className="cursor-pointer">
+                                  <div className="flex items-center gap-2 w-full">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      {isFirstWallet ? (
+                                        <div className="h-2 w-2 bg-green-500 rounded-full flex-shrink-0" title="Contract Owner" />
+                                      ) : (
+                                        <div className="h-2 w-2 bg-blue-500 rounded-full flex-shrink-0" title="Signer" />
+                                      )}
+                                      <span className="font-medium text-sm truncate flex-1">{displayText}</span>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      {/* Separator line */}
+                      <div className="w-px h-5 bg-blue-200 flex-shrink-0"></div>
+                      
+                      {/* ✅ ENLARGED: Right part - Draw boxes button with increased width for descriptive text */}
+                      <button
+                        onClick={() => setIsSignatureBoxMode(!isSignatureBoxMode)}
+                        className={`px-3 h-full text-xs font-medium transition-all rounded-none w-34 flex-shrink-0 ${
+                          isSignatureBoxMode 
+                            ? 'bg-red-50 text-red-700 hover:bg-red-100' 
+                            : 'bg-transparent text-gray-700 hover:bg-blue-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          {isSignatureBoxMode ? (
+                            <>
+                              <RotateCcw className="h-3 w-3" />
+                              <span className="whitespace-nowrap">Exit Drawing</span>
+                            </>
+                          ) : (
+                            <>
+                              <Pen className="h-3 w-3" />
+                              <span className="whitespace-nowrap">Draw Signature Boxes </span>
+                            </>
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                    
+                    {/* Enhanced signature count indicator */}
+                    {signaturePositions.length > 0 && (
+                      <div className="flex items-center gap-1 text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded-full border border-blue-200">
+                        <MapPin className="h-3 w-3" />
+                        <span className="font-medium">{signaturePositions.length}</span>
+                        <span className="text-blue-600">
+                          {signaturePositions.length === 1 ? 'box' : 'boxes'}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* ✅ ENHANCED: Separator with better styling */}
+                    <div className="w-px h-6 bg-gray-300"></div>
+                  </>
+                )}
+                
+                {/* ✅ UPDATED: Standard PDF controls with original button styling */}
+                {showDownloadButton && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={downloadPdf} 
+                    className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"  // ✅ RESTORED: Original button styling
+                  >
+                    <Download className="h-3 w-3 mr-1" />
+                    Download
+                  </Button>
+                )}
+
+                
+
+                {showReplaceButton && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={handleReplaceFile} 
+                    className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"  // ✅ RESTORED: Original button styling
+                  >
+                    <Upload className="h-3 w-3 mr-1" />
+                    Replace
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {/* ✅ REMOVE: The separate signature box controls card - DELETE IT COMPLETELY */}
+            
+            {/* ✅ OPTIONAL: Drawing mode indicator (if you want to keep it) */}
+            {isSignatureBoxMode && (
+              <div className="bg-blue-100 border-b border-blue-200 p-2 text-center">
+                <div className="flex items-center justify-center gap-2 text-sm text-blue-800">
+                  <Square className="h-4 w-4" />
+                  <span className="font-medium">Drawing Mode Active</span>
+                  <span className="text-xs opacity-75">Click and drag to create signature boxes</span>
+                </div>
+              </div>
+            )}
+            
+            {/* PDF content area */}
+            <div className="flex-1">
+              {/* Your existing PDF rendering code */}
+              <div 
+                className="relative h-full bg-white rounded-lg border border-gray-200 overflow-hidden"
+                onMouseDown={isSignatureBoxMode ? (e) => handleMouseDown(e, 1) : undefined}
+                onMouseMove={isSignatureBoxMode ? handleMouseMove : undefined}
+                onMouseUp={isSignatureBoxMode ? handleMouseUp : undefined}
+                style={{ 
+                  cursor: isSignatureBoxMode ? 'crosshair' : 'default',
+                  minHeight: '600px' 
+                }}
+              >
+                <iframe
+                  id="pdf-iframe" // ✅ ADD: ID for scroll tracking
+                  src={decryptedPdfUrl}
+                  className={`w-full h-full border-0 ${isSignatureBoxMode ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                  title="Decrypted PDF Viewer"
+                  style={{ minHeight: '600px' }}
+                />
+                
+                {/* ✅ UPDATED: Signature boxes overlay - only show when in signature mode */}
+                {isSignatureBoxMode && renderSignatureBoxes(1)}
+              </div>
+            </div>
           </div>
         );
       }
@@ -609,7 +1154,7 @@ export default function PDFEditor({
     
     // **REGULAR PDF HANDLING** - Only for non-encrypted contracts
     if (contract.s3FileKey && !isEncrypted && pdfUrl) {
-      console.log('[PDFEditor] Rendering inline regular PDF viewer');
+      
       return (
         <div className="h-full bg-gray-100">
           <iframe
@@ -640,7 +1185,7 @@ export default function PDFEditor({
     }
     
     // **NO PDF UPLOADED**
-    console.log('[PDFEditor] Rendering no PDF section');
+    
     return (
       <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
         <div className="w-full max-w-sm mx-auto text-center space-y-4">
@@ -664,134 +1209,12 @@ export default function PDFEditor({
     );
   };
 
-  console.log('[PDFEditor] Component render, current state:', {
-    isEncrypted: isContractEncrypted(contract),
-    hasDecryptedBlob: !!decryptedPdfBlob,
-    hasDecryptedUrl: !!decryptedPdfUrl,
-    showAIPanel,
-    hasInitialized,
-    isCheckingCache,
-    cacheCheckComplete
-  });
+
 
   return (
-    <div className="border rounded-md min-h-[500px] bg-white relative overflow-hidden">
-      {/* Header with PDF Actions (unchanged) */}
-      <div className="p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
-        <div className="text-sm text-gray-500">
-          {showAIPanel ? (
-            <button
-              onClick={() => setShowAIPanel(false)}
-              className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors group"
-            >
-              <ChevronLeft className="h-3 w-3 group-hover:translate-x-[-1px] transition-transform flex-shrink-0" />
-              <span className="font-normal">PDF Editor</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-1 text-sm text-gray-500">
-              <FileText className="h-3 w-3 flex-shrink-0 text-red-600" />
-              <span className="font-normal">PDF Editor</span>
-              {/* Show encryption indicator */}
-              {isContractEncrypted(contract) && (
-                <div className="flex items-center gap-1 ml-2">
-                  <Shield className="h-3 w-3 text-purple-500" />
-                  <span className="text-xs text-purple-600">Encrypted</span>
-                </div>
-              )}
-              {/* Show regular PDF info */}
-              {!isContractEncrypted(contract) && contract.s3FileName && (
-                <div className="flex items-center gap-1 ml-2">
-                  <span className="text-xs text-gray-600">
-                    {contract.s3FileName}
-                    {contract.s3FileSize && ` (${(contract.s3FileSize / 1024 / 1024).toFixed(1)} MB)`}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        
-        <div className="flex items-center gap-2">
-          {/* PDF Action Buttons for decrypted PDFs */}
-          {decryptedPdfBlob && decryptedPdfUrl && (
-            <>
-              <Button
-                onClick={downloadPdf}
-                size="sm"
-                variant="outline"
-                className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Download
-              </Button>
-              <Button
-                onClick={() => window.open(decryptedPdfUrl, '_blank')}
-                size="sm"
-                variant="outline"
-                className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
-              >
-                <ExternalLink className="h-3 w-3 mr-1" />
-                Open in Tab
-              </Button>
-            </>
-          )}
-          
-          {/* PDF Action Buttons for regular PDFs */}
-          {!isContractEncrypted(contract) && pdfUrl && (
-            <>
-              <Button
-                onClick={downloadPdf}
-                size="sm"
-                variant="outline"
-                className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
-              >
-                <Download className="h-3 w-3 mr-1" />
-                Download
-              </Button>
-              <Button
-                onClick={() => window.open(pdfUrl, '_blank')}
-                size="sm"
-                variant="outline"
-                className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
-              >
-                <ExternalLink className="h-3 w-3 mr-1" />
-                Open in Tab
-              </Button>
-              {showReplaceButton && (
-                <Button
-                  onClick={() => document.getElementById('pdf-file-input')?.click()}
-                  size="sm"
-                  variant="outline"
-                  className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
-                >
-                  <Upload className="h-3 w-3 mr-1" />
-                  Replace
-                </Button>
-              )}
-            </>
-          )}
-          
-          {/* AI Edit Button */}
-          {showAIButton && !showAIPanel && (
-            <div className="relative group">
-              <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg blur transition duration-200 opacity-25 group-hover:opacity-50"></div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="relative gap-2 w-full sm:w-auto transition-all duration-200 bg-white hover:bg-gray-50"
-                onClick={() => setShowAIPanel(true)}
-                disabled={isAIProcessing}
-              >
-                <Sparkles className="h-4 w-4" />
-                <span className="sm:inline">Edit with AI</span>
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-
+    <div className="border rounded-md min-h-[700px] bg-white relative overflow-hidden">
       {/* Main Content Area */}
-      <div className="relative h-[400px] sm:h-[500px]">
+      <div className="relative h-[500px] sm:h-[700px]">
         {/* PDF Viewer */}
         <div className={`absolute inset-0 transition-all duration-500 ease-in-out ${
           showAIPanel ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'

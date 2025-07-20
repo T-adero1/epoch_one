@@ -56,6 +56,7 @@ export const updateContract = async (
     description?: string;
     content?: string;
     status?: ContractStatus;
+    allowlistId?: string; // ✅ ADD: Support for signature positions
     metadata?: {
       signers?: string[];
     };
