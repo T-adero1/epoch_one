@@ -24,7 +24,7 @@ model Contract {
   updatedAt         DateTime       @updatedAt
   expiresAt         DateTime?
   metadata          Json?
-  allowlistId       String?
+  signaturePositions  Json?  
   authorizedUsers   String[]
   documentId        String?
   encryptionInfo    Json?

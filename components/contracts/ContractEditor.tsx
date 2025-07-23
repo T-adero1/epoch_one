@@ -351,12 +351,12 @@ export default function ContractEditor({
       // ✅ FIXED: Use computed logic instead of undefined variable
       const shouldUseDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
       
-      // ✅ UPDATED: Store signature positions in allowlistId
+      // ✅ UPDATED: Store signature positions in signaturePositions field
       const updatedContract = await updateContract(contract.id, {
         title,
         description: description || undefined,
         content,
-        allowlistId: JSON.stringify(signaturePositions), // ✅ Store positions here
+        signaturePositions: JSON.stringify(signaturePositions), // ✅ Changed from allowlistId
         metadata: {
           ...contract.metadata,
           signers: shouldUseDecryptedEmails ? signers : (contract.metadata?.signers || [])
@@ -364,7 +364,8 @@ export default function ContractEditor({
       });
 
       console.log('[ContractEditor] Contract updated successfully');
-      console.log('[ContractEditor] DEBUG - Updated contract allowlistId:', updatedContract.allowlistId);
+      console.log('[ContractEditor] DEBUG - Updated contract signaturePositions:', 
+        updatedContract.signaturePositions); // ← Changed from allowlistId
       
       // Reset change tracking
       setOriginalValues({
@@ -527,18 +528,18 @@ export default function ContractEditor({
     });
   };
 
-  // ✅ ADD: Load existing positions from database
+  // ✅ CHANGE Line 531-533: Load existing positions
   useEffect(() => {
-    if (contract.allowlistId) {
+    if (contract.signaturePositions) {  // ← Changed from allowlistId
       try {
-        const positions = JSON.parse(contract.allowlistId) as SignaturePosition[];
+        const positions = JSON.parse(contract.signaturePositions) as SignaturePosition[];
         setSignaturePositions(positions);
       } catch (error) {
         console.error('Failed to parse signature positions:', error);
         setSignaturePositions([]);
       }
     }
-  }, [contract.allowlistId]);
+  }, [contract.signaturePositions]);  // ← Changed from allowlistId
 
   // ✅ ADD: New state to track wallet-to-email mapping
   const [walletEmailMap, setWalletEmailMap] = useState<Map<string, string>>(new Map());

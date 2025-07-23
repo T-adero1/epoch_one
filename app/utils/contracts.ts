@@ -1,6 +1,7 @@
 import { Contract, ContractStatus, SignatureStatus } from '@prisma/client';
 
 export interface ContractWithRelations extends Contract {
+  signaturePositions?: string; // ✅ Add this
   signatures: {
     id: string;
     status: SignatureStatus;
@@ -56,7 +57,7 @@ export const updateContract = async (
     description?: string;
     content?: string;
     status?: ContractStatus;
-    allowlistId?: string; // ✅ ADD: Support for signature positions
+    signaturePositions?: string; // ✅ Changed from allowlistId
     metadata?: {
       signers?: string[];
     };
