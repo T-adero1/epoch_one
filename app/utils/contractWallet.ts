@@ -6,10 +6,6 @@ import { Transaction } from '@mysten/sui/transactions';
 import { hashGoogleId } from './privacy'; // Import for hashing
 import { bech32 } from 'bech32'; // ✅ Add this import
 
-// Known constants for Google OAuth (these are public)
-const GOOGLE_ISSUER = 'https://accounts.google.com';
-const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const NETWORK = 'testnet';
 
 // Contract-specific zkLogin state interface
 interface ContractZkLoginState {
@@ -160,11 +156,33 @@ function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
 
 // **FIX: Generate contract-specific proofs to match contract-specific salt**
 export async function createContractSpecificWallet(
-  userGoogleId: string,
+  userGoogleId: string,  // This is ALREADY hashed email when useEmailAsSubject=true
   contractId: string,
-  userJwt: string
+  userJwt: string,
+  userEmail?: string  // ✅ NEW: Pass email for salt generation
 ): Promise<ContractWallet> {
-  console.log('[CONTRACT-WALLET] Creating contract-specific wallet with unique salt');
+  console.log('[CONTRACT-WALLET] 🚀 STARTING CONTRACT WALLET CREATION');
+  console.log('[CONTRACT-WALLET] 📥 INPUT PARAMETERS:', {
+    userGoogleId: userGoogleId,
+    contractId: contractId,
+    userEmail: userEmail,
+    jwtLength: userJwt.length,
+    timestamp: new Date().toISOString()
+  });
+
+  // Decode and log the input JWT
+  try {
+    const jwtParts = userJwt.split('.');
+    const decodedPayload = JSON.parse(atob(jwtParts[1]));
+    console.log('[CONTRACT-WALLET] 🎫 INPUT JWT ANALYSIS:', {
+      jwtParts: jwtParts.length,
+      header: JSON.parse(atob(jwtParts[0])),
+      payload: decodedPayload,
+      signatureLength: jwtParts[2].length
+    });
+  } catch (e) {
+    console.error('[CONTRACT-WALLET] ❌ Failed to decode input JWT:', e);
+  }
 
   // **STEP 1: Reuse session ephemeral keypair (cryptographically required)**
   const sessionData = localStorage.getItem("epochone_session");
@@ -175,77 +193,147 @@ export async function createContractSpecificWallet(
   const sessionObj = JSON.parse(sessionData);
   const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
 
+  console.log('[CONTRACT-WALLET] 🔑 SESSION DATA ANALYSIS:', {
+    hasSessionData: !!sessionData,
+    hasZkLoginState: !!zkLoginState,
+    hasEphemeralKeyPair: !!zkLoginState?.ephemeralKeyPair,
+    hasPrivateKey: !!zkLoginState?.ephemeralKeyPair?.privateKey,
+    sessionDataLength: sessionData?.length || 0
+  });
+
   const privateKeyBytes = decodeSuiPrivateKey(zkLoginState.ephemeralKeyPair.privateKey);
   const ephemeralKeyPair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
   
-  console.log('[CONTRACT-WALLET] Reusing session ephemeral keypair for cryptographic validity');
+  console.log('[CONTRACT-WALLET] 🔑 KEYPAIR CREATION:', {
+    privateKeyBytesLength: privateKeyBytes.length,
+    publicKey: ephemeralKeyPair.getPublicKey().toSuiAddress(),
+    publicKeyBytes: Array.from(ephemeralKeyPair.getPublicKey().toSuiBytes())
+  });
 
-  // **STEP 2: Generate contract-specific salt (this creates the unique wallet)**
-  const hashedGoogleId = await hashGoogleId(userGoogleId);
+  // **Generate email-based salt if email provided**
+  const saltRequestBody = {
+    userGoogleId: userEmail ? await hashGoogleId(`email_${userEmail}`) : await hashGoogleId(userGoogleId),
+    contractId,
+    emailBased: !!userEmail  // ✅ Flag for email-based salt
+  };
   
+  console.log('[CONTRACT-WALLET] 🧂 SALT REQUEST PREPARATION:', {
+    originalUserGoogleId: userGoogleId,
+    originalUserEmail: userEmail,
+    processedIdentifier: saltRequestBody.userGoogleId,
+    contractId: contractId,
+    emailBased: saltRequestBody.emailBased,
+    requestBody: saltRequestBody
+  });
+
   const saltResponse = await fetch('/api/salt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userGoogleId: hashedGoogleId,
-      contractId // ✅ This makes the salt contract-specific
-    }),
+    body: JSON.stringify(saltRequestBody),
   });
 
-  const { salt } = await saltResponse.json();
-  console.log('[CONTRACT-WALLET] Generated contract-specific salt:', salt.substring(0, 8) + '...');
+  if (!saltResponse.ok) {
+    throw new Error(`Salt generation failed: ${saltResponse.status}`);
+  }
 
-  // **STEP 3: Generate unique wallet address using contract-specific salt**
+  const saltData = await saltResponse.json();
+  const { salt } = saltData;
+  
+  console.log('[CONTRACT-WALLET] 🧂 SALT RESPONSE:', {
+    responseStatus: saltResponse.status,
+    saltData: saltData,
+    salt: salt,
+    saltLength: salt?.length,
+    saltType: typeof salt
+  });
+
+  // **Generate address with ORIGINAL JWT + EMAIL-BASED SALT**
+  console.log('[CONTRACT-WALLET] 🏠 ADDRESS GENERATION STARTING');
+  console.log('[CONTRACT-WALLET] 🏠 jwtToAddress INPUT:', {
+    jwtForAddress: userJwt.substring(0, 100) + '...[TRUNCATED]',
+    saltForAddress: salt
+  });
+  
   const contractSpecificAddress = jwtToAddress(userJwt, salt);
-  console.log('[CONTRACT-WALLET] Generated unique wallet address:', contractSpecificAddress.substring(0, 8) + '...');
-
-  // **✅ STEP 4: Generate contract-specific zkProofs (KEY FIX!)**
-  console.log('[CONTRACT-WALLET] Generating contract-specific zkProofs to match salt...');
-  const contractZkProofs = await getContractZkProof({
-    jwt: userJwt,                    // ✅ Same JWT (nonce matches)
-    salt,                           // ✅ Contract-specific salt
-    keyPair: ephemeralKeyPair,      // ✅ Same keypair (from session)
-    maxEpoch: zkLoginState.maxEpoch, // ✅ Same maxEpoch
-    randomness: zkLoginState.randomness // ✅ Same randomness
+  
+  console.log('[CONTRACT-WALLET] 🏠 ADDRESS GENERATION RESULT:', {
+    contractSpecificAddress: contractSpecificAddress,
+    addressLength: contractSpecificAddress.length,
+    generationMethod: 'jwtToAddress(userJwt, salt)'
   });
-  console.log('[CONTRACT-WALLET] ✅ Contract-specific zkProofs generated successfully');
 
-  // **STEP 5: Create wallet state with contract-specific components**
+  // Parse JWT again to show what was used for address generation
+  try {
+    const jwtParts = userJwt.split('.');
+    const decodedPayload = JSON.parse(atob(jwtParts[1]));
+    console.log('[CONTRACT-WALLET] 🎫 JWT USED FOR ADDRESS GENERATION:', {
+      sub: decodedPayload.sub,
+      iss: decodedPayload.iss,
+      aud: decodedPayload.aud,
+      exp: decodedPayload.exp,
+      iat: decodedPayload.iat
+    });
+  } catch (e) {
+    console.error('[CONTRACT-WALLET] ❌ Failed to decode JWT for logging:', e);
+  }
+
+  // **Generate proofs with ORIGINAL JWT**
+  console.log('[CONTRACT-WALLET] 🔐 PROOF GENERATION STARTING');
+  const contractZkProofs = await getContractZkProof({
+    jwt: userJwt,  // ✅ Use ORIGINAL JWT - cryptographically valid!
+    salt,
+    keyPair: ephemeralKeyPair,
+    maxEpoch: zkLoginState.maxEpoch,
+    randomness: zkLoginState.randomness
+  });
+  console.log('[CONTRACT-WALLET] 🔐 PROOF GENERATION COMPLETE:', {
+    proofsGenerated: !!contractZkProofs,
+    proofPoints: !!contractZkProofs?.proofPoints,
+    issBase64Details: !!contractZkProofs?.issBase64Details,
+    headerBase64: !!contractZkProofs?.headerBase64
+  });
+
+  // **Create final wallet**
   const contractZkLoginState: ContractZkLoginState = {
     ephemeralKeyPair: {
       publicKey: zkLoginState.ephemeralKeyPair.publicKey,
       privateKey: zkLoginState.ephemeralKeyPair.privateKey,
     },
     randomness: zkLoginState.randomness,
-    jwt: userJwt,                    // ✅ Same JWT
+    jwt: userJwt,
     maxEpoch: zkLoginState.maxEpoch,
-    zkProofs: contractZkProofs,      // ✅ CONTRACT-SPECIFIC proofs (matches salt!)
-    salt,                           // ✅ Contract-specific salt
+    zkProofs: contractZkProofs,
+    salt,
     contractId,
     userGoogleId,
   };
 
   const contractWallet: ContractWallet = {
-    address: contractSpecificAddress, // ✅ Unique per contract
+    address: contractSpecificAddress,
     contractId,
     userGoogleId,
     zkLoginState: contractZkLoginState,
     isValid: true,
     createdAt: new Date().toISOString(),
-    ephemeralKeyPair, // ✅ Same keypair (cryptographically required)
+    ephemeralKeyPair,
   };
+
+  console.log('[CONTRACT-WALLET] ✅ FINAL WALLET CREATED:', {
+    address: contractWallet.address,
+    contractId: contractWallet.contractId,
+    userGoogleId: contractWallet.userGoogleId,
+    isValid: contractWallet.isValid,
+    createdAt: contractWallet.createdAt,
+    hasSalt: !!contractWallet.zkLoginState.salt,
+    hasProofs: !!contractWallet.zkLoginState.zkProofs
+  });
 
   // Store in memory
   const walletManager = InMemoryWalletManager.getInstance();
   walletManager.storeWallet(contractWallet, ephemeralKeyPair);
 
-  console.log('[CONTRACT-WALLET] ✅ Created unique contract wallet with matching proofs:', {
-    contractId,
-    address: contractSpecificAddress.substring(0, 8) + '...',
-    saltUsed: salt.substring(0, 8) + '...',
-    proofsGenerated: !!contractZkProofs
-  });
-
+  console.log('[CONTRACT-WALLET] 💾 WALLET STORED IN MEMORY');
+  
   return contractWallet;
 }
 
@@ -356,7 +444,8 @@ export function storeContractWallet(wallet: ContractWallet): void {
 export async function getOrCreateContractWallet(
   userGoogleId: string,
   contractId: string,
-  jwt: string
+  jwt: string,
+  useEmailAsSubject?: boolean
 ): Promise<ContractWallet> {
   // **CRITICAL: Hash Google ID before using it**
   const { hashGoogleId } = await import('./privacy');
@@ -377,7 +466,12 @@ export async function getOrCreateContractWallet(
   }
   
   // Create new contract-specific wallet with hashed Google ID
-  const contractWallet = await createContractSpecificWallet(hashedGoogleId, contractId, jwt);
+  const contractWallet = await createContractSpecificWallet(
+    hashedGoogleId, 
+    contractId, 
+    jwt,
+    useEmailAsSubject
+  );
   
   return contractWallet;
 }

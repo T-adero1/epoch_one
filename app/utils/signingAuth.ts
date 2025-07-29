@@ -1,4 +1,5 @@
 import { hashGoogleId } from './privacy';
+import { generatePredeterminedWalletForAllowlist } from './predeterminedWallet';
 
 // Interface for contract data needed for authentication
 export interface ContractAuthData {
@@ -17,11 +18,7 @@ export interface AuthenticationResult {
 
 /**
  * Generate predetermined wallet address for a user email and contract
- * This calls the server-side function via API since it requires environment variables
- * 
- * @param userEmail - The user's email address
- * @param contractId - The contract ID
- * @returns Promise<string> - The predetermined wallet address
+ * This calls the server-side function directly (no API call needed)
  */
 async function generatePredeterminedWalletAddress(
   userEmail: string,
@@ -34,28 +31,16 @@ async function generatePredeterminedWalletAddress(
     const hashedEmail = await hashGoogleId(`email_${userEmail.toLowerCase()}`);
     console.log('[SIGNING-AUTH] Hashed email for wallet generation:', hashedEmail.substring(0, 8) + '...');
     
-    // Step 2: Call server-side API to generate predetermined wallet
-    const response = await fetch('/api/auth/generate-wallet', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        hashedEmail,
-        contractId,
-        context: 'signing-verification'
-      }),
-    });
+    // ✅ Step 2: Call the function directly (no HTTP request)
+    const result = await generatePredeterminedWalletForAllowlist(
+      hashedEmail,
+      contractId,
+      'allowlist-creation'
+    );
     
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Failed to generate wallet: ${errorData.error || response.statusText}`);
-    }
+    console.log('[SIGNING-AUTH] Generated predetermined wallet:', result.predeterminedAddress.substring(0, 8) + '...');
     
-    const { predeterminedAddress } = await response.json();
-    console.log('[SIGNING-AUTH] Generated predetermined wallet:', predeterminedAddress.substring(0, 8) + '...');
-    
-    return predeterminedAddress;
+    return result.predeterminedAddress;
     
   } catch (error) {
     console.error('[SIGNING-AUTH] Error generating predetermined wallet:', error);

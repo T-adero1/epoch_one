@@ -138,6 +138,9 @@ export default function ContractEditor({
   const [canDecryptSigners, setCanDecryptSigners] = useState(false);
   const [signersDecrypted, setSignersDecrypted] = useState(false);
   
+  // **NEW: Add state for decrypted PDF**
+  const [decryptedPdfBlob, setDecryptedPdfBlob] = useState<Blob | null>(null);
+
   // **NEW: Check if current user can decrypt emails**
   useEffect(() => {
     const checkDecryptPermissions = async () => {
@@ -322,69 +325,213 @@ export default function ContractEditor({
     }, 500); // 500ms debounce
   };
 
-  // ✅ MODIFY: Update save function to include positions
+  // ContractEditor.tsx - Simplified handleSave
   const handleSave = async () => {
-    // Prevent saving if there are validation errors
-    const hasValidationErrors = signerErrors.some(error => error !== '');
-    if (hasValidationErrors) {
-      toast({
-        title: "Validation Error", 
-        description: "Please fix all validation errors before saving.",
-        variant: "destructive",
-      });
-      return;
-    }
+    const saveStartTime = performance.now();
+    console.log('[FLOW] 5. Save process initiated', {
+      contractId: contract.id,
+      signaturePositionsCount: signaturePositions.length,
+      hasChanges,
+      hasDecryptedBlob: !!decryptedPdfBlob,
+      saveStartTime
+    });
 
     try {
-      console.log('[ContractEditor] Starting save operation');
-      
-      // ✅ ADD: Debug signature positions before save
-      console.log('[ContractEditor] DEBUG - Signature positions to save:', {
-        positionsCount: signaturePositions.length,
-        positions: signaturePositions,
-        hasPositions: signaturePositions.length > 0,
-        positionsJSON: JSON.stringify(signaturePositions)
-      });
-      
+      // Prevent saving if there are validation errors
+      const hasValidationErrors = signerErrors.some(error => error !== '');
+      if (hasValidationErrors) {
+        toast({
+          title: "Validation Error", 
+          description: "Please fix all validation errors before saving.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       setSaveLoading(true);
       
-      // ✅ FIXED: Use computed logic instead of undefined variable
-      const shouldUseDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
+      // ✅ NEVER update metadata during signature box operations
+      const isSignatureBoxSave = signaturePositions.length > 0;
       
-      // ✅ UPDATED: Store signature positions in signaturePositions field
-      const updatedContract = await updateContract(contract.id, {
-        title,
-        description: description || undefined,
-        content,
-        signaturePositions: JSON.stringify(signaturePositions), // ✅ Changed from allowlistId
-        metadata: {
-          ...contract.metadata,
-          signers: shouldUseDecryptedEmails ? signers : (contract.metadata?.signers || [])
-        },
-      });
-
-      console.log('[ContractEditor] Contract updated successfully');
-      console.log('[ContractEditor] DEBUG - Updated contract signaturePositions:', 
-        updatedContract.signaturePositions); // ← Changed from allowlistId
+      if (isSignatureBoxSave) {
+        console.log('[FLOW] Signature box save - preserving all metadata');
+        
+        // Only update: title, description, content, signaturePositions
+        const basicUpdates = {
+          title,
+          description: description || undefined, 
+          content,
+          signaturePositions: JSON.stringify(signaturePositions)
+        };
+        
+        const updatedContract = await updateContract(contract.id, basicUpdates);
+        
+        // STEP 3: Handle PDF modification (if signature boxes exist)
+        if (signaturePositions.length > 0 && contract.s3FileKey) {
+          console.log('[FLOW] 8. Modifying and encrypting PDF with signature boxes');
+          
+          // Clear cache
+          try {
+            const { pdfCache } = await import('@/app/utils/pdfCache');
+            await pdfCache.clearEncryptedPDF(contract.id);
+            await pdfCache.clearDecryptedPDF(contract.id);
+          } catch (cacheError) {
+            console.warn('[FLOW] Cache clear failed:', cacheError);
+          }
+          
+          // Get encrypted PDF bytes
+          const encryptedPdfBytes = await modifyAndEncryptPDF(signaturePositions, walletEmailMap);
+          
+          // Upload new file
+          const uploadResult = await uploadEncryptedPDFToAWS(encryptedPdfBytes);
+          
+          // ✅ Update ONLY file-related fields (no metadata)
+          const finalUpdatedContract = await updateContract(contract.id, {
+            s3FileKey: uploadResult.s3FileKey,
+            s3FileName: uploadResult.s3FileName,
+            s3FileSize: encryptedPdfBytes.length
+          });
+          
+          // Clear signature positions
+          setSignaturePositions([]);
+          
+          // Reset change tracking
+          setOriginalValues({ title, description, content, signers });
+          setHasChanges(false);
+          
+          onSave(finalUpdatedContract);
+          
+        } else {
+          // No signature boxes
+          setOriginalValues({ title, description, content, signers });
+          setHasChanges(false);
+          onSave(updatedContract);
+        }
+        
+        toast({
+          title: "Contract saved",
+          description: "Your changes have been saved successfully.",
+          variant: "success",
+        });
+        
+      } else {
+        // STEP 1: Save metadata to database
+        console.log('[FLOW] 6. Saving contract metadata to database', {
+          contractId: contract.id,
+          title,
+          description,
+          signaturePositionsData: JSON.stringify(signaturePositions),
+          positionsCount: signaturePositions.length
+        });
+        
+        const shouldUseDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
+        
+        // ✅ STEP 1: Only update basic fields that changed (NO metadata changes)
+        const basicUpdates: any = {};
+        
+        if (title !== originalValues.title) basicUpdates.title = title;
+        if (description !== originalValues.description) basicUpdates.description = description || undefined;
+        if (content !== originalValues.content) basicUpdates.content = content;
+        
+        // Always update signature positions (this is safe)
+        basicUpdates.signaturePositions = JSON.stringify(signaturePositions);
+        
+        console.log('[FLOW] 6. Saving basic contract updates (no metadata):', basicUpdates);
+        
+        const updatedContract = await updateContract(contract.id, basicUpdates);
+        
+        // ✅ STEP 2: Only update signers if they actually changed AND user can decrypt them
+        const signersChanged = JSON.stringify(signers) !== JSON.stringify(originalValues.signers);
+        
+        if (signersChanged && signersDecrypted && decryptedSigners.length > 0) {
+          console.log('[FLOW] 6.1. Signers changed, updating metadata separately');
+          
+          // Preserve ALL existing metadata, only update signers
+          const metadataUpdate = {
+            metadata: {
+              ...contract.metadata,  // ✅ Preserve authorized users and all other fields
+              signers: signers       // ✅ Only update signers if they actually changed
+            }
+          };
+          
+          await updateContract(contract.id, metadataUpdate);
+          console.log('[FLOW] 6.2. Signers metadata updated without affecting other fields');
+        } else {
+          console.log('[FLOW] 6.1. Signers unchanged, preserving existing metadata');
+        }
+        
+        // STEP 3: Handle PDF modification (if signature boxes exist)
+        if (signaturePositions.length > 0 && contract.s3FileKey) {
+          console.log('[FLOW] 8. Modifying and encrypting PDF with signature boxes');
+          
+          // Clear cache
+          try {
+            const { pdfCache } = await import('@/app/utils/pdfCache');
+            await pdfCache.clearEncryptedPDF(contract.id);
+            await pdfCache.clearDecryptedPDF(contract.id);
+          } catch (cacheError) {
+            console.warn('[FLOW] Cache clear failed:', cacheError);
+          }
+          
+          // Get encrypted PDF bytes (with embedded signature boxes)
+          const encryptedPdfBytes = await modifyAndEncryptPDF(signaturePositions, walletEmailMap);
+          
+          console.log('[FLOW] 9. Uploading re-encrypted PDF to AWS');
+          
+          // Upload new encrypted version to AWS
+          const uploadResult = await uploadEncryptedPDFToAWS(encryptedPdfBytes);
+          
+          console.log('[FLOW] 10. Updating database with new file info');
+          
+          // Update database with new file location and size
+          const finalUpdatedContract = await updateContract(contract.id, {
+            s3FileKey: uploadResult.s3FileKey,
+            s3FileName: uploadResult.s3FileName,
+            s3FileSize: encryptedPdfBytes.length
+          });
+          
+          // ✅ CLEAR: Clear signature positions since they're now embedded in PDF
+          setSignaturePositions([]);
+          
+          console.log('[FLOW] 10.1. Signature boxes embedded and positions cleared from state');
+          
+          // Reset change tracking
+          setOriginalValues({ title, description, content, signers });
+          setHasChanges(false);
+          
+          // ✅ CRITICAL: Pass the FINAL updated contract with new S3 key
+          onSave(finalUpdatedContract);  // ← This has the NEW s3FileKey
+          
+        } else {
+          console.log('[FLOW] 8. PDF modification skipped', {
+            contractId: contract.id,
+            reason: signaturePositions.length === 0 ? 'no_signature_positions' : 'no_pdf_file',
+            signaturePositionsCount: signaturePositions.length,
+            hasPDF: !!contract.s3FileKey
+          });
+          // No signature boxes, just pass the first update
+          setOriginalValues({ title, description, content, signers });
+          setHasChanges(false);
+          onSave(updatedContract);
+        }
+        
+        toast({
+          title: "Contract saved",
+          description: `Your changes have been saved successfully. ${signaturePositions.length} signature boxes ${signaturePositions.length > 0 ? 'embedded in PDF and cache cleared' : 'saved'}.`,
+          variant: "success",
+        });
+        
+      }
       
-      // Reset change tracking
-      setOriginalValues({
-        content,
-        title,
-        description,
-        signers
-      });
-      setHasChanges(false);
-
-      toast({
-        title: "Contract saved",
-        description: `Your changes have been saved successfully. ${signaturePositions.length} signature boxes saved.`,
-        variant: "success",
-      });
-
-      onSave(updatedContract);
     } catch (error) {
-      console.error('Failed to save contract:', error);
+      const totalSaveTime = Math.round(performance.now() - saveStartTime);
+      console.error('[FLOW] Save process failed', {
+        contractId: contract.id,
+        error: error,
+        totalSaveTime,
+        signaturePositionsCount: signaturePositions.length
+      });
+      
       toast({
         title: "Error",
         description: "Failed to save contract. Please try again.",
@@ -715,6 +862,170 @@ export default function ContractEditor({
   // ✅ ADD: Computed value for whether emails are decrypted
   const hasDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
 
+  // ContractEditor.tsx - Add debugging to modifyAndEncryptPDF
+  const modifyAndEncryptPDF = async (
+    signaturePositions: SignaturePosition[], 
+    walletEmailMap: Map<string, string>
+  ): Promise<Uint8Array> => {
+    console.log('[ContractEditor] 🔍 modifyAndEncryptPDF called with:', {
+      signaturePositionsCount: signaturePositions.length,
+      walletEmailMapSize: walletEmailMap.size,
+      decryptedPdfBlobExists: !!decryptedPdfBlob,
+      decryptedPdfBlobSize: decryptedPdfBlob?.size || 'null',
+      decryptedPdfBlobType: typeof decryptedPdfBlob
+    });
+
+    // ✅ CRITICAL: Add null check with helpful error
+    if (!decryptedPdfBlob) {
+      console.error('[ContractEditor] CRITICAL ERROR: decryptedPdfBlob is null!', {
+        blobState: decryptedPdfBlob,
+        blobType: typeof decryptedPdfBlob,
+        contractId: contract.id,
+        hasPDF: !!contract.s3FileKey,
+        isEncrypted: !!contract.sealAllowlistId
+      });
+      throw new Error('No decrypted PDF blob available. The PDF must be decrypted and displayed before modification. Check PDFEditor callback.');
+    }
+
+    console.log('[ContractEditor] ✅ decryptedPdfBlob is valid, proceeding with modification');
+
+    // 1. Get decrypted PDF
+    const decryptedPdfBytes = new Uint8Array(await decryptedPdfBlob.arrayBuffer());
+    
+    console.log('[ContractEditor] ✅ Converted blob to bytes:', {
+      bytesLength: decryptedPdfBytes.length,
+      firstFewBytes: Array.from(decryptedPdfBytes.slice(0, 10))
+    });
+    
+    // 2. Add signature boxes
+    const { addSignatureBoxesToPDF } = await import('@/app/utils/pdfSignatureBoxes');
+    const modifiedPdfBytes = await addSignatureBoxesToPDF(
+      decryptedPdfBytes,
+      signaturePositions,
+      walletEmailMap
+    );
+    
+    // 3. Re-encrypt (just return bytes, don't upload)
+    const { reEncryptPDF } = await import('@/app/utils/pdfReEncryption');
+    const encryptedBytes = await reEncryptPDF({
+      pdfBytes: modifiedPdfBytes,
+      encryptionMetadata: {
+        allowlistId: contract.sealAllowlistId,
+        documentId: contract.sealDocumentId,
+        capId: contract.sealCapId
+      }
+    });
+    
+    return encryptedBytes; // ✅ Just return, don't upload
+  };
+
+  // ContractEditor.tsx - Fix uploadEncryptedPDFToAWS function
+  const uploadEncryptedPDFToAWS = async (encryptedBytes: Uint8Array) => {
+    console.log('[ContractEditor] 📤 Uploading encrypted PDF to AWS');
+
+    const formData = new FormData();
+    formData.append('file', new Blob([await decryptedPdfBlob!.arrayBuffer()], { type: 'application/pdf' }));
+    formData.append('contractId', contract.id);
+    formData.append('encryptedBytes', Buffer.from(encryptedBytes).toString('base64'));
+    formData.append('allowlistId', contract.sealAllowlistId!);
+    formData.append('documentId', contract.sealDocumentId!);
+    formData.append('capId', contract.sealCapId!);
+    formData.append('isEncrypted', 'true');
+    formData.append('replaceExisting', 'true');
+
+    console.log('[ContractEditor] 📋 FormData prepared, making request...');
+
+    const response = await fetch('/api/contracts/upload-pdf', {
+      method: 'POST',
+      body: formData,
+    });
+
+    console.log('[ContractEditor] 📡 Upload response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[ContractEditor] ❌ Upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        contractId: contract.id
+      });
+      throw new Error(`Upload failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    
+    console.log('[ContractEditor] ✅ Raw upload API response:', {
+      contractId: contract.id,
+      result,
+      resultKeys: Object.keys(result),
+      contractInResult: result.contract,
+      directKeys: {
+        s3FileKey: result.s3FileKey,
+        s3FileName: result.s3FileName,
+        s3FileSize: result.s3FileSize
+      }
+    });
+
+    // ✅ CRITICAL: Verify the response has the data we need
+    const returnData = {
+      s3FileKey: result.contract?.s3FileKey || result.s3FileKey,
+      s3FileName: result.contract?.s3FileName || result.s3FileName, 
+      s3FileSize: result.contract?.s3FileSize || result.s3FileSize
+    };
+
+    console.log('[ContractEditor] 🔍 Extracted upload result:', {
+      contractId: contract.id,
+      returnData,
+      hasS3FileKey: !!returnData.s3FileKey,
+      hasS3FileName: !!returnData.s3FileName,
+      hasS3FileSize: !!returnData.s3FileSize
+    });
+
+    // ✅ VALIDATION: Ensure we got valid data
+    if (!returnData.s3FileKey) {
+      console.error('[ContractEditor] ❌ Upload API returned no S3 file key!', {
+        contractId: contract.id,
+        fullResult: result
+      });
+      throw new Error('Upload API did not return S3 file key');
+    }
+
+    return returnData;
+  };
+
+  // ContractEditor.tsx - Add debugging to the callback handler
+  const handleDecryptedPdfChange = (blob: Blob | null) => {
+    console.log('[ContractEditor] 📞 RECEIVED decrypted PDF blob callback:', {
+      hadPreviousBlob: !!decryptedPdfBlob,
+      newBlobSize: blob?.size || 'null',
+      timestamp: new Date().toISOString(),
+      callStack: new Error().stack?.split('\n').slice(1, 4) // Show where this was called from
+    });
+    
+    setDecryptedPdfBlob(blob);
+    
+    console.log('[ContractEditor] ✅ Updated decryptedPdfBlob state to:', {
+      isNull: blob === null,
+      size: blob?.size
+    });
+  };
+
+  // ContractEditor.tsx - Add effect to monitor decryptedPdfBlob changes
+  useEffect(() => {
+    console.log('[ContractEditor] 🗂️ BLOB STATE MONITOR:', {
+      hasBlob: !!decryptedPdfBlob,
+      blobSize: decryptedPdfBlob?.size,
+      timestamp: new Date().toISOString(),
+      contractId: contract.id
+    });
+  }, [decryptedPdfBlob]);
+
   return (
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4">
@@ -761,6 +1072,8 @@ export default function ContractEditor({
                   signerWallets={signerWallets}
                   walletEmailMap={walletEmailMap} // ✅ ADD: Pass email mapping
                   onPositionsChange={handleSignaturePositionsChange} // ✅ Make sure this is passed
+                   // ✅ ADD: Pass loaded positions
+                  onDecryptedPdfChange={handleDecryptedPdfChange} // ✅ Use debug version
                   showAIButton={false}
                   onFileUpdate={handlePdfFileUpdate}
                 />

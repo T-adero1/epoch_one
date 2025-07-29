@@ -7,8 +7,7 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  // Disable React StrictMode which causes double-mounting in development
-  reactStrictMode: false
+  reactStrictMode: false,
 };
 
 export default nextConfig;

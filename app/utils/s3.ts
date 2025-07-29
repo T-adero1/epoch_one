@@ -25,7 +25,6 @@ export async function uploadToS3(file: File, contractId: string): Promise<Upload
   try {
     // Generate unique file key
     const timestamp = Date.now();
-    const fileExtension = file.name.split('.').pop();
     const key = `contracts/${contractId}/${timestamp}-${file.name}`;
 
     // Convert file to buffer

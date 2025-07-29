@@ -5,11 +5,12 @@ import { useParams, useRouter } from 'next/navigation'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { FileText, AlertTriangle, CheckCircle2, LockKeyhole, Download } from 'lucide-react'
+import { FileText, AlertTriangle, CheckCircle2, LockKeyhole, Download, Shield, Loader2, RefreshCw } from 'lucide-react'
 import SignatureDrawingCanvas from '@/components/contracts/SignatureCanvas'
 import { canUserSignContract, getUserSignatureStatus } from '@/app/utils/signatures'
 import { format } from 'date-fns'
 import { SignZkLoginModal } from '@/components/SignZkLoginModal'
+import { hashGoogleId } from '@/app/utils/privacy'
 
 
 import ClientSideEncryptor from '@/components/contracts/ClientSideEncryptor'
@@ -59,6 +60,8 @@ interface ContractDetail {
   s3FileKey?: string;
   s3FileName?: string;
   s3ContentType?: string;
+  isEncrypted?: boolean;
+  sealAllowlistId?: string;
 }
 
 // Near the top of the file, after the imports and interface definitions
@@ -129,6 +132,8 @@ export default function ContractSigningPage() {
   } | null>(null)
   const [pdfContent, setPdfContent] = useState<Uint8Array | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [decryptedPdfUrl, setDecryptedPdfUrl] = useState<string | null>(null)
+  const [currentSessionKey, setCurrentSessionKey] = useState<any>(null)
   
   // Fetch just enough contract info to get the required signer email
   const fetchContractBasicInfo = useCallback(async () => {
@@ -205,33 +210,54 @@ export default function ContractSigningPage() {
       
       setContract(contractData)
       
-      // ✅ UPDATED: Use the corrected authentication logic (email-based, not JWT-based)
+      // ✅ UPDATED: Use server-side API for authentication (fixes environment variable issue)
       if (user?.email && user?.googleId) {
-        console.log('[ContractSigning] Authenticating user with predetermined wallet logic...');
+        console.log('[ContractSigning] Authenticating user via API...');
         
-        const authResult: AuthenticationResult = await authenticateUserForContract(
-          user.email,
-          user.googleId,
-          contractData as ContractAuthData
-        );
-        
-        console.log('[ContractSigning] Authentication result:', authResult);
-        setCanSign(authResult.canSign);
-        
-        // Store the authorization message for display
-        if (!authResult.canSign) {
-          const message = getAuthorizationMessage(authResult, user.email);
-          console.log('[ContractSigning] Authorization message:', message);
-        }
-        
-        // Check current signature status
-        const status = getUserSignatureStatus(user.email, contractData);
-        setSignatureStatus(status);
-        
-        // If user cannot sign, show appropriate message
-        if (!authResult.canSign) {
-          console.log('[ContractSigning] User cannot sign - reason:', authResult.reason);
-          setRequiredEmail('authorized_email'); // Generic placeholder for display
+        try {
+          const authResponse = await fetch('/api/auth/verify-signing', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              userEmail: user.email,
+              userGoogleId: user.googleId,
+              contractId: contractData.id
+            })
+          });
+          
+          if (!authResponse.ok) {
+            throw new Error(`Authentication API failed: ${authResponse.status}`);
+          }
+          
+          const authResult: AuthenticationResult = await authResponse.json();
+          
+          console.log('[ContractSigning] Authentication result:', authResult);
+          setCanSign(authResult.canSign);
+          
+          // Store the authorization message for display
+          if (!authResult.canSign) {
+            const message = getAuthorizationMessage(authResult, user.email);
+            console.log('[ContractSigning] Authorization message:', message);
+          }
+          
+          // Check current signature status
+          const status = getUserSignatureStatus(user.email, contractData);
+          setSignatureStatus(status);
+          
+          // If user cannot sign, show appropriate message
+          if (!authResult.canSign) {
+            console.log('[ContractSigning] User cannot sign - reason:', authResult.reason);
+            setRequiredEmail('authorized_email'); // Generic placeholder for display
+            setShowLoginModal(true);
+          }
+          
+        } catch (authError) {
+          console.error('[ContractSigning] Authentication API error:', authError);
+          // Fallback to not allowing signing if authentication fails
+          setCanSign(false);
+          setRequiredEmail('authorized_email');
           setShowLoginModal(true);
         }
       }
@@ -825,6 +851,21 @@ export default function ContractSigningPage() {
     )
   }
   
+  const isEncrypted = !!(
+    contract?.isEncrypted ||
+    contract?.sealAllowlistId ||
+    contract?.s3FileName?.includes('.encrypted.')
+  );
+
+  const handleDecryptionSuccess = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    setDecryptedPdfUrl(url);
+    // Convert to bytes for signing
+    blob.arrayBuffer().then(buffer => {
+      setPdfContent(new Uint8Array(buffer));
+    });
+  };
+
   return (
     <div className="container mx-auto p-4 sm:p-6 max-w-4xl">
       <Card>
@@ -888,55 +929,84 @@ export default function ContractSigningPage() {
                         <p className="text-xs text-blue-700">
                           Please review the document below before signing
                         </p>
+                        {isEncrypted && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <Shield className="h-3 w-3 text-purple-600" />
+                            <span className="text-xs text-purple-600">Encrypted PDF</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     
-                    {/* Mobile-Optimized PDF Viewer */}
+                    {/* PDF Viewer */}
                     <div className="border rounded-lg overflow-hidden bg-gray-50">
-                      {pdfUrl ? (
-                        <div className="flex flex-col">
-                          {/* Mobile: Show button to open PDF in browser */}
-                          <div className="lg:hidden p-4 text-center space-y-4">
-                            <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
-                              <FileText className="h-8 w-8 text-red-600" />
+                      {isEncrypted ? (
+                        // Show AutoDecryptionView for encrypted PDFs
+                        decryptedPdfUrl ? (
+                          // Show decrypted PDF
+                          <div className="flex flex-col">
+                            <div className="lg:hidden p-4 text-center space-y-4">
+                              <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4">
+                                <Shield className="h-8 w-8 text-purple-600" />
+                              </div>
+                              <div className="space-y-2">
+                                <h4 className="font-semibold text-gray-900">Decrypted PDF</h4>
+                                <p className="text-sm text-purple-600">Encrypted PDF successfully decrypted</p>
+                              </div>
+                              <Button
+                                onClick={() => window.open(decryptedPdfUrl, '_blank')}
+                                className="bg-purple-600 hover:bg-purple-700 text-white w-full max-w-sm"
+                                size="lg"
+                              >
+                                <Shield className="h-4 w-4 mr-2" />
+                                Open Decrypted PDF
+                              </Button>
                             </div>
-                            <div className="space-y-2">
-                              <h4 className="font-semibold text-gray-900">
-                                {contract.s3FileName || 'Contract PDF'}
-                              </h4>
-                              <p className="text-sm text-gray-600">
-                                Open the PDF in your browser for better viewing on mobile
-                              </p>
+                            <div className="hidden lg:block">
+                              <iframe src={decryptedPdfUrl} className="w-full h-[600px]" title="Decrypted Contract PDF" />
                             </div>
-                            <Button
-                              onClick={() => {
-                                window.open(pdfUrl, '_blank');
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white w-full max-w-sm"
-                              size="lg"
-                            >
-                              <FileText className="h-4 w-4 mr-2" />
-                              Open PDF in Browser
-                            </Button>
-                            <p className="text-xs text-gray-500 mt-2">
-                              After reviewing the PDF, return here to sign the contract
-                            </p>
                           </div>
-                          
-                          {/* Desktop: Show iframe as before */}
-                          <div className="hidden lg:block">
-                            <iframe
-                              src={pdfUrl}
-                              className="w-full h-[600px]"
-                              title="Contract PDF"
-                            />
-                          </div>
-                        </div>
+                        ) : (
+                          // Show auto-decryption view
+                          <AutoDecryptionView 
+                            contract={contract}
+                            onDecrypted={handleDecryptionSuccess}
+                            currentSessionKey={currentSessionKey}
+                            setCurrentSessionKey={setCurrentSessionKey}
+                            userEmail={user?.email || ''}
+                          />
+                        )
                       ) : (
-                        <div className="p-6 text-center">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
-                          <p className="text-gray-600">Loading PDF...</p>
-                        </div>
+                        // Regular PDF display (existing code)
+                        pdfUrl ? (
+                          <div className="flex flex-col">
+                            <div className="lg:hidden p-4 text-center space-y-4">
+                              <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+                                <FileText className="h-8 w-8 text-red-600" />
+                              </div>
+                              <div className="space-y-2">
+                                <h4 className="font-semibold text-gray-900">{contract.s3FileName || 'Contract PDF'}</h4>
+                                <p className="text-sm text-gray-600">Open the PDF in your browser for better viewing on mobile</p>
+                              </div>
+                              <Button
+                                onClick={() => window.open(pdfUrl, '_blank')}
+                                className="bg-blue-600 hover:bg-blue-700 text-white w-full max-w-sm"
+                                size="lg"
+                              >
+                                <FileText className="h-4 w-4 mr-2" />
+                                Open PDF in Browser
+                              </Button>
+                            </div>
+                            <div className="hidden lg:block">
+                              <iframe src={pdfUrl} className="w-full h-[600px]" title="Contract PDF" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-6 text-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
+                            <p className="text-gray-600">Loading PDF...</p>
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
@@ -1022,3 +1092,103 @@ export default function ContractSigningPage() {
     </div>
   )
 } 
+
+const AutoDecryptionView = ({ 
+  contract, 
+  onDecrypted,
+  currentSessionKey,
+  setCurrentSessionKey,
+  userEmail  // ✅ ADD: Accept userEmail as prop
+}: { 
+  contract: any; 
+  onDecrypted: (blob: Blob) => void;
+  currentSessionKey?: any;
+  setCurrentSessionKey?: (sessionKey: any) => void;
+  userEmail: string;  // ✅ ADD: Type for userEmail
+}) => {
+  const [decryptionStep, setDecryptionStep] = useState<string>('loading-metadata');
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const autoDecrypt = async () => {
+      console.log('[AutoDecryptionView] Starting auto-decrypt process for user:', userEmail);
+      try {
+        const { decryptContractPDF } = await import('@/app/utils/sealDecryption');
+        const hashedEmail = await hashGoogleId(`email_${userEmail.toLowerCase()}`);
+        const result = await decryptContractPDF({
+          contract,
+          cachedSessionKey: currentSessionKey,
+          onProgress: setProgress,
+          onStepChange: setDecryptionStep,
+          userEmail: hashedEmail
+        });
+        console.log('[AutoDecryptionView] Decryption result:', result);
+        if (!result.wasFromCache && setCurrentSessionKey) {
+          setCurrentSessionKey(result.sessionKey);
+        }
+
+        const decryptedBlob = new Blob([result.decryptedData], { type: 'application/pdf' });
+        onDecrypted(decryptedBlob);
+
+      } catch (err) {
+        console.error('Decryption failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to decrypt PDF');
+        setDecryptionStep('error');
+      }
+    };
+
+    autoDecrypt();
+  }, [contract.id, userEmail]);  // ✅ ADD: userEmail to dependencies
+
+  const getStepMessage = () => {
+    switch (decryptionStep) {
+      case 'loading-metadata': return 'Loading encryption metadata...';
+      case 'downloading': return 'Downloading encrypted PDF...';
+      case 'initializing-seal': return 'Initializing SEAL client...';
+      case 'authorizing': return 'Authorizing ephemeral key...';
+      case 'creating-session': return 'Creating decryption session...';
+      case 'fetching-keys': return 'Fetching decryption keys...';
+      case 'decrypting': return 'Decrypting PDF data...';
+      case 'complete': return 'Decryption complete!';
+      case 'error': return 'Decryption failed';
+      default: return 'Processing...';
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="p-6 text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+          <AlertTriangle className="h-8 w-8 text-red-600" />
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold text-gray-900">Auto-Decryption Failed</h3>
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+        <Button onClick={() => window.location.reload()} variant="outline" className="mt-4">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 text-center">
+      <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4">
+        <Loader2 className="h-8 w-8 text-purple-600 animate-spin" />
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold text-gray-900">Auto-Decrypting PDF</h3>
+        <p className="text-sm text-purple-600">{getStepMessage()}</p>
+      </div>
+      <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
+        <div 
+          className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
+  );
+}; 

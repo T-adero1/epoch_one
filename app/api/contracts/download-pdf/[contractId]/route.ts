@@ -1,73 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getS3ViewUrl, downloadFromS3 } from '@/app/utils/s3';
 import { PrismaClient } from '@prisma/client';
+import { downloadFromS3 } from '@/app/utils/s3';
 
 const prisma = new PrismaClient();
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { contractId: string } }
-) {
-  try {
-    const { contractId } = await params;
-    const { searchParams } = new URL(request.url);
-    const view = searchParams.get('view'); // 'inline' or 'download'
+export async function GET(request: Request, { params }: { params: { contractId: string } }) {
+  console.log('[DOWNLOAD_API] 🔍 Download request started:', {
+    contractId: params.contractId,
+    timestamp: new Date().toISOString(),
+    url: request.url
+  });
 
-    // Find contract with S3 file info
+  try {
     const contract = await prisma.contract.findUnique({
-      where: { id: contractId },
-      select: {
-        id: true,
-        s3FileKey: true,
-        s3FileName: true,
-        s3ContentType: true,
-        ownerGoogleIdHash: true, // Fixed: was ownerId, now ownerGoogleIdHash
-      },
+      where: { id: params.contractId }
+    });
+    
+    console.log('[DOWNLOAD_API] 📋 Contract data from database:', {
+      contractId: params.contractId,
+      s3FileKey: contract?.s3FileKey,
+      s3FileName: contract?.s3FileName,
+      foundInDB: !!contract
     });
 
-    if (!contract) {
-      return NextResponse.json(
-        { error: 'Contract not found' },
-        { status: 404 }
-      );
+    if (!contract?.s3FileKey) {
+      return new Response('Contract file not found', { status: 404 });
     }
 
-    if (!contract.s3FileKey) {
-      return NextResponse.json(
-        { error: 'No PDF file found for this contract' },
-        { status: 404 }
-      );
-    }
+    console.log('[DOWNLOAD_API] 📡 Attempting S3 download:', {
+      contractId: params.contractId,
+      s3Key: contract.s3FileKey,
+    });
 
-    if (view === 'inline') {
-      // Return the PDF file directly for inline viewing
-      const fileBuffer = await downloadFromS3(contract.s3FileKey);
-      
-      return new NextResponse(fileBuffer, {
-        headers: {
-          'Content-Type': contract.s3ContentType || 'application/pdf',
-          'Content-Disposition': 'inline', // Display in browser
-          'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
-        },
-      });
-    } else {
-      // Return signed URL for download (existing behavior)
-      const viewUrl = await getS3ViewUrl(contract.s3FileKey);
-
-      return NextResponse.json({
-        downloadUrl: viewUrl,
-        fileName: contract.s3FileName,
-        contentType: contract.s3ContentType,
-      });
-    }
-
+    // ✅ ADD: Actually download and return the file
+    const buffer = await downloadFromS3(contract.s3FileKey);
+    
+    console.log('[DOWNLOAD_API] Downloaded successfully, size:', buffer.length);
+    
+    return new Response(buffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline',
+        'Content-Length': buffer.length.toString()
+      }
+    });
+    
   } catch (error) {
-    console.error('Error handling PDF request:', error);
-    return NextResponse.json(
-      { error: 'Failed to process PDF request' },
-      { status: 500 }
-    );
-  } finally {
-    await prisma.$disconnect();
+    console.error('[DOWNLOAD_API] ❌ Error:', error);
+    return new Response('Download failed', { status: 500 });
   }
 } 

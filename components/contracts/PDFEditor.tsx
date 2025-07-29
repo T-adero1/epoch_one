@@ -1,12 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
+const PrecisionPDFViewer = dynamic(() => import('@/app/utils/PrecisionPDFViewer'), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center p-8">Loading PDF viewer...</div>
+});
+import type { PDFCoordinate } from '@/app/utils/PrecisionPDFViewer';
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { 
   Download, 
   Upload, 
-  Sparkles, 
+
   Loader2, 
   Brain, 
   Wand2, 
@@ -16,14 +22,14 @@ import {
   RefreshCw,
   AlertTriangle,
   Shield,
-  ExternalLink,
+
   RotateCcw,
   Pen,
   Square,
   MapPin,
-  Users,
-  Trash2,
-  User
+
+  User,
+  X
 } from 'lucide-react'
 import { toast } from '@/components/ui/use-toast'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -31,10 +37,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 interface SignaturePosition {
   signerWallet: string;
   page: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  x: number;        // Percentage (0.0 to 1.0) relative to PDF page
+  y: number;        // Percentage (0.0 to 1.0) relative to PDF page  
+  width: number;    // Percentage (0.0 to 1.0) relative to PDF page
+  height: number;   // Percentage (0.0 to 1.0) relative to PDF page
 }
 
 interface PDFEditorProps {
@@ -58,6 +64,7 @@ interface PDFEditorProps {
         };
       };
     } | null;
+    signaturePositions?: string; // Added for existing positions
   };
   onFileUpdate?: (newFile: File) => void;
   startWithAI?: boolean;
@@ -68,6 +75,8 @@ interface PDFEditorProps {
   signerWallets?: string[];         // Available signer wallets
   walletEmailMap?: Map<string, string>; // ✅ ADD: Email mapping
   onPositionsChange?: (positions: SignaturePosition[]) => void;
+    // ✅ ADD: Initial positions prop
+  onDecryptedPdfChange?: (decryptedBlob: Blob | null) => void; // ✅ NEW: Pass decrypted blob to parent
 }
 
 // **IMPROVED: More reliable encryption detection**
@@ -162,6 +171,259 @@ const createOrGetSessionKey = async (allowlistId: string, userAddress: string) =
   }
 };
 
+// 🎯 ENHANCED: Fixed PDF Content Bounds Detection
+class PDFCoordinateManager {
+  private iframe: HTMLIFrameElement | null = null;
+  private pdfPageDimensions: { width: number; height: number } | null = null;
+  private displayDimensions: { width: number; height: number } | null = null;
+  private scaleFactors: { x: number; y: number } | null = null;
+  private iframeId: string;
+
+  constructor(iframeId: string) {
+    this.iframeId = iframeId;
+  }
+
+  /**
+   * Dynamically find and cache iframe reference
+   */
+  private ensureIframe(): HTMLIFrameElement | null {
+    if (!this.iframe) {
+      this.iframe = document.querySelector(`#${this.iframeId}`) as HTMLIFrameElement;
+      if (this.iframe) {
+        console.log('[PDFCoordManager] ✅ Found iframe:', this.iframeId);
+        // Try to extract PDF dimensions when iframe is found
+        this.extractPdfDimensions();
+      } else {
+        console.warn('[PDFCoordManager] ❌ Iframe not found:', this.iframeId);
+      }
+    }
+    return this.iframe;
+  }
+
+  /**
+   * Extract actual PDF page dimensions from the loaded PDF
+   */
+  private async extractPdfDimensions(): Promise<void> {
+    const iframe = this.iframe;
+    if (!iframe) return;
+
+    try {
+      // Wait for iframe to load
+      await new Promise<void>((resolve) => {
+        if (iframe.contentDocument?.readyState === 'complete') {
+          resolve();
+        } else {
+          iframe.addEventListener('load', () => resolve(), { once: true });
+        }
+      });
+
+      // Try to get PDF dimensions from iframe content
+      const iframeDocument = iframe.contentDocument;
+      if (iframeDocument) {
+        // Look for PDF.js viewer elements or embedded object
+        const pdfViewer = iframeDocument.querySelector('.page') || 
+                          iframeDocument.querySelector('embed') ||
+                          iframeDocument.querySelector('object');
+        
+        if (pdfViewer) {
+          const rect = pdfViewer.getBoundingClientRect();
+          this.displayDimensions = {
+            width: rect.width,
+            height: rect.height
+          };
+          
+          console.log('[PDFCoordManager] Display dimensions detected:', this.displayDimensions);
+        }
+      }
+
+      // Get iframe display size
+      const iframeRect = iframe.getBoundingClientRect();
+      if (!this.displayDimensions) {
+        this.displayDimensions = {
+          width: iframeRect.width,
+          height: iframeRect.height
+        };
+      }
+
+      // For now, assume standard PDF page dimensions (we'll enhance this)
+      // Standard US Letter: 612 x 792 points, A4: 595 x 842 points
+      // We can enhance this by extracting from the actual PDF
+      this.pdfPageDimensions = { width: 595, height: 842 }; // A4 default
+
+      this.calculateScaleFactors();
+
+    } catch (error) {
+      console.warn('[PDFCoordManager] Failed to extract PDF dimensions:', error);
+      // Fallback to assuming 1:1 scale
+      this.scaleFactors = { x: 1, y: 1 };
+    }
+  }
+
+  /**
+   * Calculate scale factors between display and actual PDF dimensions
+   */
+  private calculateScaleFactors(): void {
+    if (!this.pdfPageDimensions || !this.displayDimensions) {
+      this.scaleFactors = { x: 1, y: 1 };
+      return;
+    }
+
+    this.scaleFactors = {
+      x: this.pdfPageDimensions.width / this.displayDimensions.width,
+      y: this.pdfPageDimensions.height / this.displayDimensions.height
+    };
+
+    console.log('[PDFCoordManager] Scale factors calculated:', {
+      pdfDimensions: this.pdfPageDimensions,
+      displayDimensions: this.displayDimensions,
+      scaleFactors: this.scaleFactors
+    });
+  }
+
+  /**
+   * Enhanced method to get actual PDF page dimensions from blob
+   */
+  async setPdfDimensionsFromBlob(pdfBlob: Blob): Promise<void> {
+    try {
+      const { PDFDocument } = await import('pdf-lib');
+      const arrayBuffer = await pdfBlob.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const firstPage = pdfDoc.getPages()[0];
+      
+      if (firstPage) {
+        const { width, height } = firstPage.getSize();
+        this.pdfPageDimensions = { width, height };
+        this.calculateScaleFactors();
+        
+        console.log('[PDFCoordManager] ✅ Extracted actual PDF dimensions:', {
+          width,
+          height,
+          scaleFactors: this.scaleFactors
+        });
+      }
+    } catch (error) {
+      console.warn('[PDFCoordManager] Failed to extract PDF dimensions from blob:', error);
+    }
+  }
+
+  /**
+   * Get the current PDF content bounds with scale awareness
+   */
+  private getPdfContentBounds(): { bounds: DOMRect; scale: number } | null {
+    const iframe = this.ensureIframe();
+    if (!iframe) {
+      console.error('[PDFCoordManager] ❌ No iframe found for coordinate calculation');
+      return null;
+    }
+
+    try {
+      const iframeRect = iframe.getBoundingClientRect();
+      
+      // Account for any potential margins or padding in the PDF viewer
+      let contentBounds = new DOMRect(
+        iframeRect.left,
+        iframeRect.top,
+        iframeRect.width,
+        iframeRect.height
+      );
+
+      // If we have scale factors, we can provide better bounds info
+      const scale = this.scaleFactors ? Math.min(this.scaleFactors.x, this.scaleFactors.y) : 1;
+      
+      return { bounds: contentBounds, scale };
+
+    } catch (error) {
+      console.error('[PDFCoordManager] Failed to get PDF bounds:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Enhanced coordinate conversion with scale factor awareness
+   */
+  mouseEventToPdfPercentage(event: React.MouseEvent): { x: number; y: number } | null {
+    const pdfBounds = this.getPdfContentBounds();
+    if (!pdfBounds) {
+      console.error('[PDFCoordManager] ❌ Cannot get PDF bounds for coordinate conversion');
+      return null;
+    }
+
+    const { bounds } = pdfBounds;
+    
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      console.error('[PDFCoordManager] ❌ Invalid bounds dimensions:', bounds);
+      return null;
+    }
+    
+    const relativeX = event.clientX - bounds.left;
+    const relativeY = event.clientY - bounds.top;
+    
+    // Convert to percentages (still 0-1 range)
+    let percentageX = Math.max(0, Math.min(1, relativeX / bounds.width));
+    let percentageY = Math.max(0, Math.min(1, relativeY / bounds.height));
+
+    // Apply scale factor correction if available
+    if (this.scaleFactors && this.displayDimensions && this.pdfPageDimensions) {
+      // Adjust for any aspect ratio differences
+      const displayAspect = this.displayDimensions.width / this.displayDimensions.height;
+      const pdfAspect = this.pdfPageDimensions.width / this.pdfPageDimensions.height;
+      
+      if (Math.abs(displayAspect - pdfAspect) > 0.01) {
+        // There's an aspect ratio difference, adjust coordinates
+        console.log('[PDFCoordManager] Applying aspect ratio correction:', {
+          displayAspect,
+          pdfAspect,
+          originalCoords: { x: percentageX, y: percentageY }
+        });
+      }
+    }
+
+    console.log('[PDFCoordManager] Coordinate conversion:', {
+      mouseCoords: { x: event.clientX, y: event.clientY },
+      relativeCoords: { x: relativeX, y: relativeY },
+      percentageCoords: { x: percentageX, y: percentageY },
+      bounds: { width: bounds.width, height: bounds.height },
+      scaleFactors: this.scaleFactors
+    });
+    
+    return { x: percentageX, y: percentageY };
+  }
+
+  /**
+   * Force refresh iframe reference and recalculate dimensions
+   */
+  refreshIframe(): void {
+    this.iframe = null;
+    this.pdfPageDimensions = null;
+    this.displayDimensions = null;
+    this.scaleFactors = null;
+    console.log('[PDFCoordManager] 🔄 Full reset - will re-detect everything on next use');
+  }
+
+  /**
+   * Validate that a signature position is within valid bounds
+   */
+  validatePosition(position: Partial<SignaturePosition>): boolean {
+    if (typeof position.x !== 'number' || typeof position.y !== 'number' || 
+        typeof position.width !== 'number' || typeof position.height !== 'number') {
+      return false;
+    }
+
+    const withinBounds = 
+      position.x >= 0 && position.x <= 1 &&
+      position.y >= 0 && position.y <= 1 &&
+      position.width > 0 && position.width <= 1 &&
+      position.height > 0 && position.height <= 1 &&
+      (position.x + position.width) <= 1 &&
+      (position.y + position.height) <= 1;
+
+    const minSize = 0.01; // 1% minimum
+    const validSize = position.width >= minSize && position.height >= minSize;
+
+    return withinBounds && validSize;
+  }
+}
+
 export default function PDFEditor({ 
   contract, 
   onFileUpdate, 
@@ -171,8 +433,10 @@ export default function PDFEditor({
   showAIButton = true,
   signatureMode = 'view',
   signerWallets = [],
-  walletEmailMap = new Map(), // ✅ ADD: Default empty map
-  onPositionsChange
+  walletEmailMap = new Map(), 
+  onPositionsChange,
+    
+  onDecryptedPdfChange
 }: PDFEditorProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
@@ -211,6 +475,9 @@ export default function PDFEditor({
 
   // ✅ ADD: State to track PDF scroll position
   const [pdfScrollPosition, setPdfScrollPosition] = useState({ x: 0, y: 0 });
+
+  // 🎯 PRODUCTION: Initialize coordinate manager
+  const [coordinateManager] = useState(() => new PDFCoordinateManager('pdf-iframe'));
 
   // ✅ ADD: Function to handle iframe scroll events
   const handleIframeScroll = useCallback((iframe: HTMLIFrameElement) => {
@@ -267,30 +534,119 @@ export default function PDFEditor({
     }
   }, [decryptedPdfUrl, pdfUrl, handleIframeScroll]);
 
-  // ✅ ADD: Signature box drawing handlers
+  // ✅ ENHANCED: Load signature positions from props first, then contract data
+
+  // 🎯 ENHANCED: Enhanced toggle function with proper feedback
+
+
+  // 🔧 ENHANCED: Effect to refresh coordinate manager when PDF loads
+  useEffect(() => {
+    if (decryptedPdfUrl && coordinateManager) {
+      console.log('[PDFEditor] 📄 PDF loaded, refreshing coordinate manager');
+      // Give iframe time to load
+      setTimeout(() => {
+        coordinateManager.refreshIframe();
+      }, 1000);
+    }
+  }, [decryptedPdfUrl, coordinateManager]);
+
+
+
+  // 🔧 ENHANCED: More robust mouse event handlers with better error feedback
   const handleMouseDown = (e: React.MouseEvent, pageNumber: number) => {
-    console.log('[PDFEditor] Mouse down:', { isSignatureBoxMode, selectedSignerWallet, signatureMode });
-    if (!isSignatureBoxMode || !selectedSignerWallet || signatureMode !== 'edit') return;
-    
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    // ✅ FIXED: Add scroll position to coordinates
-    const x = e.clientX - rect.left + pdfScrollPosition.x;
-    const y = e.clientY - rect.top + pdfScrollPosition.y;
-    
-    console.log('[PDFEditor] Starting signature box draw at:', { 
-      x, 
-      y, 
-      pageNumber, 
-      scrollX: pdfScrollPosition.x, 
-      scrollY: pdfScrollPosition.y 
+    console.log('[PDFEditor] �� SIGNATURE BOX DRAW ATTEMPT:', {
+      isSignatureBoxMode,
+      selectedSignerWallet,
+      signatureMode,
+      pageNumber,
+      signerWalletsCount: signerWallets.length,
+      walletEmailMapSize: walletEmailMap.size,
+      hasIframe: !!document.querySelector('#pdf-iframe'),
+      conditions: {
+        hasSignatureBoxMode: !!isSignatureBoxMode,
+        hasSelectedSigner: !!selectedSignerWallet,
+        isEditMode: signatureMode === 'edit',
+        allConditionsMet: !!(isSignatureBoxMode && selectedSignerWallet && signatureMode === 'edit')
+      }
     });
+
+    // Prevent if clicking on existing signature box
+    const clickedElement = e.target as HTMLElement;
+    const isClickingSignatureBox = clickedElement.closest('.signature-box-container');
     
+    if (isClickingSignatureBox) {
+      console.log('[PDFEditor] ❌ Clicked on existing signature box, ignoring');
+      return;
+    }
+
+    // 🔧 ENHANCED: More detailed condition checking with user feedback
+    if (!isSignatureBoxMode) {
+      console.log('[PDFEditor] ❌ Signature box mode not active');
+      toast({
+        title: "Drawing Mode Not Active",
+        description: "Click 'Draw Signature Boxes' button to start drawing.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!selectedSignerWallet) {
+      console.log('[PDFEditor] ❌ No signer selected. Available signers:', signerWallets);
+      toast({
+        title: "No Signer Selected",
+        description: "Please select a signer from the dropdown first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (signatureMode !== 'edit') {
+      console.log('[PDFEditor] ❌ Not in edit mode. Current mode:', signatureMode);
+      toast({
+        title: "Read-Only Mode",
+        description: "Signature boxes can only be drawn in edit mode.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // 🔧 CRITICAL: Check if iframe exists before coordinate conversion
+    const iframe = document.querySelector('#pdf-iframe');
+    if (!iframe) {
+      console.error('[PDFEditor] ❌ PDF iframe not found in DOM');
+      toast({
+        title: "PDF Not Ready",
+        description: "Please wait for the PDF to load completely.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Convert mouse position to PDF-relative percentage
+    const pdfPosition = coordinateManager.mouseEventToPdfPercentage(e);
+    if (!pdfPosition) {
+      console.error('[PDFEditor] ❌ Failed to convert mouse position to PDF coordinates');
+      toast({
+        title: "Coordinate Error",
+        description: "Could not determine position on PDF. Please try clicking closer to the center.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    console.log('[PDFEditor] ✅ Starting signature box draw:', {
+      pageNumber,
+      pdfPosition,
+      selectedSigner: selectedSignerWallet,
+      signerEmail: walletEmailMap.get(selectedSignerWallet)
+    });
+
     setIsDrawingSignatureBox(true);
     setCurrentDrawingBox({
       signerWallet: selectedSignerWallet,
       page: pageNumber,
-      x,
-      y,
+      x: pdfPosition.x,
+      y: pdfPosition.y,
       width: 0,
       height: 0
     });
@@ -298,275 +654,274 @@ export default function PDFEditor({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDrawingSignatureBox || !currentDrawingBox) return;
+
+    const currentPosition = coordinateManager.mouseEventToPdfPercentage(e);
+    if (!currentPosition) return;
+
+    // Calculate width and height from start position
+    const width = Math.abs(currentPosition.x - currentDrawingBox.x!);
+    const height = Math.abs(currentPosition.y - currentDrawingBox.y!);
     
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    // ✅ FIXED: Add scroll position to coordinates
-    const currentX = e.clientX - rect.left + pdfScrollPosition.x;
-    const currentY = e.clientY - rect.top + pdfScrollPosition.y;
-    
+    // Adjust x,y if dragging backwards
+    const x = Math.min(currentDrawingBox.x!, currentPosition.x);
+    const y = Math.min(currentDrawingBox.y!, currentPosition.y);
+
     setCurrentDrawingBox(prev => ({
       ...prev!,
-      width: currentX - prev!.x!,
-      height: currentY - prev!.y!
+      x,
+      y,
+      width,
+      height
     }));
   };
 
-  // ✅ ENHANCED: Add debugging to handleMouseUp
   const handleMouseUp = () => {
-    if (!isDrawingSignatureBox || !currentDrawingBox || 
-        !currentDrawingBox.width || !currentDrawingBox.height ||
-        Math.abs(currentDrawingBox.width) < 20 || Math.abs(currentDrawingBox.height) < 10) {
-      console.log('[PDFEditor] DEBUG - Signature box creation cancelled:', {
-        isDrawing: isDrawingSignatureBox,
-        hasCurrentBox: !!currentDrawingBox,
-        width: currentDrawingBox?.width,
-        height: currentDrawingBox?.height
+    if (!isDrawingSignatureBox || !currentDrawingBox) return;
+
+    // Validate the position before saving
+    if (!coordinateManager.validatePosition(currentDrawingBox)) {
+      toast({
+        title: "Invalid Signature Box",
+        description: "Signature box is too small or outside valid area. Please try again.",
+        variant: "destructive"
       });
+      
       setIsDrawingSignatureBox(false);
       setCurrentDrawingBox(null);
       return;
     }
-    
+
     const newPosition: SignaturePosition = {
       signerWallet: currentDrawingBox.signerWallet!,
       page: currentDrawingBox.page!,
-      x: Math.min(currentDrawingBox.x!, currentDrawingBox.x! + currentDrawingBox.width!),
-      y: Math.min(currentDrawingBox.y!, currentDrawingBox.y! + currentDrawingBox.height!),
-      width: Math.abs(currentDrawingBox.width!),
-      height: Math.abs(currentDrawingBox.height!)
+      x: currentDrawingBox.x!,
+      y: currentDrawingBox.y!,
+      width: currentDrawingBox.width!,
+      height: currentDrawingBox.height!
     };
-    
+
     const updatedPositions = [...signaturePositions, newPosition];
-    
-    console.log('[PDFEditor] DEBUG - New signature box created:', {
-      newPosition,
-      totalPositions: updatedPositions.length,
-      allPositions: updatedPositions,
-      hasCallback: !!onPositionsChange
-    });
-    
     setSignaturePositions(updatedPositions);
     
-    // ✅ CRITICAL: Make sure callback is called
     if (onPositionsChange) {
-      console.log('[PDFEditor] DEBUG - Calling onPositionsChange callback with:', updatedPositions);
       onPositionsChange(updatedPositions);
-    } else {
-      console.warn('[PDFEditor] WARNING - onPositionsChange callback is not provided!');
     }
-    
+
+    // Reset drawing state
     setIsDrawingSignatureBox(false);
     setCurrentDrawingBox(null);
+
     
-    toast({
-      title: "Signature Box Added",
-      description: `Added signature box for ${selectedSignerWallet.substring(0, 8)}... (Total: ${updatedPositions.length})`,
-      variant: "success",
-    });
   };
 
-  // ✅ ENHANCED: Add debugging to removeSignatureBox
+  // 🎯 PRODUCTION: Enhanced removeSignatureBox
   const removeSignatureBox = (index: number) => {
-    const updatedPositions = signaturePositions.filter((_, i) => i !== index);
+    if (index < 0 || index >= signaturePositions.length) {
+      console.error('[PDFEditor] Invalid signature box index for removal:', index);
+      return;
+    }
+
+    const position = signaturePositions[index];
+    const email = walletEmailMap.get(position.signerWallet) || 'Unknown Signer';
     
-    console.log('[PDFEditor] DEBUG - Signature box removed:', {
-      removedIndex: index,
-      remainingPositions: updatedPositions.length,
-      allPositions: updatedPositions,
-      hasCallback: !!onPositionsChange
+    console.log('[PDFEditor] Removing signature box:', {
+      index,
+      email,
+      position
     });
-    
+
+    const updatedPositions = signaturePositions.filter((_, i) => i !== index);
     setSignaturePositions(updatedPositions);
     
-    // ✅ CRITICAL: Make sure callback is called for removals too
     if (onPositionsChange) {
-      console.log('[PDFEditor] DEBUG - Calling onPositionsChange callback after removal with:', updatedPositions);
       onPositionsChange(updatedPositions);
-    } else {
-      console.warn('[PDFEditor] WARNING - onPositionsChange callback is not provided for removal!');
     }
+
+    
   };
 
-  // ✅ ADD: Props from parent component
+  // 🎯 PRODUCTION: Enhanced Signature Box Rendering
+  const renderSignatureBoxes = (pageNumber: number) => {
+    console.log('[PDFEditor] Rendering signature boxes for page:', pageNumber, {
+      totalPositions: signaturePositions.length,
+      positionsThisPage: signaturePositions.filter(pos => pos.page === pageNumber).length
+    });
+
+    return signaturePositions
+      .filter(pos => pos.page === pageNumber)
+      .map((position, index) => {
+        const email = walletEmailMap.get(position.signerWallet) || 'Unknown Signer';
+        const globalIndex = signaturePositions.findIndex(p => p === position);
+        
+        // Validate position before rendering
+        if (!coordinateManager.validatePosition(position)) {
+          console.warn('[PDFEditor] Skipping invalid signature position:', position);
+          return null;
+        }
+
+        console.log('[PDFEditor] Rendering signature box:', {
+          index: globalIndex,
+          email,
+          position: {
+            x: `${position.x * 100}%`,
+            y: `${position.y * 100}%`,
+            width: `${position.width * 100}%`,
+            height: `${position.height * 100}%`
+          }
+        });
+
+        return (
+          <div
+            key={`signature-${globalIndex}-${position.signerWallet}-${position.page}`}
+            className="absolute pointer-events-auto group hover:scale-105 transition-all z-20 signature-box-container"
+            style={{
+              left: `${position.x * 100}%`,
+              top: `${position.y * 100}%`,
+              width: `${position.width * 100}%`,
+              height: `${position.height * 100}%`,
+            }}
+          >
+            <div className="w-full h-full border-2 border-dashed border-blue-500 bg-blue-50/90 rounded-lg flex flex-col items-center justify-center text-xs font-medium text-blue-700 p-1 min-h-[40px]">
+              <div className="text-center flex-1 flex flex-col justify-center">
+                <div className="flex items-center gap-1 justify-center">
+                  <User className="h-3 w-3 flex-shrink-0" />
+                  <span className="text-xs">Sign Here</span>
+                </div>
+                <div className="text-[10px] text-blue-600 truncate w-full">{email}</div>
+              </div>
+              
+              {/* Enhanced delete button for edit mode */}
+              {signatureMode === 'edit' && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeSignatureBox(globalIndex);
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600 transition-colors z-30 shadow-sm"
+                  title={`Remove signature box for ${email}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })
+      .filter(Boolean); // Remove null entries
+  };
+
+  // 🎯 PRODUCTION: Enhanced Drawing Box Render
+  const renderCurrentDrawingBox = () => {
+    if (!isDrawingSignatureBox || !currentDrawingBox) return null;
+
+    const { x = 0, y = 0, width = 0, height = 0 } = currentDrawingBox;
+    
+    // Don't render if too small
+    if (Math.abs(width) < 0.01 || Math.abs(height) < 0.01) return null;
+
+    return (
+      <div
+        className="absolute pointer-events-none z-30 border-2 border-blue-400 bg-blue-100/50 rounded"
+        style={{
+          left: `${x * 100}%`,
+          top: `${y * 100}%`,
+          width: `${Math.abs(width) * 100}%`,
+          height: `${Math.abs(height) * 100}%`,
+        }}
+      >
+        <div className="w-full h-full flex items-center justify-center text-xs text-blue-600 font-medium">
+          Drawing...
+        </div>
+      </div>
+    );
+  };
+
+  // 🎯 PRODUCTION: Responsive Updates
   useEffect(() => {
+    const handleResize = () => {
+      // Force coordinate manager to recalculate bounds on resize
+      coordinateManager.iframe = document.querySelector('#pdf-iframe') as HTMLIFrameElement;
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [coordinateManager]);
+
+  // 🔧 ENHANCED: Auto-select first signer when available
+  useEffect(() => {
+    console.log('[PDFEditor] 🔄 Signer setup effect:', {
+      signerWalletsCount: signerWallets.length,
+      selectedSignerWallet,
+      hasEmailMap: walletEmailMap.size > 0
+    });
+
     if (signerWallets.length > 0 && !selectedSignerWallet) {
+      console.log('[PDFEditor] ✅ Auto-selecting first signer:', signerWallets[0]);
       setSelectedSignerWallet(signerWallets[0]);
     }
   }, [signerWallets, selectedSignerWallet]);
 
-  // ✅ ADD: Signature box rendering function with improved visuals
-  const renderSignatureBoxes = (pageNumber: number) => (
-    <>
-      {/* Existing signature boxes with enhanced styling */}
-      {signaturePositions
-        .filter(pos => pos.page === pageNumber)
-        .map((position, index) => {
-          const email = walletEmailMap.get(position.signerWallet);
-          const displayLabel = email ? email.split('@')[0] : position.signerWallet.substring(0, 8) + '...';
-          
-          // ✅ NEW: Different color schemes for different signers
-          const colorSchemes = [
-            { border: 'border-emerald-400', bg: 'bg-emerald-50', label: 'bg-emerald-500', text: 'text-emerald-700', shadow: 'shadow-emerald-200' },
-            { border: 'border-blue-400', bg: 'bg-blue-50', label: 'bg-blue-500', text: 'text-blue-700', shadow: 'shadow-blue-200' },
-            { border: 'border-purple-400', bg: 'bg-purple-50', label: 'bg-purple-500', text: 'text-purple-700', shadow: 'shadow-purple-200' },
-            { border: 'border-rose-400', bg: 'bg-rose-50', label: 'bg-rose-500', text: 'text-rose-700', shadow: 'shadow-rose-200' },
-            { border: 'border-amber-400', bg: 'bg-amber-50', label: 'bg-amber-500', text: 'text-amber-700', shadow: 'shadow-amber-200' }
-          ];
-          
-          const colorScheme = colorSchemes[index % colorSchemes.length];
-          const isFirstSigner = index === 0; // Owner is usually first
-          
-          return (
-            <div
-              key={index}
-              className={`absolute pointer-events-auto group transition-all duration-300 hover:scale-105 ${
-                signatureMode === 'edit' 
-                  ? 'hover:shadow-lg cursor-pointer' 
-                  : 'hover:shadow-md'
-              }`}
-              style={{
-                // ✅ FIXED: Subtract scroll position to keep boxes aligned with PDF content
-                left: position.x - pdfScrollPosition.x,
-                top: position.y - pdfScrollPosition.y,
-                width: position.width,
-                height: position.height,
-              }}
-            >
-              {/* ✅ ENHANCED: Main signature box with gradient border and shadow */}
-              <div className={`
-                relative w-full h-full rounded-lg transition-all duration-300 group-hover:scale-[1.02]
-                ${colorScheme.border} ${colorScheme.bg} ${colorScheme.shadow}
-                border-2 border-dashed shadow-md bg-opacity-60
-                backdrop-blur-sm
-              `}>
-                
-                {/* ✅ NEW: Signature icon and placeholder text */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
-                  <div className={`flex items-center gap-1 ${colorScheme.text} opacity-75`}>
-                    {isFirstSigner ? (
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H16a1 1 0 110 2h-1.92l-1 4H15a1 1 0 110 2h-2.38l-.56 2.242a1 1 0 11-1.94-.485L10.47 14H7.53l-.56 2.242a1 1 0 11-1.94-.485L5.47 14H4a1 1 0 110-2h1.92l1-4H5a1 1 0 110-2h2.38l.56-2.243a1 1 0 011.213-.727zM9.53 8l-1 4h2.94l1-4H9.53z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.828 2.828 0 114 4L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    )}
-                    <span className="text-xs font-medium hidden group-hover:inline">
-                      {isFirstSigner ? 'Your signature' : 'Your client\'s signature'}
-                    </span>
-                  </div>
-                  
-                  {/* ✅ NEW: Decorative signature line */}
-                  <div className={`mt-1 w-full max-w-[80%] h-px ${colorScheme.border.replace('border-', 'bg-')} opacity-50`}></div>
-                </div>
-                
-                {/* ✅ NEW: Corner indicator for signer type */}
-                {isFirstSigner && (
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-full border border-white shadow-sm">
-                    <div className="absolute inset-0.5 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-full"></div>
-                  </div>
-                )}
-              </div>
-              
-              {/* ✅ ENHANCED: Label with improved styling and animations */}
-              <div className="absolute -top-1 left-0 transform -translate-y-full">
-                <div className={`
-                  ${colorScheme.label} text-white text-xs px-3 py-1.5 rounded-t-lg rounded-br-lg
-                  font-medium shadow-sm flex items-center gap-2 whitespace-nowrap
-                  transition-all duration-300 group-hover:shadow-md
-                  ${signatureMode === 'edit' ? 'group-hover:-translate-y-0.5' : ''}
-                `}>
-                  {/* ✅ NEW: User avatar/icon */}
-                  <div className="w-4 h-4 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
-                    {isFirstSigner ? (
-                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M9.243 3.03a1 1 0 01.727 1.213L9.53 6h2.94l.56-2.243a1 1 0 111.94.486L14.53 6H16a1 1 0 110 2h-1.92l-1 4H15a1 1 0 110 2h-2.38l-.56 2.242a1 1 0 11-1.94-.485L10.47 14H7.53l-.56 2.242a1 1 0 11-1.94-.485L5.47 14H4a1 1 0 110-2h1.92l1-4H5a1 1 0 110-2h2.38l.56-2.243a1 1 0 011.213-.727zM9.53 8l-1 4h2.94l1-4H9.53z" clipRule="evenodd" />
-                      </svg>
-                    ) : (
-                      <User className="w-2.5 h-2.5 text-white" />
-                    )}
-                  </div>
-                  
-                  <span className="font-medium">{displayLabel}</span>
-                  
-                  {/* ✅ ENHANCED: Delete button with improved styling */}
-                  {signatureMode === 'edit' && (
-                    <button
-                      onClick={() => removeSignatureBox(signaturePositions.indexOf(position))}
-                      className="ml-1 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 hover:bg-white hover:bg-opacity-20 rounded p-0.5"
-                      title="Remove signature box"
-                    >
-                      <Trash2 className="h-3 w-3 text-white" />
-                    </button>
-                  )}
-                </div>
-                
-                {/* ✅ NEW: Small connection line from label to box */}
-                <div className={`absolute top-full left-3 w-px h-1 ${colorScheme.label}`}></div>
-              </div>
-            </div>
-          );
-        })}
-      
-      {/* ✅ ENHANCED: Currently drawing box with scroll compensation */}
-      {isDrawingSignatureBox && currentDrawingBox && currentDrawingBox.page === pageNumber && (
-        <div
-          className="absolute pointer-events-none transition-all duration-150"
-          style={{
-            // ✅ FIXED: Subtract scroll position for drawing box too
-            left: Math.min(currentDrawingBox.x!, currentDrawingBox.x! + (currentDrawingBox.width || 0)) - pdfScrollPosition.x,
-            top: Math.min(currentDrawingBox.y!, currentDrawingBox.y! + (currentDrawingBox.height || 0)) - pdfScrollPosition.y,
-            width: Math.abs(currentDrawingBox.width || 0),
-            height: Math.abs(currentDrawingBox.height || 0),
-          }}
-        >
-          {/* ✅ NEW: Animated drawing preview with gradient border */}
-          <div className="relative w-full h-full">
-            {/* Outer glow effect */}
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg blur-sm opacity-30 animate-pulse"></div>
-            
-            {/* Main drawing box */}
-            <div className="relative w-full h-full border-2 border-dashed border-blue-500 bg-gradient-to-br from-blue-100 to-purple-100 bg-opacity-60 rounded-lg backdrop-blur-sm">
-              {/* Drawing indicator */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex items-center gap-2 text-blue-600 opacity-75">
-                  <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.828 2.828 0 114 4L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                  <span className="text-xs font-medium">Drawing...</span>
-                </div>
-              </div>
-              
-              {/* Animated corner indicators */}
-              <div className="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-blue-500 animate-pulse"></div>
-              <div className="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-blue-500 animate-pulse"></div>
-              <div className="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-blue-500 animate-pulse"></div>
-              <div className="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-blue-500 animate-pulse"></div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+  // 🔧 ENHANCED: Debug signature box mode toggle
+  const toggleSignatureBoxMode = () => {
+    const newMode = !isSignatureBoxMode;
+
+    if (newMode && !selectedSignerWallet && signerWallets.length > 0) {
+      setSelectedSignerWallet(signerWallets[0]);
+    }
+
+    if (newMode && signatureMode !== 'edit') {
+      toast({
+        title: "Read-Only Mode",
+        description: "Signature boxes can only be drawn in edit mode.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Refresh iframe reference when enabling drawing mode
+    if (newMode) {
+      coordinateManager.refreshIframe();
+    }
+
+    setIsSignatureBoxMode(newMode);
+
+    
+  };
+
+  // 🔧 UPDATE: Replace the existing button onClick with the enhanced function
+  // Find the button around line 1118 and replace its onClick:
+  /*
+  <button
+    onClick={toggleSignatureBoxMode}  // Use new enhanced function
+    className={`px-3 h-full text-xs font-medium transition-all rounded-none w-34 flex-shrink-0 ${
+      isSignatureBoxMode 
+        ? 'bg-red-50 text-red-700 hover:bg-red-100' 
+        : 'bg-transparent text-gray-700 hover:bg-blue-100'
+    }`}
+  >
+  */
 
   // **UPDATED: Single initialization effect to prevent double loading**
   useEffect(() => {
     if (hasInitialized) return;
     
-    console.log('[PDFEditor] Initializing component with contract:', {
+    console.log('[PDFEditor] 🚀 INITIALIZATION DEBUG:', {
       contractId: contract.id,
-      title: contract.title,
-      s3FileKey: contract.s3FileKey,
-      s3FileName: contract.s3FileName,
-      isEncrypted: contract.isEncrypted,
+      hasInitialized,
+      hasCallback: !!onDecryptedPdfChange,
+      callbackType: typeof onDecryptedPdfChange,
+      isEncrypted: isContractEncrypted(contract),
+      hasS3FileKey: !!contract.s3FileKey,
       sealAllowlistId: contract.sealAllowlistId,
       sealDocumentId: contract.sealDocumentId,
-      sealCapId: contract.sealCapId,
-      metadata: contract.metadata,
-      walrusEncryption: contract.metadata?.walrus?.encryption
+      sealCapId: contract.sealCapId
     });
-
+    
     const isEncrypted = isContractEncrypted(contract);
     console.log('[PDFEditor] Encryption detection result:', isEncrypted);
     
@@ -624,27 +979,20 @@ export default function PDFEditor({
     
     setDecryptedPdfBlob(decryptedBlob);
     setDecryptedPdfUrl(newUrl);
-    
-    // **NEW: Cache the decrypted PDF for future use**
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.storeDecryptedPDF(
-        contract.id,
-        new Uint8Array(await decryptedBlob.arrayBuffer()),
-        contract.s3FileName || 'decrypted-contract.pdf'
-      );
-      console.log('[PDFEditor] Cached decrypted PDF in IndexDB');
-    } catch (cacheError) {
-      console.warn('[PDFEditor] Failed to cache decrypted PDF:', cacheError);
-    }
+
+    // ✅ NEW: Extract actual PDF dimensions for accurate coordinate mapping
+    await coordinateManager.setPdfDimensionsFromBlob(decryptedBlob);
     
     console.log('[PDFEditor] State updated with decrypted PDF data');
     
-    toast({
-      title: "PDF Decrypted Successfully",
-      description: "Your encrypted PDF is now ready to view and edit.",
-      variant: "success",
-    });
+    // ✅ NEW: Notify parent component about decrypted blob
+    if (onDecryptedPdfChange) {
+      console.log('[PDFEditor] 📞 CALLING onDecryptedPdfChange callback with blob');
+      onDecryptedPdfChange(decryptedBlob);
+      console.log('[PDFEditor] ✅ Callback completed');
+    } else {
+      console.error('[PDFEditor] ❌ onDecryptedPdfChange callback is missing!');
+    }
   };
 
   // **UPDATED: Enhanced cache check with proper state management**
@@ -866,247 +1214,248 @@ export default function PDFEditor({
     }
   };
 
-  // **NEW: Clear decrypted data to force re-decryption**
-  const handleRedecrypt = async () => {
-    console.log('[PDFEditor] Clearing decrypted data to force re-decryption');
-    
-    // Clean up current URLs
-    if (decryptedPdfUrl) {
-      URL.revokeObjectURL(decryptedPdfUrl);
-    }
-    
-    // Clear state
-    setDecryptedPdfBlob(null);
-    setDecryptedPdfUrl(null);
-    setCacheCheckComplete(false);
-    
-    // Clear cache
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.clearDecryptedPDF(contract.id);
-      console.log('[PDFEditor] Cleared cached decrypted PDF');
-    } catch (error) {
-      console.warn('[PDFEditor] Failed to clear cache:', error);
-    }
-    
-    toast({
-      title: "Cache Cleared",
-      description: "Re-decrypting PDF...",
-    });
-  };
 
-  // **UPDATED: Enhanced PDF viewer with cache check prevention**
+  // **UPDATED: Enhanced PDF viewer with PrecisionPDFViewer integration**
   const renderPDFViewer = () => {
-    console.log('[PDFEditor] Rendering PDF viewer...');
-    
     const isEncrypted = isContractEncrypted(contract);
     
-    console.log('[PDFEditor] Render state:', {
-      isEncrypted,
-      hasDecryptedBlob: !!decryptedPdfBlob,
-      hasDecryptedUrl: !!decryptedPdfUrl,
-      hasS3FileKey: !!contract.s3FileKey,
-      hasInitialized,
-      isCheckingCache,
-      cacheCheckComplete
-    });
-    
-    // **ENCRYPTED PDF HANDLING** - Only path for encrypted contracts
-    if (isEncrypted) {
-      
-      
-      // Show inline decrypted PDF viewer
-      if (decryptedPdfBlob && decryptedPdfUrl) {
-        
-        return (
-          <div className="h-full bg-gray-100 space-y-3">
-            {/* ✅ NEW: Integrated header with signature controls */}
-            <div className={`p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 transition-all ${
-              isSignatureBoxMode 
-                ? 'bg-blue-50 border-blue-200' 
-                : 'bg-white border-gray-200'  // ✅ CHANGED: bg-white instead of bg-gray-50
-            }`}>
-              {/* Left side - existing title and status */}
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-red-600" />  {/* ✅ CHANGED: text-red-600 to match original */}
-                  <span className="font-normal text-gray-500">PDF Editor</span>  {/* ✅ CHANGED: font-normal and text-gray-500 to match original */}
+    // Create a single conditional rendering helper
+    const renderPDFContent = () => {
+      // **ENCRYPTED PDF HANDLING**
+      if (isEncrypted) {
+        // Show inline decrypted PDF viewer with PrecisionPDFViewer
+        if (decryptedPdfBlob && decryptedPdfUrl) {
+          return (
+            <div className="h-full bg-gray-100 space-y-3">
+              {/* ✅ Integrated header with signature controls */}
+              <div className={`p-3 md:p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0 transition-all ${
+                isSignatureBoxMode 
+                  ? 'bg-blue-50 border-blue-200' 
+                  : 'bg-white border-gray-200'
+              }`}>
+                {/* Left side - title and status */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-red-600" />
+                    <span className="font-normal text-gray-500">PDF Editor</span>
+                  </div>
+                  
+                  {isContractEncrypted(contract) && (
+                    <div className="flex items-center gap-1 ml-2">
+                      <Shield className="h-3 w-3 text-purple-500" />
+                      <span className="text-xs text-purple-600">Encrypted</span>
+                    </div>
+                  )}
                 </div>
                 
-                {isContractEncrypted(contract) && (
-                  <div className="flex items-center gap-1 ml-2">  {/* ✅ CHANGED: ml-2 to match original spacing */}
-                    <Shield className="h-3 w-3 text-purple-500" />
-                    <span className="text-xs text-purple-600">Encrypted</span>
-                  </div>
-                )}
+                {/* Right side - ALL controls in one row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Signature controls (when in edit mode) */}
+                  {signatureMode === 'edit' && signerWallets.length > 0 && (
+                    <>
+                      {/* Combined selector + button */}
+                      <div className="flex items-center h-8 border border-blue-200 rounded-md bg-white hover:bg-blue-50 transition-colors w-80">
+                        {/* Signer selector */}
+                        <div className="flex-1 min-w-0 w-52">
+                          <Select value={selectedSignerWallet} onValueChange={setSelectedSignerWallet}>
+                            <SelectTrigger className="h-full px-3 text-xs border-0 bg-transparent hover:bg-transparent w-full rounded-none">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <User className="h-3 w-3 text-blue-600 flex-shrink-0" />
+                                <span className="truncate flex-1 text-left">
+                                  {(() => {
+                                    const email = walletEmailMap.get(selectedSignerWallet);
+                                    return email ? email : `Select Signer`;
+                                  })()}
+                                </span>
+                              </div>
+                            </SelectTrigger>
+                            <SelectContent className="w-84">
+                              {signerWallets.map((wallet, index) => {
+                                const email = walletEmailMap.get(wallet);
+                                const displayText = email ? email : `Unknown User`;
+                                const isFirstWallet = index === 0;
+                                
+                                return (
+                                  <SelectItem key={wallet} value={wallet} className="cursor-pointer">
+                                    <div className="flex items-center gap-2 w-full">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        {isFirstWallet ? (
+                                          <div className="h-2 w-2 bg-green-500 rounded-full flex-shrink-0" title="Contract Owner" />
+                                        ) : (
+                                          <div className="h-2 w-2 bg-blue-500 rounded-full flex-shrink-0" title="Signer" />
+                                        )}
+                                        <span className="font-medium text-sm truncate flex-1">{displayText}</span>
+                                      </div>
+                                    </div>
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        {/* Separator line */}
+                        <div className="w-px h-5 bg-blue-200 flex-shrink-0"></div>
+                        
+                        {/* Draw boxes button */}
+                        <button
+                          onClick={() => setIsSignatureBoxMode(!isSignatureBoxMode)}
+                          className={`px-3 h-full text-xs font-medium transition-all rounded-none w-34 flex-shrink-0 ${
+                            isSignatureBoxMode 
+                              ? 'bg-red-50 text-red-700 hover:bg-red-100' 
+                              : 'bg-transparent text-gray-700 hover:bg-blue-100'
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-1">
+                            {isSignatureBoxMode ? (
+                              <>
+                                <RotateCcw className="h-3 w-3" />
+                                <span className="whitespace-nowrap">Exit Drawing</span>
+                              </>
+                            ) : (
+                              <>
+                                <Pen className="h-3 w-3" />
+                                <span className="whitespace-nowrap">Draw Signature Boxes</span>
+                              </>
+                            )}
+                          </div>
+                        </button>
+                      </div>
+                      
+                      {/* Signature count indicator */}
+                      {signaturePositions.length > 0 && (
+                        <div className="flex items-center gap-1 text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded-full border border-blue-200">
+                          <MapPin className="h-3 w-3" />
+                          <span className="font-medium">{signaturePositions.length}</span>
+                          <span className="text-blue-600">
+                            {signaturePositions.length === 1 ? 'box' : 'boxes'}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* Separator */}
+                      <div className="w-px h-6 bg-gray-300"></div>
+                    </>
+                  )}
+                  
+                  {/* Standard PDF controls */}
+                  {showDownloadButton && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={downloadPdf} 
+                      className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
+                    >
+                      <Download className="h-3 w-3 mr-1" />
+                      Download
+                    </Button>
+                  )}
+
+                  {showReplaceButton && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={handleReplaceFile} 
+                      className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Replace
+                    </Button>
+                  )}
+                </div>
               </div>
               
-              {/* Right side - ALL controls in one row */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* ✅ ADD: Signature controls FIRST (when in edit mode) */}
-                {signatureMode === 'edit' && signerWallets.length > 0 && (
-                  <>
-                    {/* ✅ ENLARGED: Combined selector + button with increased width for descriptive text */}
-                    <div className="flex items-center h-8 border border-blue-200 rounded-md bg-white hover:bg-blue-50 transition-colors w-80">
-                      {/* ✅ ADJUSTED: Left part - Signer selector with adjusted width */}
-                      <div className="flex-1 min-w-0 w-52">
-                        <Select value={selectedSignerWallet} onValueChange={setSelectedSignerWallet}>
-                          <SelectTrigger className="h-full px-3 text-xs border-0 bg-transparent hover:bg-transparent w-full rounded-none">
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <User className="h-3 w-3 text-blue-600 flex-shrink-0" />
-                              <span className="truncate flex-1 text-left">
-                                {(() => {
-                                  const email = walletEmailMap.get(selectedSignerWallet);
-                                  const displayText = email ? email : `Select Signer`;
-                                  return displayText;
-                                })()}
-                              </span>
-                            </div>
-                          </SelectTrigger>
-                          <SelectContent className="w-84">
-                            {/* ✅ UPDATED: Dropdown width to match container */}
-                            {signerWallets.map((wallet, index) => {
-                              const email = walletEmailMap.get(wallet);
-                              const displayText = email ? email : `Unknown User`;
-                              const isFirstWallet = index === 0;
-                              
-                              return (
-                                <SelectItem key={wallet} value={wallet} className="cursor-pointer">
-                                  <div className="flex items-center gap-2 w-full">
-                                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                                      {isFirstWallet ? (
-                                        <div className="h-2 w-2 bg-green-500 rounded-full flex-shrink-0" title="Contract Owner" />
-                                      ) : (
-                                        <div className="h-2 w-2 bg-blue-500 rounded-full flex-shrink-0" title="Signer" />
-                                      )}
-                                      <span className="font-medium text-sm truncate flex-1">{displayText}</span>
-                                    </div>
-                                  </div>
-                                </SelectItem>
-                              );
-                            })}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      
-                      {/* Separator line */}
-                      <div className="w-px h-5 bg-blue-200 flex-shrink-0"></div>
-                      
-                      {/* ✅ ENLARGED: Right part - Draw boxes button with increased width for descriptive text */}
-                      <button
-                        onClick={() => setIsSignatureBoxMode(!isSignatureBoxMode)}
-                        className={`px-3 h-full text-xs font-medium transition-all rounded-none w-34 flex-shrink-0 ${
-                          isSignatureBoxMode 
-                            ? 'bg-red-50 text-red-700 hover:bg-red-100' 
-                            : 'bg-transparent text-gray-700 hover:bg-blue-100'
-                        }`}
-                      >
-                        <div className="flex items-center justify-center gap-1">
-                          {isSignatureBoxMode ? (
-                            <>
-                              <RotateCcw className="h-3 w-3" />
-                              <span className="whitespace-nowrap">Exit Drawing</span>
-                            </>
-                          ) : (
-                            <>
-                              <Pen className="h-3 w-3" />
-                              <span className="whitespace-nowrap">Draw Signature Boxes </span>
-                            </>
-                          )}
-                        </div>
-                      </button>
-                    </div>
-                    
-                    {/* Enhanced signature count indicator */}
-                    {signaturePositions.length > 0 && (
-                      <div className="flex items-center gap-1 text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded-full border border-blue-200">
-                        <MapPin className="h-3 w-3" />
-                        <span className="font-medium">{signaturePositions.length}</span>
-                        <span className="text-blue-600">
-                          {signaturePositions.length === 1 ? 'box' : 'boxes'}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {/* ✅ ENHANCED: Separator with better styling */}
-                    <div className="w-px h-6 bg-gray-300"></div>
-                  </>
-                )}
-                
-                {/* ✅ UPDATED: Standard PDF controls with original button styling */}
-                {showDownloadButton && (
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    onClick={downloadPdf} 
-                    className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"  // ✅ RESTORED: Original button styling
-                  >
-                    <Download className="h-3 w-3 mr-1" />
-                    Download
-                  </Button>
-                )}
-
-                
-
-                {showReplaceButton && (
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    onClick={handleReplaceFile} 
-                    className="h-8 px-3 text-xs border-blue-200 hover:bg-blue-100"  // ✅ RESTORED: Original button styling
-                  >
-                    <Upload className="h-3 w-3 mr-1" />
-                    Replace
-                  </Button>
-                )}
+              {/* Drawing mode indicator */}
+              {isSignatureBoxMode && (
+                <div className="bg-blue-100 border-b border-blue-200 p-2 text-center">
+                  <div className="flex items-center justify-center gap-2 text-sm text-blue-800">
+                    <Square className="h-4 w-4" />
+                    <span className="font-medium">Drawing Mode Active</span>
+                    <span className="text-xs opacity-75">Click and drag to create signature boxes</span>
+                  </div>
+                </div>
+              )}
+              
+              {/* 🎯 NEW: PrecisionPDFViewer Integration */}
+              <div className="flex-1">
+                <PrecisionPDFViewer
+                  file={decryptedPdfBlob}
+                  isDrawingMode={isSignatureBoxMode && signatureMode === 'edit'}
+                  onBoxDraw={handlePrecisionBoxDraw}
+                  onCoordinateClick={handleCoordinateClick}
+                  overlayBoxes={convertToPrecisionFormat()}
+                  className="w-full h-full"
+                />
               </div>
             </div>
-            
-            {/* ✅ REMOVE: The separate signature box controls card - DELETE IT COMPLETELY */}
-            
-            {/* ✅ OPTIONAL: Drawing mode indicator (if you want to keep it) */}
-            {isSignatureBoxMode && (
-              <div className="bg-blue-100 border-b border-blue-200 p-2 text-center">
-                <div className="flex items-center justify-center gap-2 text-sm text-blue-800">
-                  <Square className="h-4 w-4" />
-                  <span className="font-medium">Drawing Mode Active</span>
-                  <span className="text-xs opacity-75">Click and drag to create signature boxes</span>
+          );
+        }
+        
+        // Cache checking state
+        if (isCheckingCache) {
+          return (
+            <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 rounded-full">
+                  <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 animate-spin" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900">Checking Cache</h3>
+                  <p className="text-xs sm:text-sm text-blue-600">Looking for cached decrypted PDF...</p>
                 </div>
               </div>
-            )}
-            
-            {/* PDF content area */}
-            <div className="flex-1">
-              {/* Your existing PDF rendering code */}
-              <div 
-                className="relative h-full bg-white rounded-lg border border-gray-200 overflow-hidden"
-                onMouseDown={isSignatureBoxMode ? (e) => handleMouseDown(e, 1) : undefined}
-                onMouseMove={isSignatureBoxMode ? handleMouseMove : undefined}
-                onMouseUp={isSignatureBoxMode ? handleMouseUp : undefined}
-                style={{ 
-                  cursor: isSignatureBoxMode ? 'crosshair' : 'default',
-                  minHeight: '600px' 
-                }}
-              >
-                <iframe
-                  id="pdf-iframe" // ✅ ADD: ID for scroll tracking
-                  src={decryptedPdfUrl}
-                  className={`w-full h-full border-0 ${isSignatureBoxMode ? 'pointer-events-none' : 'pointer-events-auto'}`}
-                  title="Decrypted PDF Viewer"
-                  style={{ minHeight: '600px' }}
-                />
-                
-                {/* ✅ UPDATED: Signature boxes overlay - only show when in signature mode */}
-                {isSignatureBoxMode && renderSignatureBoxes(1)}
+            </div>
+          );
+        }
+        
+        // Show AutoDecryptionView if cache check is complete and no cached PDF found
+        if (cacheCheckComplete && !decryptedPdfBlob) {
+          return (
+            <AutoDecryptionView 
+              contract={contract}
+              onDecrypted={(blob) => {
+                handleDecryptionSuccess(blob);
+              }}
+            />
+          );
+        }
+        
+        // Waiting state if cache check hasn't completed yet
+        if (!cacheCheckComplete) {
+          return (
+            <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
+              <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full">
+                  <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-gray-600" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900">Preparing Encrypted PDF</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">Initializing decryption...</p>
+                </div>
               </div>
             </div>
+          );
+        }
+      }
+      
+      // **REGULAR PDF HANDLING** - Only for non-encrypted contracts
+      if (contract.s3FileKey && !isEncrypted && pdfUrl) {
+        return (
+          <div className="h-full bg-gray-100">
+            <PrecisionPDFViewer
+              file={pdfUrl}
+              isDrawingMode={isSignatureBoxMode && signatureMode === 'edit'}
+              onBoxDraw={handlePrecisionBoxDraw}
+              onCoordinateClick={handleCoordinateClick}
+              overlayBoxes={convertToPrecisionFormat()}
+              className="w-full h-full"
+            />
           </div>
         );
       }
       
-      // **NEW: Show cache checking state**
-      if (isCheckingCache) {
-        console.log('[PDFEditor] Showing cache check loading state');
+      // Loading state for regular PDFs
+      if (contract.s3FileKey && !isEncrypted && isLoadingPdf) {
         return (
           <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
             <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
@@ -1114,102 +1463,148 @@ export default function PDFEditor({
                 <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 animate-spin" />
               </div>
               <div className="space-y-2">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Checking Cache</h3>
-                <p className="text-xs sm:text-sm text-blue-600">Looking for cached decrypted PDF...</p>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Loading PDF</h3>
+                <p className="text-xs sm:text-sm text-blue-600">Preparing document for viewing...</p>
               </div>
             </div>
           </div>
         );
       }
       
-      // **UPDATED: Only show AutoDecryptionView if cache check is complete and no cached PDF found**
-      if (cacheCheckComplete && !decryptedPdfBlob) {
-        console.log('[PDFEditor] Cache check complete, no cached PDF found, showing AutoDecryptionView');
-        return (
-          <AutoDecryptionView 
-            contract={contract}
-            onDecrypted={handleDecryptionSuccess}
-          />
-        );
-      }
-      
-      // **NEW: Show waiting state if cache check hasn't completed yet**
-      if (!cacheCheckComplete) {
-        console.log('[PDFEditor] Cache check not complete yet, showing waiting state');
-        return (
-          <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
-            <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-              <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full">
-                <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-gray-600" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Preparing Encrypted PDF</h3>
-                <p className="text-xs sm:text-sm text-gray-600">Initializing decryption...</p>
-              </div>
-            </div>
-          </div>
-        );
-      }
-    }
-    
-    // **REGULAR PDF HANDLING** - Only for non-encrypted contracts
-    if (contract.s3FileKey && !isEncrypted && pdfUrl) {
-      
-      return (
-        <div className="h-full bg-gray-100">
-          <iframe
-            src={pdfUrl}
-            className="w-full h-full border-0"
-            title="PDF Viewer"
-            style={{ minHeight: '400px' }}
-          />
-        </div>
-      );
-    }
-    
-    // **LOADING STATE** for regular PDFs
-    if (contract.s3FileKey && !isEncrypted && isLoadingPdf) {
+      // No PDF uploaded - FALLBACK
       return (
         <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
-          <div className="w-full max-w-sm mx-auto text-center space-y-4 sm:space-y-6">
-            <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 rounded-full">
-              <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 animate-spin" />
-            </div>
+          <div className="w-full max-w-sm mx-auto text-center space-y-4">
+            <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-gray-400" />
             <div className="space-y-2">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900">Loading PDF</h3>
-              <p className="text-xs sm:text-sm text-blue-600">Preparing document for viewing...</p>
+              <h3 className="text-base sm:text-lg font-medium text-gray-900">No PDF uploaded</h3>
+              <p className="text-xs sm:text-sm text-gray-600 px-2">Upload a PDF file to get started</p>
             </div>
           </div>
         </div>
       );
-    }
-    
-    // **NO PDF UPLOADED**
-    
-    return (
-      <div className="h-full flex items-center justify-center bg-white p-3 sm:p-6">
-        <div className="w-full max-w-sm mx-auto text-center space-y-4">
-          <FileText className="h-10 w-10 sm:h-12 sm:w-12 mx-auto text-gray-400" />
-          <div className="space-y-2">
-            <h3 className="text-base sm:text-lg font-medium text-gray-900">No PDF uploaded</h3>
-            <p className="text-xs sm:text-sm text-gray-600 px-2">Upload a PDF file to get started</p>
-          </div>
-          <Button
-            onClick={() => {
-              console.log('[PDFEditor] Upload PDF button clicked');
-              document.getElementById('pdf-file-input')?.click();
-            }}
-            className="w-full sm:w-auto px-6 py-3 text-sm font-medium min-h-[44px] touch-manipulation"
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Upload PDF
-          </Button>
-        </div>
-      </div>
-    );
+    };
+
+    // **SINGLE RETURN** - No early returns!
+    return renderPDFContent();
   };
 
+  // PDFEditor.tsx - Add logging to decryptedPdfBlob state changes
+  useEffect(() => {
+    console.log('[PDFEditor] 📊 BLOB STATE CHANGED:', {
+      hasBlob: !!decryptedPdfBlob,
+      blobSize: decryptedPdfBlob?.size,
+      timestamp: new Date().toISOString(),
+      hasCallback: !!onDecryptedPdfChange
+    });
+    
+    // If we have a blob but haven't notified parent yet, do it now
+    if (decryptedPdfBlob && onDecryptedPdfChange) {
+      console.log('[PDFEditor] 🔄 Re-triggering callback from state change');
+      onDecryptedPdfChange(decryptedPdfBlob);
+    }
+  }, [decryptedPdfBlob]);
 
+  // ✅ ADD: Monitor contract updates and force refresh
+  useEffect(() => {
+    console.log('[PDFEditor] 🔍 Contract prop changed:', {
+      contractId: contract.id,
+      s3FileKey: contract.s3FileKey,
+      s3FileName: contract.s3FileName,
+      s3FileSize: contract.s3FileSize,
+      timestamp: new Date().toISOString()
+    });
+    
+    // If we have cached data but contract file info changed, clear everything
+    if (hasInitialized && contract.s3FileKey) {
+      const currentSignature = `${contract.s3FileKey}-${contract.s3FileSize}`;
+      const previousSignature = sessionStorage.getItem(`contract_signature_${contract.id}`);
+      
+      if (previousSignature && previousSignature !== currentSignature) {
+        console.log('[PDFEditor] 🔄 CONTRACT FILE CHANGED - Force refresh:', {
+          previousSignature,
+          currentSignature,
+          contractId: contract.id
+        });
+        
+        // Clear all cached data
+        if (decryptedPdfUrl) URL.revokeObjectURL(decryptedPdfUrl);
+        setDecryptedPdfBlob(null);
+        setDecryptedPdfUrl(null);
+        setHasInitialized(false);
+        setCacheCheckComplete(false);
+        setIsCheckingCache(false);
+        
+        // Clear cache
+        const clearCache = async () => {
+          try {
+            const { pdfCache } = await import('@/app/utils/pdfCache');
+            await pdfCache.clearDecryptedPDF(contract.id);
+            await pdfCache.clearEncryptedPDF(contract.id);
+          } catch (error) {
+            console.warn('Cache clear failed:', error);
+          }
+        };
+        clearCache();
+      }
+      
+      // Store new signature
+      sessionStorage.setItem(`contract_signature_${contract.id}`, currentSignature);
+    }
+  }, [contract.id, contract.s3FileKey, contract.s3FileName, contract.s3FileSize, hasInitialized, decryptedPdfBlob, decryptedPdfUrl]);
+
+  // Add these handler functions before the return statement in PDFEditor.tsx
+
+  // Convert existing signature positions to PrecisionPDFViewer format
+  const convertToPrecisionFormat = useCallback(() => {
+    return signaturePositions.map((pos, index) => ({
+      ...pos,
+      id: `signature-${index}-${pos.signerWallet}`,
+      label: walletEmailMap.get(pos.signerWallet) || 'Unknown Signer'
+    }));
+  }, [signaturePositions, walletEmailMap]);
+
+  // Handle box drawing from PrecisionPDFViewer
+  const handlePrecisionBoxDraw = useCallback((box: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    pageNumber: number;
+  }) => {
+    if (!selectedSignerWallet) {
+      toast({
+        title: "No Signer Selected",
+        description: "Please select a signer first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const newPosition: SignaturePosition = {
+      signerWallet: selectedSignerWallet,
+      page: box.pageNumber,
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height
+    };
+
+    const updatedPositions = [...signaturePositions, newPosition];
+    setSignaturePositions(updatedPositions);
+    
+    if (onPositionsChange) {
+      onPositionsChange(updatedPositions);
+    }
+
+    console.log('[PDFEditor] New signature box added via PrecisionPDFViewer:', newPosition);
+  }, [selectedSignerWallet, signaturePositions, onPositionsChange, walletEmailMap]);
+
+  // Handle coordinate clicks (for future single-click placement)
+  const handleCoordinateClick = useCallback((coordinate: PDFCoordinate) => {
+    console.log('[PDFEditor] Coordinate clicked:', coordinate);
+    // Could be used for single-click signature placement in the future
+  }, []);
 
   return (
     <div className="border rounded-md min-h-[700px] bg-white relative overflow-hidden">
@@ -1375,6 +1770,9 @@ export default function PDFEditor({
           </div>
         </div>
       )}
+
+      {/* 🔧 PRODUCTION: Debug panel */}
+
     </div>
   );
 } 

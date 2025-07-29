@@ -28,10 +28,7 @@ export async function POST(req: NextRequest) {
       'allowlist-creation' // Use same context as original allowlist creation
     );
     
-    console.log('[AUTH-API] Generated predetermined wallet:', {
-      walletPreview: predeterminedResult.predeterminedAddress.substring(0, 8) + '...',
-      method: predeterminedResult.method
-    });
+    
     
     return NextResponse.json({
       success: true,

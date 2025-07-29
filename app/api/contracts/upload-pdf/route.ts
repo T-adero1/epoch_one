@@ -9,6 +9,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const contractId = formData.get('contractId') as string;
+    const replaceExisting = formData.get('replaceExisting') === 'true';
     
     // New encryption-related fields
     const encryptedBytes = formData.get('encryptedBytes') as string; // base64 encoded
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
     const capId = formData.get('capId') as string;
     const isEncrypted = formData.get('isEncrypted') === 'true';
     
-    // ✅ ADD THIS - Get authorized wallet addresses
+    // Get authorized wallet addresses
     const authorizedUsersStr = formData.get('authorizedUsers') as string;
     const authorizedUsers = authorizedUsersStr ? JSON.parse(authorizedUsersStr) : [];
 
@@ -29,6 +30,18 @@ export async function POST(request: NextRequest) {
     }
 
     let uploadResult;
+
+    if (replaceExisting) {
+      console.log('[API] Replacing existing PDF file', {
+        contractId,
+        isEncrypted
+      });
+    } else {
+      console.log('[API] Uploading new PDF file', {
+        contractId,
+        isEncrypted  
+      });
+    }
     
     if (isEncrypted) {
       // Handle encrypted PDF upload
@@ -50,7 +63,6 @@ export async function POST(request: NextRequest) {
       // Upload encrypted file to S3
       uploadResult = await uploadToS3(encryptedFile, contractId);
 
-      // ✅ UPDATE THIS - Include authorizedUsers in the database update
       const updatedContract = await prisma.contract.update({
         where: { id: contractId },
         data: {
@@ -60,13 +72,11 @@ export async function POST(request: NextRequest) {
           s3FileSize: uploadResult.fileSize,
           s3ContentType: uploadResult.contentType,
           s3UploadedAt: uploadResult.uploadedAt,
-          // Add encryption fields
           sealAllowlistId: allowlistId,
           sealDocumentId: documentId,
           sealCapId: capId,
           isEncrypted: true,
           originalFileName: file?.name || `${contractId}.pdf`,
-          // ✅ ADD THIS - Store authorized wallet addresses
           authorizedUsers: authorizedUsers,
         },
         include: {
@@ -82,12 +92,12 @@ export async function POST(request: NextRequest) {
           allowlistId,
           documentId,
           capId,
-          authorizedUsers // ✅ ADD THIS - Return in response
+          authorizedUsers
         }
       });
       
     } else {
-      // Handle regular PDF upload (original logic)
+      // Handle regular PDF upload
       if (!file) {
         return NextResponse.json(
           { error: 'No file provided' },
@@ -148,4 +158,4 @@ export async function POST(request: NextRequest) {
   } finally {
     await prisma.$disconnect();
   }
-} 
+}

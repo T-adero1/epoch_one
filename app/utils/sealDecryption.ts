@@ -8,9 +8,10 @@ import { genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
 
 interface DecryptionParams {
   contract: any;
-  cachedSessionKey?: SessionKey;
+  cachedSessionKey?: any;
   onProgress?: (progress: number) => void;
   onStepChange?: (step: string) => void;
+  userEmail?: string;  // ✅ OPTIONAL: Only for signer page
 }
 
 interface DecryptionResult {
@@ -25,7 +26,7 @@ interface DecryptionResult {
  * Optimized with SessionKey caching for fast re-decryption
  */
 export async function decryptContractPDF(params: DecryptionParams): Promise<DecryptionResult> {
-  const { contract, cachedSessionKey, onProgress, onStepChange } = params;
+  const { contract, cachedSessionKey, onProgress, onStepChange, userEmail } = params;
 
   console.log('[SEAL_DECRYPT] Starting complete decryption flow for contract:', contract.id);
   
@@ -152,7 +153,8 @@ export async function decryptContractPDF(params: DecryptionParams): Promise<Decr
         sealPackageId: SEAL_PACKAGE_ID,
         ttlMin: TTL_MIN,
         onProgress,
-        onStepChange
+        onStepChange,
+        userEmail: userEmail // Pass userEmail to createNewSessionKey
       });
       
       wasFromCache = false;
@@ -243,9 +245,10 @@ async function createNewSessionKey(params: {
   ttlMin: number;
   onProgress?: (progress: number) => void;
   onStepChange?: (step: string) => void;
+  userEmail?: string; // Add userEmail to the function signature
 }): Promise<SessionKey> {
   
-  const { suiClient, allowlistId, documentId, contractId, sealPackageId, ttlMin } = params;
+  const { suiClient, allowlistId, documentId, contractId, sealPackageId, ttlMin, userEmail } = params;
   
   console.log('[SEAL_DECRYPT] Creating new SessionKey with full authorization...');
 
@@ -270,10 +273,24 @@ async function createNewSessionKey(params: {
     throw new Error('User address or Google ID not found in session');
   }
 
-  // Create contract-specific wallet
-  const { getOrCreateContractWallet } = await import('@/app/utils/contractWallet');
-  const contractWallet = await getOrCreateContractWallet(userGoogleId, contractId, zkLoginState.jwt);
+  // ✅ CHANGE: Extract email from JWT when userEmail is provided
+  let emailForSalt: string | undefined;
+  if (userEmail) {
+    console.log('[SEAL_DECRYPT] Using provided email for salt generation:', userEmail.substring(0, 5) + '...');
+    emailForSalt = userEmail;
+  }
+
+  // ✅ USE EMAIL IF PROVIDED, OTHERWISE FALL BACK TO EXISTING LOGIC
+  const walletIdentifier = emailForSalt || userGoogleId;  // Use email if provided, else Google ID
   
+  // Create contract-specific wallet with email-based flag
+  const { getOrCreateContractWallet } = await import('@/app/utils/contractWallet');
+  const contractWallet = await getOrCreateContractWallet(
+    walletIdentifier, 
+    contractId, 
+    zkLoginState.jwt,
+    !!emailForSalt  // ✅ Use email-based mode when email is provided
+  );
   // Get ephemeral keypair and address
   const ephemeralKeypair = contractWallet.ephemeralKeyPair;
   const ephemeralPublicKeyAddress = ephemeralKeypair.getPublicKey().toSuiAddress();

@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
             console.log(`[API] Generating predetermined wallet for hashed identifier: ${hashedEmail.substring(0, 8)}...`);
             
             // **UPDATED: Use hashed email as the identifier for predetermined wallet generation**
-            const predeterminedResult = generatePredeterminedWalletForAllowlist(
+            const predeterminedResult = await generatePredeterminedWalletForAllowlist(
               hashedEmail, // Use hashed email as identifier
               contractId, 
               'allowlist-creation'

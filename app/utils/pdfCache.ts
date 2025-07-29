@@ -261,31 +261,7 @@ class PDFCache {
     });
   }
 
-  // **UPDATED: Decrypted PDF Management with improved error handling**
-  async storeDecryptedPDF(
-    contractId: string,
-    decryptedData: Uint8Array,
-    fileName: string
-  ): Promise<void> {
-    const cachedDecryptedPDF: CachedDecryptedPDF = {
-      contractId,
-      decryptedData,
-      fileName,
-      fileSize: decryptedData.length,
-      cachedAt: Date.now()
-    };
 
-    return this.executeTransaction(this.decryptedPdfStoreName, 'readwrite', (store) => {
-      return new Promise<void>((resolve, reject) => {
-        const request = (store as IDBObjectStore).put(cachedDecryptedPDF);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          console.log('[PDF_CACHE] Stored decrypted PDF for contract:', contractId, `(${(decryptedData.length / 1024).toFixed(1)} KB)`);
-          resolve();
-        };
-      });
-    });
-  }
 
   async getDecryptedPDF(contractId: string): Promise<CachedDecryptedPDF | null> {
     return this.executeTransaction(this.decryptedPdfStoreName, 'readonly', (store) => {
@@ -391,6 +367,19 @@ class PDFCache {
             console.log('[PDF_CACHE] No cached encrypted PDF found for contract:', contractId);
             resolve(null);
           }
+        };
+      });
+    });
+  }
+
+  async clearEncryptedPDF(contractId: string): Promise<void> {
+    return this.executeTransaction(this.pdfStoreName, 'readwrite', (store) => {
+      return new Promise<void>((resolve, reject) => {
+        const request = (store as IDBObjectStore).delete(contractId);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          console.log('[PDF_CACHE] Cleared encrypted PDF for contract:', contractId);
+          resolve();
         };
       });
     });

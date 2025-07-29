@@ -172,7 +172,8 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { id, title, description, content, status, metadata } = body;
+    //  ADD: Extract signaturePositions from request body
+    const { id, title, description, content, status, metadata, signaturePositions } = body;
 
     log.info('Updating contract', { id, status });
 
@@ -192,6 +193,7 @@ export async function PUT(request: Request) {
           content,
           status,
           metadata,
+          signaturePositions,  // ADD: Include signaturePositions in update
         },
         include: {
           signatures: true
