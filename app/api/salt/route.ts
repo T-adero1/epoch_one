@@ -15,8 +15,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     console.log('[SALT API] Successfully parsed request body');
     
-    const { token } = body;
+    const { token, useEmailAsSub } = body;
     console.log('[SALT API] Token present in request:', !!token);
+    console.log('[SALT API] Use email as sub:', !!useEmailAsSub);
     
     if (!token) {
       return NextResponse.json({ error: 'Token is required' }, { status: 400 });
@@ -53,9 +54,15 @@ export async function POST(request: Request) {
     const sub = payload.sub;
     const iss = payload.iss;
     const aud = payload.aud;
+    const email = payload.email;
     
     if (!sub || !iss || !aud) {
       return NextResponse.json({ error: 'Missing required JWT claims' }, { status: 400 });
+    }
+    
+    // If useEmailAsSub flag is set, validate email exists
+    if (useEmailAsSub && !email) {
+      return NextResponse.json({ error: 'Email claim required when useEmailAsSub is true' }, { status: 400 });
     }
     
     // Check master seed
@@ -63,10 +70,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
     
-    // Prepare HKDF inputs
-    const info = Buffer.from(sub);
+    // Prepare HKDF inputs - use email as subject if requested
+    const subjectForSalt = useEmailAsSub ? email : sub;
+    const info = Buffer.from(subjectForSalt);
     const audValue = typeof aud === 'string' ? aud : Array.isArray(aud) ? aud[0] : '';
     const salt = Buffer.from(`${iss}:${audValue}`);
+    
+    console.log('[SALT API] Using subject for salt generation:', useEmailAsSub ? 'email' : 'google_user_id');
     
     // Compute the salt - FIX HERE
     console.log('[SALT API] Running HKDF...');
