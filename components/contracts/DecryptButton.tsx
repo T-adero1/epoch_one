@@ -208,6 +208,10 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
     console.log("[DecryptButton] Current decryption step:", decryptionStep);
   }, [decryptionStep]);
 
+  useImperativeHandle(ref, () => ({
+    handleDecrypt
+  }));
+
   // Fetch detailed contract data when needed
   const fetchContractDetails = async () => {
     console.log("[DecryptButton] Fetching contract details from database");
@@ -695,11 +699,6 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
     ephemeralAddress
   });
   
-  // Expose handleDecrypt through ref
-  useImperativeHandle(ref, () => ({
-    handleDecrypt
-  }));
-
   return (
     <div className="flex flex-col gap-2">
       <Button
@@ -726,5 +725,7 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
     </div>
   );
 });
+
+DecryptButton.displayName = 'DecryptButton';
 
 export default DecryptButton;

@@ -8,74 +8,58 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(cuid())
-  email         String        @unique
-  walletAddress String        @unique
+  email         String   @unique
+  walletAddress String   @id @unique
   name          String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  googleId      String?       @unique
-  contracts     Contract[]    @relation("ContractOwner")
-  signatures    Signature[]
-  settings      UserSettings?
-}
-
-model UserSettings {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  theme         String   @default("light")
-  notifications Boolean  @default(true)
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  user          User     @relation(fields: [userId], references: [id])
 }
 
 model Contract {
-  id              String         @id @default(cuid())
-  title           String
-  description     String?
-  content         String?
-  status          ContractStatus @default(DRAFT)
-  ownerId         String
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  expiresAt       DateTime?
-  metadata        Json?
-  allowlistId     String?
-  authorizedUsers String[]
-  documentId      String?
-  encryptionInfo  Json?
-  networkInfo     String?
-  walrusBlobId    String?
-  startDate       DateTime?
-  endDate         DateTime?
-  
-  // New AWS S3 fields
-  s3FileKey       String?        // S3 object key
-  s3Bucket        String?        // S3 bucket name
-  s3FileName      String?        // Original filename
-  s3FileSize      Int?           // File size in bytes
-  s3ContentType   String?        // MIME type
-  s3UploadedAt    DateTime?      // Upload timestamp
-  
-  owner           User           @relation("ContractOwner", fields: [ownerId], references: [id])
-  signatures      Signature[]
+  id                String         @id @default(cuid())
+  title             String
+  description       String?
+  content           String?
+  status            ContractStatus @default(DRAFT)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  expiresAt         DateTime?
+  metadata          Json?
+  signaturePositions  Json?  
+  authorizedUsers   String[]
+  documentId        String?
+  encryptionInfo    Json?
+  endDate           DateTime?
+  networkInfo       String?
+  startDate         DateTime?
+  walrusBlobId      String?
+  s3Bucket          String?
+  s3ContentType     String?
+  s3FileKey         String?
+  s3FileName        String?
+  s3FileSize        Int?
+  s3UploadedAt      DateTime?
+  isEncrypted       Boolean        @default(false)
+  originalFileName  String?
+  sealAllowlistId   String?
+  sealCapId         String?
+  sealDocumentId    String?
+  ownerGoogleIdHash String
+  signatures        Signature[]
 }
 
 model Signature {
-  id            String          @id @default(cuid())
-  contractId    String
-  userId        String
-  signedAt      DateTime?
-  status        SignatureStatus @default(PENDING)
-  walletAddress String
-  signature     String?         // Base64 signature image
-  zkLoginData   Json?           // NEW: zkLogin signature data
-  email         String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  contract      Contract        @relation(fields: [contractId], references: [id])
-  user          User            @relation(fields: [userId], references: [id])
+  id               String          @id @default(cuid())
+  contractId       String
+  signedAt         DateTime?
+  status           SignatureStatus @default(PENDING)
+  walletAddress    String
+  signature        String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  email            String?
+  zkLoginData      Json?
+  userGoogleIdHash String
+  contract         Contract        @relation(fields: [contractId], references: [id])
 }
 
 enum ContractStatus {

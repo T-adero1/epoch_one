@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 
@@ -17,7 +17,8 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
   const prevAuthState = useRef({ isAuthenticated, isLoading, isAuthStateResolved });
   const redirectAttempted = useRef(false);
   const mountTime = useRef(Date.now());
-  const redirectTimeout = useRef<NodeJS.Timeout | null>(null);
+  // ✅ FIX: Change type to handle both browser and Node.js setTimeout return types
+  const redirectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Log when auth state changes
   useEffect(() => {

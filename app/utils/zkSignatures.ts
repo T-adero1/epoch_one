@@ -27,9 +27,9 @@ export async function createSHA256Hash(input: string | Uint8Array): Promise<stri
 export async function signData(data: string, ephemeralKeyPair: Ed25519Keypair): Promise<string> {
   const dataBytes = new TextEncoder().encode(data);
   const signature = await ephemeralKeyPair.signPersonalMessage(dataBytes);
-  return Array.from(signature.signature)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+  
+  // ✅ FIX: signature.signature is already a string, just return it
+  return signature.signature;
 }
 
 export function getSignableContractContent(contract: any): string {

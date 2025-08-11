@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Dialog, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cn } from "@/lib/utils"
-import { setCookie, getCookie } from 'cookies-next'
+import { getCookie } from 'cookies-next'
 
 const PASSWORD_COOKIE = 'site-password-verified'
 
@@ -72,7 +72,7 @@ export function PasswordProtection({ children }: { children: React.ReactNode }) 
         setError(data.message || 'Incorrect password')
       }
     } catch (err) {
-      setError('Something went wrong. Please try again.')
+      setError(`Something went wrong. Please try again. ${err}`)
     }
   }
 

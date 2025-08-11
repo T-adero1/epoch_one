@@ -7,6 +7,8 @@ import { FaGoogle, FaShieldAlt, FaClock, FaExclamationTriangle } from 'react-ico
 import { HiOutlineSparkles } from 'react-icons/hi';
 import Link from 'next/link';
 
+// Add testmode flag
+const TESTMODE_ENABLED = process.env.NEXT_PUBLIC_TESTMODE === 'true';
 
 // Performance tracking helper
 const perf = {
@@ -32,7 +34,7 @@ const perf = {
 };
 
 // Simplify extract JWT function with better logging
-export function extractJwtFromUrl(): string | null {
+function extractJwtFromUrl(): string | null {
   if (typeof window === 'undefined') return null;
 
   try {
@@ -78,6 +80,7 @@ export function extractJwtFromUrl(): string | null {
 // Create a client component that uses useSearchParams
 function HomePageContent() {
   console.log('[PAGE:LIFECYCLE] HomePageContent - Component function execution started');
+  console.log('[PAGE:TESTMODE] Testmode enabled:', TESTMODE_ENABLED);
   const mountTimeRef = useRef(performance.now());
   const renderCountRef = useRef(0);
   const [renderPhase, setRenderPhase] = useState('mounting');
@@ -192,12 +195,13 @@ function HomePageContent() {
   }, [searchParams]);
 
   // =============================================================================
-  // COMMENTED OUT FOR COMING SOON - UNCOMMENT TO RESTORE FUNCTIONALITY
+  // AUTHENTICATION LOGIC - ENABLED WHEN TESTMODE IS TRUE
   // =============================================================================
 
   // Check for JWT token in URL (from OAuth callback)
-  /*
   useEffect(() => {
+    if (!TESTMODE_ENABLED) return;
+    
     const checkForJwt = async () => {
       // Prevent duplicate processing
       const processingKey = 'processing_jwt_login';
@@ -249,11 +253,11 @@ function HomePageContent() {
     
     checkForJwt();
   }, [completeLogin]);
-  */
 
   // If already authenticated, redirect to dashboard
-  /*
   useEffect(() => {
+    if (!TESTMODE_ENABLED) return;
+    
     if (isAuthenticated && !isLoading) {
       // Check for the stored redirect path first
       const storedRedirectPath = localStorage.getItem('zkLoginRedirectPath');
@@ -271,11 +275,14 @@ function HomePageContent() {
       router.push('/dashboard');
     }
   }, [isAuthenticated, isLoading, router]);
-  */
 
   // Handle Google login click with improved logging
-  /*
   const handleGoogleLoginClick = useCallback(async () => {
+    if (!TESTMODE_ENABLED) {
+      console.log('[LOGIN] Login disabled - Coming Soon mode');
+      return;
+    }
+    
     console.log('[LOGIN] Starting Google OAuth login flow');
     setLoginAnimation(true);
     
@@ -310,17 +317,17 @@ function HomePageContent() {
       setLoginAnimation(false);
     }
   }, [setLoginAnimation, startLogin, setStatusMessage]);
-  */
 
   // =============================================================================
   // COMING SOON TEMPORARY FUNCTIONALITY - REMOVE WHEN RESTORING ABOVE
   // =============================================================================
 
   // Temporary disabled login handler for coming soon
-  const handleGoogleLoginClick = useCallback(() => {
-    console.log('[LOGIN] Login disabled - Coming Soon mode');
-    // Do nothing - login is disabled
-  }, []);
+  // This block is now redundant as the logic is moved into the TESTMODE_ENABLED check
+  // const handleGoogleLoginClick = useCallback(() => {
+  //   console.log('[LOGIN] Login disabled - Coming Soon mode');
+  //   // Do nothing - login is disabled
+  // }, []);
 
   // Display error if any
   useEffect(() => {
@@ -343,90 +350,80 @@ function HomePageContent() {
   }, [loginAnimation, isLoading, renderPhase]);
 
   // =============================================================================
-  // COMMENTED OUT FOR COMING SOON - UNCOMMENT TO RESTORE FUNCTIONALITY
+  // BUTTON AND UI CONTENT - CONDITIONAL BASED ON TESTMODE
   // =============================================================================
 
   // Memoize button text for better performance
-  /*
-  const buttonText = useMemo(() => 
-    isLoading ? 'Connecting...' : 'Continue with Google', 
-    [isLoading]
-  );
+  const buttonText = useMemo(() => {
+    if (TESTMODE_ENABLED) {
+      return isLoading ? 'Connecting...' : 'Continue with Google';
+    }
+    return 'Coming Soon!';
+  }, [isLoading]);
   
-  // Memoize the Google login button to prevent re-renders
+  // Memoize the login button to prevent re-renders
   const loginButton = useMemo(() => {
-    console.log('[PAGE:BUTTON] Creating Google login button');
     const buttonCreationTime = performance.now() - mountTimeRef.current;
     
-    const button = (
-      <button
-        onClick={handleGoogleLoginClick}
-        disabled={isLoading || loginAnimation}
-        className={`
-          w-full flex items-center justify-center py-3.5 px-4
-          text-sm font-medium rounded-lg
-          transition-all duration-300 ease-in-out
-          ${loginAnimation ? 'bg-green-600' : 'bg-blue-600 hover:bg-blue-700'} 
-          text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
-          disabled:opacity-50 disabled:cursor-not-allowed
-          relative overflow-hidden shadow-md
-        `}
-      >
-        <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 ${loginAnimation ? 'opacity-100' : 'opacity-0'}`}>
-          <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-        </div>
-        
-        <div className={`flex items-center transition-opacity duration-200 ${loginAnimation ? 'opacity-0' : 'opacity-100'}`}>
-          <FaGoogle className="h-4 w-4 mr-2" />
-          <span>{buttonText}</span>
-        </div>
-      </button>
-    );
-    
-    console.log(`[PAGE:BUTTON] Google login button created after ${Math.round(buttonCreationTime)}ms from mount`);
-    return button;
+    if (TESTMODE_ENABLED) {
+      console.log('[PAGE:BUTTON] Creating Google login button (testmode)');
+      const button = (
+        <button
+          onClick={handleGoogleLoginClick}
+          disabled={isLoading || loginAnimation}
+          className={`
+            w-full flex items-center justify-center py-3.5 px-4
+            text-sm font-medium rounded-lg
+            transition-all duration-300 ease-in-out
+            ${loginAnimation ? 'bg-green-600' : 'bg-blue-600 hover:bg-blue-700'} 
+            text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500
+            disabled:opacity-50 disabled:cursor-not-allowed
+            relative overflow-hidden shadow-md
+          `}
+        >
+          <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 ${loginAnimation ? 'opacity-100' : 'opacity-0'}`}>
+            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </div>
+          
+          <div className={`flex items-center transition-opacity duration-200 ${loginAnimation ? 'opacity-0' : 'opacity-100'}`}>
+            <FaGoogle className="h-4 w-4 mr-2" />
+            <span>{buttonText}</span>
+          </div>
+        </button>
+      );
+      
+      console.log(`[PAGE:BUTTON] Google login button created after ${Math.round(buttonCreationTime)}ms from mount`);
+      return button;
+    } else {
+      console.log('[PAGE:BUTTON] Creating disabled Coming Soon button');
+      const button = (
+        <button
+          onClick={handleGoogleLoginClick}
+          disabled={true}
+          className={`
+            w-full flex items-center justify-center py-3.5 px-4
+            text-sm font-medium rounded-lg
+            transition-all duration-300 ease-in-out
+            bg-gray-400 cursor-not-allowed
+            text-white focus:outline-none
+            disabled:opacity-75
+            relative overflow-hidden shadow-md
+          `}
+        >
+          <div className={`flex items-center`}>
+            <FaClock className="h-4 w-4 mr-2" />
+            <span>{buttonText}</span>
+          </div>
+        </button>
+      );
+      
+      console.log(`[PAGE:BUTTON] Coming Soon button created after ${Math.round(buttonCreationTime)}ms from mount`);
+      return button;
+    }
   }, [isLoading, loginAnimation, buttonText, handleGoogleLoginClick]);
-  */
-
-  // =============================================================================
-  // COMING SOON TEMPORARY FUNCTIONALITY - REMOVE WHEN RESTORING ABOVE
-  // =============================================================================
-
-  // Temporary "Coming Soon!" button text
-  const buttonText = useMemo(() => 'Coming Soon!', []);
-  
-  // Temporary disabled login button for coming soon
-  const loginButton = useMemo(() => {
-    console.log('[PAGE:BUTTON] Creating disabled Coming Soon button');
-    const buttonCreationTime = performance.now() - mountTimeRef.current;
-    
-    const button = (
-      <button
-        onClick={handleGoogleLoginClick}
-        disabled={true}
-        className={`
-          w-full flex items-center justify-center py-3.5 px-4
-          text-sm font-medium rounded-lg
-          transition-all duration-300 ease-in-out
-          bg-gray-400 cursor-not-allowed
-          text-white focus:outline-none
-          disabled:opacity-75
-          relative overflow-hidden shadow-md
-        `}
-      >
-        <div className={`flex items-center`}>
-          <FaClock className="h-4 w-4 mr-2" />
-          <span>{buttonText}</span>
-        </div>
-      </button>
-    );
-    
-    console.log(`[PAGE:BUTTON] Coming Soon button created after ${Math.round(buttonCreationTime)}ms from mount`);
-    return button;
-  }, [buttonText, handleGoogleLoginClick]);
 
   // =============================================================================
   // END COMING SOON TEMPORARY FUNCTIONALITY
@@ -498,19 +495,36 @@ function HomePageContent() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4">
       <div className="w-full max-w-md">
         {/* =============================================================================
-            COMING SOON BANNER - REMOVE WHEN RESTORING FUNCTIONALITY
+            COMING SOON BANNER - ONLY SHOW WHEN TESTMODE IS DISABLED
             ============================================================================= */}
-        <div className="mb-6 rounded-lg p-4 bg-gradient-to-r from-purple-500 to-blue-600 text-white text-center shadow-lg">
-          <div className="flex items-center justify-center mb-2">
-            <HiOutlineSparkles className="h-6 w-6 mr-2 animate-pulse" />
-            <h1 className="text-lg font-bold">Coming Soon!</h1>
-            <HiOutlineSparkles className="h-6 w-6 ml-2 animate-pulse" />
+        {!TESTMODE_ENABLED && (
+          <div className="mb-6 rounded-lg p-4 bg-gradient-to-r from-purple-500 to-blue-600 text-white text-center shadow-lg">
+            <div className="flex items-center justify-center mb-2">
+              <HiOutlineSparkles className="h-6 w-6 mr-2 animate-pulse" />
+              <h1 className="text-lg font-bold">Coming Soon!</h1>
+              <HiOutlineSparkles className="h-6 w-6 ml-2 animate-pulse" />
+            </div>
+            <p className="text-sm opacity-90">
+              EpochOne is currently in development. Stay tuned for the official launch!
+            </p>
           </div>
-          <p className="text-sm opacity-90">
-            EpochOne is currently in development. Stay tuned for the official launch!
-          </p>
-        </div>
-        {/* ============================================================================= */}
+        )}
+
+        {/* =============================================================================
+            TESTMODE BANNER - ONLY SHOW WHEN TESTMODE IS ENABLED
+            ============================================================================= */}
+        {TESTMODE_ENABLED && (
+          <div className="mb-6 rounded-lg p-4 bg-gradient-to-r from-orange-500 to-red-600 text-white text-center shadow-lg">
+            <div className="flex items-center justify-center mb-2">
+              <FaExclamationTriangle className="h-5 w-5 mr-2" />
+              <h1 className="text-lg font-bold">Test Mode</h1>
+              <FaExclamationTriangle className="h-5 w-5 ml-2" />
+            </div>
+            <p className="text-sm opacity-90">
+              Authentication is enabled for testing purposes only.
+            </p>
+          </div>
+        )}
 
         {statusMessage.type !== 'none' && (
           <div className={`mb-4 rounded-lg p-4 flex items-start ${
@@ -535,14 +549,17 @@ function HomePageContent() {
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100">
           <div className="p-6 sm:p-8">
             <div className="text-center mb-6 sm:mb-8">
-              {/* COMING SOON: Changed icon color to gray */}
-              <HiOutlineSparkles className="h-10 w-10 text-gray-400 mx-auto mb-4" />
+              {/* Dynamic icon color based on testmode */}
+              <HiOutlineSparkles className={`h-10 w-10 mx-auto mb-4 ${TESTMODE_ENABLED ? 'text-blue-500' : 'text-gray-400'}`} />
               <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">
                 Welcome to EpochOne
               </h2>
-              {/* COMING SOON: Updated subtitle */}
+              {/* Dynamic subtitle based on testmode */}
               <p className="text-gray-500 text-sm sm:text-base">
-                Preview - Authentication will be available soon
+                {TESTMODE_ENABLED 
+                  ? 'Secure authentication with zero-knowledge technology'
+                  : 'Preview - Authentication will be available soon'
+                }
               </p>
             </div>
             
@@ -554,8 +571,9 @@ function HomePageContent() {
                   <div className="w-full border-t border-gray-200"></div>
                 </div>
                 <div className="relative flex justify-center text-sm">
-                  {/* COMING SOON: Changed text */}
-                  <span className="px-2 bg-white text-gray-500">Preview Mode</span>
+                  <span className="px-2 bg-white text-gray-500">
+                    {TESTMODE_ENABLED ? 'Secure Login' : 'Preview Mode'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -563,24 +581,33 @@ function HomePageContent() {
           
           <div className="bg-gray-50 px-6 sm:px-8 py-6 border-t border-gray-100">
             <div className="flex items-start space-x-4">
-              {/* COMING SOON: Changed icon styling to gray */}
-              <div className="flex-shrink-0 bg-gray-100 p-2 rounded-md">
-                <FaShieldAlt className="h-5 w-5 text-gray-500" />
+              {/* Dynamic icon styling based on testmode */}
+              <div className={`flex-shrink-0 p-2 rounded-md ${TESTMODE_ENABLED ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                <FaShieldAlt className={`h-5 w-5 ${TESTMODE_ENABLED ? 'text-blue-600' : 'text-gray-500'}`} />
               </div>
               <div>
-                {/* COMING SOON: Added (Preview) to title and grayed text */}
+                {/* Dynamic title and text based on testmode */}
                 <h3 className="text-sm font-medium text-gray-700">
-                  Enhanced Privacy & Security (Preview)
+                  {TESTMODE_ENABLED 
+                    ? 'Enhanced Privacy & Security'
+                    : 'Enhanced Privacy & Security (Preview)'
+                  }
                 </h3>
                 <div className="mt-1 text-xs text-gray-500">
                   <p>
-                    Our zero-knowledge login system will verify your identity without revealing 
-                    your credentials to the blockchain, ensuring your privacy remains protected.
+                    {TESTMODE_ENABLED 
+                      ? 'Our zero-knowledge login system verifies your identity without revealing your credentials to the blockchain, ensuring your privacy remains protected.'
+                      : 'Our zero-knowledge login system will verify your identity without revealing your credentials to the blockchain, ensuring your privacy remains protected.'
+                    }
                   </p>
                 </div>
                 <div className="mt-3">
-                  {/* COMING SOON: Changed badge to gray */}
-                  <span className="inline-block px-3 py-0.5 text-xs text-gray-600 bg-gray-200 rounded-full">
+                  {/* Dynamic badge based on testmode */}
+                  <span className={`inline-block px-3 py-0.5 text-xs rounded-full ${
+                    TESTMODE_ENABLED 
+                      ? 'text-blue-700 bg-blue-100' 
+                      : 'text-gray-600 bg-gray-200'
+                  }`}>
                     Powered by zkLogin technology
                   </span>
                 </div>

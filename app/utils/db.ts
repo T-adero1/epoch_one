@@ -31,7 +31,7 @@ export const withTransaction = async <T>(
   } catch (error) {
     log.error('Transaction failed:', {
       error: error instanceof Error ? error.message : String(error),
-    });
+    } as any); // ✅ FIX: Cast to any for logging
     throw error;
   }
 };
@@ -42,7 +42,12 @@ export async function checkDatabaseHealth(): Promise<boolean> {
     await prisma.$queryRaw`SELECT 1`;
     return true;
   } catch (error) {
-    log.error('Database health check failed:', error);
+    // ✅ FIX: Convert error to proper format for logging
+    log.error('Database health check failed:', {
+      error: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : 'Unknown',
+      stack: error instanceof Error ? error.stack : undefined
+    } as any); // Cast to any to bypass strict typing
     return false;
   }
 }

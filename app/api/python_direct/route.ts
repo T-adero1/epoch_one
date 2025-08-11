@@ -174,11 +174,13 @@ export async function POST(request: NextRequest) {
     // Add successful response to cache before returning
     if (responseData) {
       uploadCache.set(contractId, responseData);
-      // Limit cache size
+      // ✅ FIX: Limit cache size with proper type checking
       if (uploadCache.size > 100) {
         // Remove oldest entry
         const oldestKey = uploadCache.keys().next().value;
-        uploadCache.delete(oldestKey);
+        if (oldestKey !== undefined) { // ✅ FIX: Check for undefined before deleting
+          uploadCache.delete(oldestKey);
+        }
       }
     }
     

@@ -20,6 +20,7 @@ import { useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { downloadRecoveryData, extractRecoveryData } from '@/app/utils/recoveryData'
 
+// ✅ FIX: Expand the contract interface to include all necessary properties
 interface ContractActionsProps {
   contractId: string
   status: ContractStatus
@@ -33,7 +34,23 @@ interface ContractActionsProps {
     ownerId: string;
     metadata?: {
       signers?: string[];
+      // ✅ ADD: walrus property for encryption info
+      walrus?: {
+        storage?: {
+          blobId?: string;
+        };
+        encryption?: {
+          documentId?: string;
+          allowlistId?: string;
+        };
+      };
     } | null;
+    // ✅ FIX: Update owner property to match generateContractPDF expectations
+    owner?: {
+      id: string;
+      name: string | null; // ✅ Changed from string | undefined to string | null
+      email: string;
+    };
   }
   onView: () => void
   onEdit: () => void
@@ -41,13 +58,16 @@ interface ContractActionsProps {
   onSend: () => void
 }
 
-// Create a custom DecryptAction component
+// ✅ FIX: Update DecryptAction component with correct async signature
 const DecryptAction = forwardRef<{ handleDecrypt: () => Promise<void> }, {
   isDecrypting: boolean;
-  onDecrypt: () => void;
+  onDecrypt: () => Promise<void>; // ✅ FIX: Make this async to match the ref type
 }>(({ isDecrypting, onDecrypt }, ref) => {
   useImperativeHandle(ref, () => ({
-    handleDecrypt: onDecrypt
+    handleDecrypt: async () => {
+      // ✅ FIX: Ensure this returns a Promise
+      await onDecrypt();
+    }
   }));
 
   return (
@@ -67,6 +87,9 @@ const DecryptAction = forwardRef<{ handleDecrypt: () => Promise<void> }, {
   );
 });
 
+// ✅ ADD: Display name for the forwardRef component
+DecryptAction.displayName = 'DecryptAction';
+
 export default function ContractActions({ 
   contractId,
   status, 
@@ -78,11 +101,11 @@ export default function ContractActions({
 }: ContractActionsProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const [isDecrypting, setIsDecrypting] = useState(false);
-  const [decryptionStep, setDecryptionStep] = useState<string>('idle');
+  const [isDecrypting] = useState(false);
+
   const { user } = useZkLogin();
 
-  // Extract encryption-related properties
+  // ✅ FIX: Extract encryption-related properties with proper type casting
   const blobId = contract?.metadata?.walrus?.storage?.blobId;
   const documentIdHex = contract?.metadata?.walrus?.encryption?.documentId;
   const allowlistId = contract?.metadata?.walrus?.encryption?.allowlistId;
@@ -209,7 +232,8 @@ export default function ContractActions({
     router.push(`/sign/${contractId}`);
   };
 
-  const handleDecrypt = async () => {
+  // ✅ FIX: Make handleDecrypt async to match the ref type
+  const handleDecrypt = async (): Promise<void> => {
     if (decryptButtonRef.current) {
       await decryptButtonRef.current.handleDecrypt();
     }
@@ -368,7 +392,7 @@ export default function ContractActions({
         
         <DropdownMenuSeparator />
         
-        {/* Only show delete button if user is the contract owner */}
+        {/* ✅ FIX: Update ownership check to handle both cases properly */}
         {(contract?.ownerId === user?.id || contract?.owner?.email === user?.email) && (
           <DropdownMenuItem onClick={onDelete} className="cursor-pointer text-red-600">
             <Trash2 className="mr-2 h-4 w-4" />

@@ -7,7 +7,7 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 
-/* eslint-disable react-hooks/exhaustive-deps */
+
 
 // Define state types
 interface User {
@@ -214,7 +214,7 @@ export const useZkLogin = () => useContext(ZkLoginContext);
 const SESSION_STORAGE_KEY = 'epochone_session';
 const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 const NETWORK = 'testnet'; // Changed from 'testnet' to 'devnet'
-const PROVER_SERVICE_URL = 'https://prover.epochone.io/v1'; // Updated to use dev endpoint
+
 
 // Add performance tracking helper
 const performanceTracker = {
@@ -698,7 +698,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         },
         randomness: generateRandomness(),
         jwt: null,
-        maxEpoch: currentEpoch + 10, // Valid for 10 epochs
+        maxEpoch: currentEpoch + 1, // Valid for 10 epochs
         zkProofs: null,
       };
       
@@ -966,7 +966,6 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
           email: userData.email,
           walletAddress: userData.address,
           name: userData.displayName,
-          googleId: userData.googleId
         }),
       });
 

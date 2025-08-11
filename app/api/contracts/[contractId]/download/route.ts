@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
 
 // List of potential working Walrus testnet aggregators
 const TESTNET_AGGREGATORS = [
@@ -53,13 +51,13 @@ const TESTNET_AGGREGATORS = [
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
-    // Fix for NextJS warning - properly await params.contractId
-    const contractId = await params.contractId;
+    // ✅ FIXED: Properly await the params Promise
+    const { contractId } = await params;
     const body = await request.json();
-    const { blobId, allowlistId, documentIdHex } = body;
+    const { blobId } = body;
 
     // Validate request parameters
     if (!blobId) {

@@ -4,10 +4,10 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Check, X, Plus, Minus, Edit3, ChevronDown, ChevronRight } from 'lucide-react'
-import { TextChange } from '@/app/utils/textDiff'
+import { LineChange } from '@/app/utils/textDiff'
 
 interface AIChangesReviewProps {
-  changes: TextChange[];
+  changes: LineChange[];
   onAcceptChange: (changeId: string) => void;
   onRejectChange: (changeId: string) => void;
   onAcceptAll: () => void;
@@ -137,21 +137,21 @@ export default function AIChangesReview({
                   <div className="text-sm">
                     {change.type === 'deletion' && (
                       <div className="bg-red-100 border border-red-200 rounded p-2 mb-2">
-                        <span className="text-red-800 line-through">"{change.originalText}"</span>
+                        <span className="text-red-800 line-through">"{change.originalLine}"</span>
                       </div>
                     )}
                     {change.type === 'addition' && (
                       <div className="bg-green-100 border border-green-200 rounded p-2 mb-2">
-                        <span className="text-green-800">+ "{change.newText}"</span>
+                        <span className="text-green-800">+ "{change.newLine}"</span>
                       </div>
                     )}
                     {change.type === 'modification' && (
                       <div className="space-y-1">
                         <div className="bg-red-100 border border-red-200 rounded p-2">
-                          <span className="text-red-800 line-through">- "{change.originalText}"</span>
+                          <span className="text-red-800 line-through">- "{change.originalLine}"</span>
                         </div>
                         <div className="bg-green-100 border border-green-200 rounded p-2">
-                          <span className="text-green-800">+ "{change.newText}"</span>
+                          <span className="text-green-800">+ "{change.newLine}"</span>
                         </div>
                       </div>
                     )}
@@ -160,7 +160,7 @@ export default function AIChangesReview({
                   {/* Expanded details */}
                   {isExpanded && (
                     <div className="mt-2 pt-2 border-t border-gray-200 text-xs text-gray-600">
-                      <div>Position: {change.startIndex}-{change.endIndex}</div>
+                      <div>Line: {change.lineNumber}</div>
                       <div>Change ID: {change.id}</div>
                     </div>
                   )}

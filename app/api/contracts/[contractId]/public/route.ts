@@ -5,16 +5,16 @@ import { log } from '@/app/utils/logger';
 // GET /api/contracts/[contractId]/public - Get basic public info about a contract
 export async function GET(
   request: Request,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
-    const contractId = params.contractId;
-    
+    const { contractId } = await params;
+
     log.info('Fetching public contract info', { 
       contractId,
       requestUrl: request.url,
       method: request.method,
-      headers: Object.fromEntries(request.headers.entries())
+      headers: JSON.stringify(Object.fromEntries(request.headers.entries()))
     });
     
     const contract = await prisma.contract.findUnique({
@@ -39,14 +39,15 @@ export async function GET(
     }
     
     // Only return the signers information for the public endpoint
-    const signers = contract.metadata?.signers || [];
+    const metadata = (contract.metadata ?? {}) as Record<string, unknown>;
+    const signers = Array.isArray(metadata.signers) ? (metadata.signers as string[]) : [];
     
     log.info('Successfully fetched public contract info', { 
       contractId,
       title: contract.title,
       status: contract.status,
       signerCount: signers.length,
-      signers
+      signers: JSON.stringify(signers)
     });
     
     return NextResponse.json({ 
@@ -54,10 +55,11 @@ export async function GET(
       signers
     });
   } catch (error) {
+    const cid = (await params).contractId; // safe for logging
     log.error('Error fetching public contract info', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      contractId: params.contractId,
+      contractId: cid,
       requestPath: request.url
     });
     return NextResponse.json(

@@ -31,7 +31,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
         userEmail: user?.email || 'none'
       }
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); 
 
   // Check if user is using the right email if required
   useEffect(() => {
@@ -43,7 +43,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
     });
 
     if (isAuthenticated && user?.email && requiredEmail && user.email.toLowerCase() !== requiredEmail.toLowerCase()) {
-      const errorMsg = `This document must be signed with ${requiredEmail}. Please sign out and sign in with the correct email.`;
+      const errorMsg = `This document must be signed with the authorized email address. Please sign out and sign in with the correct email.`;
       console.log('[SignZkLoginModal] Email mismatch:', {
         userEmail: user.email,
         requiredEmail,
@@ -54,7 +54,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
       console.log('[SignZkLoginModal] User authenticated successfully with correct email:', user.email);
       setError(null);
     }
-  }, [isAuthenticated, user?.email, requiredEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.email, requiredEmail]);
 
   // Track when modal opens/closes
   useEffect(() => {
@@ -65,7 +65,7 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
         isLoading
       }
     });
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]); 
 
   const handleLoginClick = useCallback(async () => {
     try {
@@ -151,23 +151,30 @@ export function SignZkLoginModal({ open, onOpenChange, requiredEmail }: SignZkLo
     }
   }, [open, isAuthenticated, error, onOpenChange]);
 
+  // Only hide close button when showing generic message (no requiredEmail)
+  const shouldHideCloseButton = !requiredEmail && !isAuthenticated && !error;
+
   // Log render state
   console.log('[SignZkLoginModal] Rendering with state:', {
     open,
     isLoading,
     isAuthenticated,
     hasError: !!error,
-    errorMessage: error
+    errorMessage: error,
+    requiredEmail,
+    shouldHideCloseButton
   });
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md" hideCloseButton={!isAuthenticated && !error}>
+      <DialogContent 
+        className={`sm:max-w-md ${shouldHideCloseButton ? '[&>button]:hidden' : ''}`}
+      >
         <DialogHeader>
           <DialogTitle>Sign in to view and sign document</DialogTitle>
           <DialogDescription>
             {requiredEmail 
-              ? `Please sign in with ${requiredEmail} to access this document.`
+              ? `Please sign in with the authorized email address to access this document.`
               : 'Authentication is required to view and sign this document.'}
           </DialogDescription>
         </DialogHeader>
