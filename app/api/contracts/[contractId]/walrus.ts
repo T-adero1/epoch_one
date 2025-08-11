@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { logger } from '@/lib/logger';
+import { prisma } from '@/app/utils/db';
 
 export async function POST(
   req: NextRequest,
@@ -10,7 +9,7 @@ export async function POST(
     const contractId = params.contractId;
     const walrusData = await req.json();
     
-    logger.info('Updating contract with Walrus data', {
+    console.log('Updating contract with Walrus data:', {
       contractId, 
       walrusDataKeys: Object.keys(walrusData)
     });
@@ -19,11 +18,7 @@ export async function POST(
     const contract = await prisma.contract.findUnique({
       where: { id: contractId },
       include: { 
-        signatures: {
-          include: {
-            user: true
-          }
-        } 
+        signatures: true
       }
     });
 
@@ -32,7 +27,7 @@ export async function POST(
     }
 
     // Get existing metadata or initialize empty object
-    const existingMetadata = contract.metadata || {};
+    const existingMetadata = contract.metadata as Record<string, any> || {};
 
     // Create updated metadata object
     const updatedMetadata = {
@@ -40,7 +35,7 @@ export async function POST(
       walrus: walrusData,
       walrusUploaded: true,
       authorizedWallets: contract.signatures
-        .map(sig => sig.walletAddress)
+        .map((sig: any) => sig.walletAddress)
         .filter(Boolean)
     };
 
@@ -50,16 +45,14 @@ export async function POST(
       data: { metadata: updatedMetadata }
     });
 
-    logger.info('Contract updated with Walrus data', {
+    console.log('Contract updated with Walrus data:', {
       contractId,
       blobId: walrusData.blobId
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    logger.error('Error updating contract with Walrus data', {
-      error: error instanceof Error ? error.message : String(error)
-    });
+    console.error('Error updating contract with Walrus data:', error);
     return NextResponse.json({ error: 'Failed to update contract' }, { status: 500 });
   }
 }

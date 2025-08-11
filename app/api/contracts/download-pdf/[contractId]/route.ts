@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
     const { contractId } = await params;
@@ -21,7 +21,7 @@ export async function GET(
         s3FileKey: true,
         s3FileName: true,
         s3ContentType: true,
-        ownerGoogleIdHash: true, // Fixed: was ownerId, now ownerGoogleIdHash
+        ownerGoogleIdHash: true,
       },
     });
 
@@ -46,12 +46,12 @@ export async function GET(
       return new NextResponse(fileBuffer, {
         headers: {
           'Content-Type': contract.s3ContentType || 'application/pdf',
-          'Content-Disposition': 'inline', // Display in browser
-          'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
+          'Content-Disposition': 'inline',
+          'Cache-Control': 'private, max-age=3600',
         },
       });
     } else {
-      // Return signed URL for download (existing behavior)
+      // Return signed URL for download
       const viewUrl = await getS3ViewUrl(contract.s3FileKey);
 
       return NextResponse.json({

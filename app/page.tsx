@@ -34,7 +34,7 @@ const perf = {
 };
 
 // Simplify extract JWT function with better logging
-export function extractJwtFromUrl(): string | null {
+function extractJwtFromUrl(): string | null {
   if (typeof window === 'undefined') return null;
 
   try {

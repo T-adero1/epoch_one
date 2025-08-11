@@ -53,6 +53,19 @@ interface OriginalValues {
   signers: string[];
 }
 
+// ✅ FIX: Enhanced helper type for contract metadata with proper typing
+interface ContractMetadata {
+  signers?: string[];
+  walrus?: {
+    encryption?: {
+      allowlistId?: string;
+      documentId?: string;
+      capId?: string;
+    };
+  };
+  [key: string]: any;
+}
+
 // Add this helper function at the top of the component
 function isSpacingOnlyChange(group: ChangeGroup): boolean {
   const filteredOriginal = group.originalLines.filter(line => line.trim() !== '');
@@ -72,6 +85,23 @@ function areEmailsEncrypted(emails: string[]): boolean {
            !email.includes('@') && 
            /^[A-Za-z0-9+/=]+$/.test(email);
   });
+}
+
+// ✅ FIX: Helper function to safely get contract metadata with proper type casting
+function getContractMetadata(contract: ContractWithRelations): ContractMetadata {
+  if (!contract.metadata) return {};
+  
+  if (typeof contract.metadata === 'object' && contract.metadata !== null && !Array.isArray(contract.metadata)) {
+    return contract.metadata as ContractMetadata;
+  }
+  
+  return {};
+}
+
+// ✅ FIX: Helper function to safely get signers from metadata using the typed helper
+function getSignersFromMetadata(contract: ContractWithRelations): string[] {
+  const metadata = getContractMetadata(contract);
+  return metadata.signers || [];
 }
 
 export default function ContractEditor({ 
@@ -101,7 +131,7 @@ export default function ContractEditor({
     content: contract.content || '',
     title: contract.title || '',
     description: contract.description || '',
-    signers: contract.metadata?.signers || []
+    signers: getSignersFromMetadata(contract) // ✅ FIX: Use helper function
   })
   
   // State to track if any changes have been made
@@ -161,7 +191,7 @@ export default function ContractEditor({
   // **NEW: Auto-decrypt emails if user is owner and emails are encrypted**
   useEffect(() => {
     const autoDecryptSigners = async () => {
-      const contractSigners = contract.metadata?.signers || [];
+      const contractSigners = getSignersFromMetadata(contract); // ✅ FIX: Use helper function
       
       if (!contractSigners.length || !canDecryptSigners || signersDecrypted) return;
       
@@ -193,7 +223,7 @@ export default function ContractEditor({
     };
 
     autoDecryptSigners();
-  }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
+  }, [getSignersFromMetadata(contract), canDecryptSigners, user?.googleId, signersDecrypted]); // ✅ FIX: Use helper function directly
   
   // **UPDATED: Initialize values when contract changes - use decrypted emails when available**
   useEffect(() => {
@@ -205,7 +235,7 @@ export default function ContractEditor({
     // **UPDATED: Use decrypted signers if available, otherwise use original**
     const contractSigners = signersDecrypted && decryptedSigners.length > 0 
       ? decryptedSigners 
-      : contract.metadata?.signers || []
+      : getSignersFromMetadata(contract) // ✅ FIX: Use helper function
       
     setSigners(contractSigners.length ? [...contractSigners] : [''])
     
@@ -216,7 +246,7 @@ export default function ContractEditor({
       description: contract.description || '',
       signers: signersDecrypted && decryptedSigners.length > 0 
         ? decryptedSigners 
-        : contract.metadata?.signers || []
+        : getSignersFromMetadata(contract) // ✅ FIX: Use helper function
     })
     
     setHasChanges(false)
@@ -322,7 +352,7 @@ export default function ContractEditor({
     }, 500); // 500ms debounce
   };
 
-  // ✅ MODIFY: Update save function to include positions
+  // ✅ FIX: Update save function to include positions with proper metadata handling
   const handleSave = async () => {
     // Prevent saving if there are validation errors
     const hasValidationErrors = signerErrors.some(error => error !== '');
@@ -351,6 +381,9 @@ export default function ContractEditor({
       // ✅ FIXED: Use computed logic instead of undefined variable
       const shouldUseDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
       
+      // ✅ FIX: Build metadata object properly with type safety
+      const currentMetadata = getContractMetadata(contract);
+      
       // ✅ UPDATED: Store signature positions in signaturePositions field
       const updatedContract = await updateContract(contract.id, {
         title,
@@ -358,8 +391,8 @@ export default function ContractEditor({
         content,
         signaturePositions: JSON.stringify(signaturePositions), // ✅ Changed from allowlistId
         metadata: {
-          ...contract.metadata,
-          signers: shouldUseDecryptedEmails ? signers : (contract.metadata?.signers || [])
+          ...currentMetadata, // ✅ FIX: Spread the properly typed metadata
+          signers: shouldUseDecryptedEmails ? signers : getSignersFromMetadata(contract) // ✅ FIX: Use helper
         },
       });
 
@@ -532,7 +565,12 @@ export default function ContractEditor({
   useEffect(() => {
     if (contract.signaturePositions) {  // ← Changed from allowlistId
       try {
-        const positions = JSON.parse(contract.signaturePositions) as SignaturePosition[];
+        // ✅ FIX: Ensure signaturePositions is a string before parsing
+        const positionsData = typeof contract.signaturePositions === 'string' 
+          ? contract.signaturePositions 
+          : JSON.stringify(contract.signaturePositions);
+        
+        const positions = JSON.parse(positionsData) as SignaturePosition[];
         setSignaturePositions(positions);
       } catch (error) {
         console.error('Failed to parse signature positions:', error);
@@ -756,7 +794,10 @@ export default function ContractEditor({
               // Show PDF Editor when PDF exists
               <div className="space-y-6">
                 <PDFEditor
-                  contract={contract}
+                  contract={{
+                    ...contract,
+                    metadata: getContractMetadata(contract) // ✅ FIX: Remove 'as any' and use proper typing
+                  }}
                   signatureMode="edit"
                   signerWallets={signerWallets}
                   walletEmailMap={walletEmailMap} // ✅ ADD: Pass email mapping
@@ -1222,7 +1263,7 @@ export default function ContractEditor({
                               body: JSON.stringify({
                                 contractId: contract.id,
                                 contractTitle: title,
-                                ownerName: contract.owner.name || contract.owner.email,
+                                ownerName: user?.email,  // ✅ FIX: Use user from context instead of contract.owner
                                 signerEmails: validSigners,
                               }),
                             });

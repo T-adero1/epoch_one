@@ -9,7 +9,12 @@ const s3Client = new S3Client({
   },
 });
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET;
+
+const BUCKET_NAME = process.env.AWS_S3_BUCKET!;
+
+if (!BUCKET_NAME) {
+  throw new Error('AWS_S3_BUCKET environment variable is required');
+}
 
 interface UploadResult {
   key: string;
@@ -25,7 +30,6 @@ export async function uploadToS3(file: File, contractId: string): Promise<Upload
   try {
     // Generate unique file key
     const timestamp = Date.now();
-    const fileExtension = file.name.split('.').pop();
     const key = `contracts/${contractId}/${timestamp}-${file.name}`;
 
     // Convert file to buffer
@@ -122,6 +126,23 @@ export async function getS3ViewUrl(key: string, expiresIn: number = 3600): Promi
   } catch (error) {
     console.error('S3 signed URL generation error:', error);
     throw new Error(`Failed to generate S3 view URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+export async function getS3DownloadUrl(key: string, fileName?: string, expiresIn: number = 3600): Promise<string> {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      // Force browser to download as attachment; include filename if provided
+      ResponseContentDisposition: `attachment${fileName ? `; filename="${fileName}"` : ''}`,
+    });
+
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+    return signedUrl;
+  } catch (error) {
+    console.error('S3 signed download URL generation error:', error);
+    throw new Error(`Failed to generate S3 download URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

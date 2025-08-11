@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/utils/db';
-import { log } from '@/app/utils/logger';
 
 // GET /api/signatures/pending - Get contracts that need to be signed by a specific email
 export async function GET(request: Request) {
@@ -9,32 +8,20 @@ export async function GET(request: Request) {
     const email = searchParams.get('email');
 
     if (!email) {
-      log.warn('Missing email parameter for pending signatures', {
-        url: request.url,
-        headers: Object.fromEntries(request.headers.entries())
-      });
       return NextResponse.json(
         { error: 'Email parameter is required' },
         { status: 400 }
       );
     }
-
-    log.info('Fetching contracts to sign', { 
-      email,
-      requestUrl: request.url,
-      method: request.method
-    });
     
     // Normalize email to lowercase for case-insensitive comparison
     const normalizedEmail = email.toLowerCase();
-    log.debug('Normalized email for signature search', { originalEmail: email, normalizedEmail });
+
+    // Hash the email to match the schema
+    const { hashGoogleId } = await import('@/app/utils/privacy');
+    const userGoogleIdHash = await hashGoogleId(`email_${normalizedEmail}`);
 
     // Find PENDING contracts where the user's email is in the signers array
-    log.debug('Executing Prisma query for pending signatures', {
-      status: 'PENDING',
-      signerEmail: normalizedEmail
-    });
-    
     const contractsToSign = await prisma.contract.findMany({
       where: {
         status: 'PENDING', // Only include contracts with PENDING status
@@ -47,67 +34,33 @@ export async function GET(request: Request) {
         NOT: {
           signatures: {
             some: {
-              user: {
-                email: {
-                  equals: normalizedEmail,
-                  mode: 'insensitive'
-                }
-              },
+              userGoogleIdHash: userGoogleIdHash, // Use userGoogleIdHash instead of user relation
               status: 'SIGNED'
             }
           }
         }
       },
       include: {
-        owner: {
-          select: {
-            name: true,
-            email: true
-          }
-        },
-        signatures: {
-          include: {
-            user: true
-          }
-        }
+        signatures: true // Remove the problematic user include
       },
       orderBy: {
         updatedAt: 'desc'
       }
     });
 
-    log.info('Found contracts to sign', { 
-      email: normalizedEmail, 
-      count: contractsToSign.length,
-      contractIds: contractsToSign.map(c => c.id)
+    // Transform the response to include useful information
+    const contractsWithDetails = contractsToSign.map(contract => {
+      const metadata = contract.metadata as any;
+      return {
+        ...contract,
+        signerCount: metadata?.signers?.length || 0,
+        signatureCount: contract.signatures?.length || 0
+      };
     });
-    
-    if (contractsToSign.length === 0) {
-      log.debug('No contracts found for signing', {
-        email: normalizedEmail,
-        query: {
-          status: 'PENDING',
-          signerEmail: normalizedEmail
-        }
-      });
-    } else {
-      log.debug('Contract signatures details', {
-        contractsWithSignatures: contractsToSign.map(c => ({
-          id: c.id,
-          title: c.title,
-          signers: c.metadata?.signers || [],
-          signatureCount: c.signatures?.length || 0
-        }))
-      });
-    }
 
-    return NextResponse.json(contractsToSign);
+    return NextResponse.json(contractsWithDetails);
   } catch (error) {
-    log.error('Error fetching contracts to sign', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      email: searchParams?.get('email')
-    });
+    console.error('Error fetching contracts to sign:', error);
     return NextResponse.json(
       { error: 'Failed to fetch contracts' },
       { status: 500 }

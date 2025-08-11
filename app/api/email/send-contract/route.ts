@@ -113,7 +113,7 @@ const generateEmailTemplate = (
     return { subject, htmlContent, textContent };
   };
   
-  export default generateEmailTemplate;
+  
 
 // Send email via Brevo API
 const sendBrevoEmail = async (to: string, subject: string, htmlContent: string, textContent: string) => {
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
         return { email, success: true, messageId: result.messageId };
       } catch (error) {
         console.error(`Failed to send email to ${email}:`, error);
-        return { email, success: false, error: error.message };
+        return { email, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     });
 

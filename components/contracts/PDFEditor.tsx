@@ -1,27 +1,23 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { 
   Download, 
   Upload, 
-  Sparkles, 
   Loader2, 
   Brain, 
   Wand2, 
   FileText, 
   Lightbulb,
-
   RefreshCw,
   AlertTriangle,
   Shield,
-  ExternalLink,
   RotateCcw,
   Pen,
   Square,
   MapPin,
-  Users,
   Trash2,
   User
 } from 'lucide-react'
@@ -70,8 +66,31 @@ interface PDFEditorProps {
   onPositionsChange?: (positions: SignaturePosition[]) => void;
 }
 
+// ✅ FIXED: Create a proper Contract interface instead of using 'any'
+interface Contract {
+  id: string;
+  title: string;
+  s3FileKey?: string | null;
+  s3FileName?: string | null;
+  s3FileSize?: number | null;
+  s3ContentType?: string | null;
+  isEncrypted?: boolean;
+  sealAllowlistId?: string | null;
+  sealDocumentId?: string | null;
+  sealCapId?: string | null;
+  metadata?: {
+    walrus?: {
+      encryption?: {
+        allowlistId?: string;
+        documentId?: string;
+        capId?: string;
+      };
+    };
+  } | null;
+}
+
 // **IMPROVED: More reliable encryption detection**
-const isContractEncrypted = (contract: any): boolean => {
+const isContractEncrypted = (contract: Contract): boolean => {
   // Priority 1: Direct encryption flags
   if (contract.isEncrypted === true) return true;
   if (contract.sealAllowlistId) return true;
@@ -87,80 +106,6 @@ const isContractEncrypted = (contract: any): boolean => {
   return false;
 };
 
-// Add this helper function near the top of the file
-const createOrGetSessionKey = async (allowlistId: string, userAddress: string) => {
-  const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
-    '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
-  const TTL_MIN = 30;
-
-  try {
-    // **UPDATED: Check cache first using allowlistId**
-    const { pdfCache } = await import('@/app/utils/pdfCache');
-    const cachedSessionKeyData = await pdfCache.getSessionKey(allowlistId, userAddress);
-    
-    if (cachedSessionKeyData) {
-      console.log('[PDFEditor] Using cached session key for allowlist:', allowlistId);
-      // Import session key from cache
-      const { SessionKey } = await import('@mysten/seal');
-      const sessionKey = SessionKey.import(cachedSessionKeyData);
-      return sessionKey;
-    }
-
-    console.log('[PDFEditor] Creating new session key for allowlist:', allowlistId);
-    // Create new session key (existing logic)
-    const sessionData = localStorage.getItem("epochone_session");
-    if (!sessionData) {
-      throw new Error("No session data found");
-    }
-    
-    const sessionObj = JSON.parse(sessionData);
-    const zkLoginState = sessionObj.zkLoginState || sessionObj.user.zkLoginState;
-    
-    if (!zkLoginState?.ephemeralKeyPair?.privateKey) {
-      throw new Error("No ephemeral key found");
-    }
-
-    const { bech32 } = await import('bech32');
-    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-    const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
-    const { SessionKey } = await import('@mysten/seal');
-
-    function decodeSuiPrivateKey(suiPrivateKey: string): Uint8Array {
-      if (!suiPrivateKey.startsWith('suiprivkey1')) {
-        throw new Error('Invalid Sui private key format');
-      }
-      const decoded = bech32.decode(suiPrivateKey);
-      const privateKeyBytes = Buffer.from(bech32.fromWords(decoded.words));
-      return new Uint8Array(privateKeyBytes.slice(1)); // Remove flag byte
-    }
-
-    const privateKeyBytes = decodeSuiPrivateKey(zkLoginState.ephemeralKeyPair.privateKey);
-    const ephemeralKeypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
-    const ephemeralAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
-    const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
-
-    const sessionKey = new SessionKey({
-      address: ephemeralAddress,
-      packageId: SEAL_PACKAGE_ID,
-      ttlMin: TTL_MIN,
-      signer: ephemeralKeypair,
-      suiClient: suiClient as any
-    });
-
-    const personalMessage = sessionKey.getPersonalMessage();
-    const signature = await ephemeralKeypair.signPersonalMessage(personalMessage);
-    await sessionKey.setPersonalMessageSignature(signature.signature);
-
-    // **UPDATED: Cache the session key using allowlistId**
-    const exportedSessionKey = sessionKey.export();
-    await pdfCache.storeSessionKey(allowlistId, SEAL_PACKAGE_ID, exportedSessionKey, TTL_MIN, userAddress);
-
-    return sessionKey;
-  } catch (error) {
-    console.error('[PDFEditor] Session key creation failed:', error);
-    throw error;
-  }
-};
 
 export default function PDFEditor({ 
   contract, 
@@ -168,7 +113,6 @@ export default function PDFEditor({
   startWithAI = false,
   showDownloadButton = true,
   showReplaceButton = false,
-  showAIButton = true,
   signatureMode = 'view',
   signerWallets = [],
   walletEmailMap = new Map(), // ✅ ADD: Default empty map
@@ -212,6 +156,106 @@ export default function PDFEditor({
   // ✅ ADD: State to track PDF scroll position
   const [pdfScrollPosition, setPdfScrollPosition] = useState({ x: 0, y: 0 });
 
+  // **UPDATED: Enhanced decryption success handler with cache integration**
+  const handleDecryptionSuccess = useCallback(async (decryptedBlob: Blob) => {
+    console.log('[PDFEditor] PDF decrypted successfully, creating object URL');
+    console.log('[PDFEditor] Decrypted blob size:', decryptedBlob.size);
+    
+    // Clean up previous URL if it exists
+    if (decryptedPdfUrl) {
+      console.log('[PDFEditor] Cleaning up previous object URL');
+      URL.revokeObjectURL(decryptedPdfUrl);
+    }
+    
+    // Create new object URL for the decrypted PDF
+    const newUrl = URL.createObjectURL(decryptedBlob);
+    console.log('[PDFEditor] Created new object URL:', newUrl);
+    
+    setDecryptedPdfBlob(decryptedBlob);
+    setDecryptedPdfUrl(newUrl);
+    
+    // **NEW: Cache the decrypted PDF for future use**
+    try {
+      const { pdfCache } = await import('@/app/utils/pdfCache');
+      await pdfCache.storeDecryptedPDF(
+        contract.id,
+        new Uint8Array(await decryptedBlob.arrayBuffer()),
+        contract.s3FileName || 'decrypted-contract.pdf'
+      );
+      console.log('[PDFEditor] Cached decrypted PDF in IndexDB');
+    } catch (cacheError) {
+      console.warn('[PDFEditor] Failed to cache decrypted PDF:', cacheError);
+    }
+    
+    console.log('[PDFEditor] State updated with decrypted PDF data');
+    
+    toast({
+      title: "PDF Decrypted Successfully",
+      description: "Your encrypted PDF is now ready to view and edit.",
+      variant: "success",
+    });
+  }, [contract.id, contract.s3FileName, decryptedPdfUrl]);
+
+  // **UPDATED: Enhanced cache check with proper state management**
+  const checkCacheForDecryptedPDF = useCallback(async () => {
+    if (!isContractEncrypted(contract) || decryptedPdfBlob) return;
+    
+    setIsCheckingCache(true);
+    console.log('[PDFEditor] Checking IndexDB cache for decrypted PDF...');
+    
+    try {
+      const { pdfCache } = await import('@/app/utils/pdfCache');
+      const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
+      
+      if (cachedPDF) {
+        console.log('[PDFEditor] Found decrypted PDF in cache!');
+        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
+        await handleDecryptionSuccess(blob);
+      } else {
+        console.log('[PDFEditor] No decrypted PDF found in cache');
+      }
+    } catch (error) {
+      console.warn('[PDFEditor] Cache check failed:', error);
+    } finally {
+      setIsCheckingCache(false);
+      setCacheCheckComplete(true);
+      console.log('[PDFEditor] Cache check complete');
+    }
+  }, [contract, decryptedPdfBlob, handleDecryptionSuccess]);
+
+  // **UPDATED: Only load regular PDFs (never encrypted ones)**
+  const loadPdfUrl = useCallback(async () => {
+    if (!contract.s3FileKey) return;
+    
+    // **CRITICAL: Never load encrypted PDFs through this path**
+    if (isContractEncrypted(contract)) {
+      console.log('[PDFEditor] Refusing to load encrypted PDF through regular path');
+      return;
+    }
+    
+    console.log('[PDFEditor] Loading PDF URL for non-encrypted contract:', contract.id);
+    setIsLoadingPdf(true);
+    try {
+      const response = await fetch(`/api/contracts/download-pdf/${contract.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[PDFEditor] Regular PDF URL loaded successfully:', data.downloadUrl);
+        setPdfUrl(data.downloadUrl);
+      } else {
+        throw new Error('Failed to load PDF');
+      }
+    } catch (error) {
+      console.error('[PDFEditor] Error loading PDF:', error);
+      toast({
+        title: "Error Loading PDF",
+        description: "Failed to load the PDF file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingPdf(false);
+    }
+  }, [contract.s3FileKey, contract.id, contract]);
+
   // ✅ ADD: Function to handle iframe scroll events
   const handleIframeScroll = useCallback((iframe: HTMLIFrameElement) => {
     try {
@@ -242,7 +286,7 @@ export default function PDFEditor({
       }
     } catch (error) {
       // Cross-origin restrictions might prevent access to iframe content
-      console.warn('[PDFEditor] Unable to track iframe scroll due to cross-origin restrictions');
+      console.warn('[PDFEditor] Unable to track iframe scroll due to cross-origin restrictions', error);
     }
   }, []);
 
@@ -266,6 +310,63 @@ export default function PDFEditor({
       }
     }
   }, [decryptedPdfUrl, pdfUrl, handleIframeScroll]);
+
+  // **UPDATED: Single initialization effect to prevent double loading**
+  useEffect(() => {
+    if (hasInitialized) return;
+    
+    console.log('[PDFEditor] Initializing component with contract:', {
+      contractId: contract.id,
+      title: contract.title,
+      s3FileKey: contract.s3FileKey,
+      s3FileName: contract.s3FileName,
+      isEncrypted: contract.isEncrypted,
+      sealAllowlistId: contract.sealAllowlistId,
+      sealDocumentId: contract.sealDocumentId,
+      sealCapId: contract.sealCapId,
+      metadata: contract.metadata,
+      walrusEncryption: contract.metadata?.walrus?.encryption
+    });
+
+    const isEncrypted = isContractEncrypted(contract);
+    console.log('[PDFEditor] Encryption detection result:', isEncrypted);
+    
+    if (isEncrypted) {
+      console.log('[PDFEditor] Contract is encrypted - checking cache first');
+      checkCacheForDecryptedPDF();
+    } else if (contract.s3FileKey) {
+      console.log('[PDFEditor] Contract is not encrypted - loading regular PDF');
+      loadPdfUrl();
+    } else {
+      console.log('[PDFEditor] No PDF file available');
+    }
+    
+    setHasInitialized(true);
+  }, [contract, hasInitialized, checkCacheForDecryptedPDF, loadPdfUrl]);
+
+  // **NEW: Reset when contract changes**
+  useEffect(() => {
+    if (hasInitialized) {
+      console.log('[PDFEditor] Contract changed, resetting state');
+      setHasInitialized(false);
+      setCacheCheckComplete(false);
+      setIsCheckingCache(false);
+      
+      // Clean up URLs
+      if (decryptedPdfUrl) {
+        URL.revokeObjectURL(decryptedPdfUrl);
+      }
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+      
+      // Reset state
+      setDecryptedPdfBlob(null);
+      setDecryptedPdfUrl(null);
+      setPdfUrl(null);
+      setIsLoadingPdf(false);
+    }
+  }, [contract.id, hasInitialized, decryptedPdfUrl, pdfUrl]);
 
   // ✅ ADD: Signature box drawing handlers
   const handleMouseDown = (e: React.MouseEvent, pageNumber: number) => {
@@ -453,7 +554,7 @@ export default function PDFEditor({
                       </svg>
                     )}
                     <span className="text-xs font-medium hidden group-hover:inline">
-                      {isFirstSigner ? 'Your signature' : 'Your client\'s signature'}
+                      {isFirstSigner ? 'Your signature' : 'Your client&apos;s signature'}
                     </span>
                   </div>
                   
@@ -549,177 +650,6 @@ export default function PDFEditor({
       )}
     </>
   );
-
-  // **UPDATED: Single initialization effect to prevent double loading**
-  useEffect(() => {
-    if (hasInitialized) return;
-    
-    console.log('[PDFEditor] Initializing component with contract:', {
-      contractId: contract.id,
-      title: contract.title,
-      s3FileKey: contract.s3FileKey,
-      s3FileName: contract.s3FileName,
-      isEncrypted: contract.isEncrypted,
-      sealAllowlistId: contract.sealAllowlistId,
-      sealDocumentId: contract.sealDocumentId,
-      sealCapId: contract.sealCapId,
-      metadata: contract.metadata,
-      walrusEncryption: contract.metadata?.walrus?.encryption
-    });
-
-    const isEncrypted = isContractEncrypted(contract);
-    console.log('[PDFEditor] Encryption detection result:', isEncrypted);
-    
-    if (isEncrypted) {
-      console.log('[PDFEditor] Contract is encrypted - checking cache first');
-      checkCacheForDecryptedPDF();
-    } else if (contract.s3FileKey) {
-      console.log('[PDFEditor] Contract is not encrypted - loading regular PDF');
-      loadPdfUrl();
-    } else {
-      console.log('[PDFEditor] No PDF file available');
-    }
-    
-    setHasInitialized(true);
-  }, [contract.id, hasInitialized]);
-
-  // **NEW: Reset when contract changes**
-  useEffect(() => {
-    if (hasInitialized) {
-      console.log('[PDFEditor] Contract changed, resetting state');
-      setHasInitialized(false);
-      setCacheCheckComplete(false);
-      setIsCheckingCache(false);
-      
-      // Clean up URLs
-      if (decryptedPdfUrl) {
-        URL.revokeObjectURL(decryptedPdfUrl);
-      }
-      if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl);
-      }
-      
-      // Reset state
-      setDecryptedPdfBlob(null);
-      setDecryptedPdfUrl(null);
-      setPdfUrl(null);
-      setIsLoadingPdf(false);
-    }
-  }, [contract.id]);
-
-  // **UPDATED: Enhanced decryption success handler with cache integration**
-  const handleDecryptionSuccess = async (decryptedBlob: Blob) => {
-    console.log('[PDFEditor] PDF decrypted successfully, creating object URL');
-    console.log('[PDFEditor] Decrypted blob size:', decryptedBlob.size);
-    
-    // Clean up previous URL if it exists
-    if (decryptedPdfUrl) {
-      console.log('[PDFEditor] Cleaning up previous object URL');
-      URL.revokeObjectURL(decryptedPdfUrl);
-    }
-    
-    // Create new object URL for the decrypted PDF
-    const newUrl = URL.createObjectURL(decryptedBlob);
-    console.log('[PDFEditor] Created new object URL:', newUrl);
-    
-    setDecryptedPdfBlob(decryptedBlob);
-    setDecryptedPdfUrl(newUrl);
-    
-    // **NEW: Cache the decrypted PDF for future use**
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.storeDecryptedPDF(
-        contract.id,
-        new Uint8Array(await decryptedBlob.arrayBuffer()),
-        contract.s3FileName || 'decrypted-contract.pdf'
-      );
-      console.log('[PDFEditor] Cached decrypted PDF in IndexDB');
-    } catch (cacheError) {
-      console.warn('[PDFEditor] Failed to cache decrypted PDF:', cacheError);
-    }
-    
-    console.log('[PDFEditor] State updated with decrypted PDF data');
-    
-    toast({
-      title: "PDF Decrypted Successfully",
-      description: "Your encrypted PDF is now ready to view and edit.",
-      variant: "success",
-    });
-  };
-
-  // **UPDATED: Enhanced cache check with proper state management**
-  const checkCacheForDecryptedPDF = async () => {
-    if (!isContractEncrypted(contract) || decryptedPdfBlob) return;
-    
-    setIsCheckingCache(true);
-    console.log('[PDFEditor] Checking IndexDB cache for decrypted PDF...');
-    
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
-      
-      if (cachedPDF) {
-        console.log('[PDFEditor] Found decrypted PDF in cache!');
-        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
-        await handleDecryptionSuccess(blob);
-      } else {
-        console.log('[PDFEditor] No decrypted PDF found in cache');
-      }
-    } catch (error) {
-      console.warn('[PDFEditor] Cache check failed:', error);
-    } finally {
-      setIsCheckingCache(false);
-      setCacheCheckComplete(true);
-      console.log('[PDFEditor] Cache check complete');
-    }
-  };
-
-  // Clean up object URLs on unmount
-  useEffect(() => {
-    return () => {
-      if (decryptedPdfUrl) {
-        console.log('[PDFEditor] Cleaning up decrypted PDF URL on unmount');
-        URL.revokeObjectURL(decryptedPdfUrl);
-      }
-      if (pdfUrl) {
-        console.log('[PDFEditor] Cleaning up regular PDF URL on unmount');
-        URL.revokeObjectURL(pdfUrl);
-      }
-    };
-  }, [decryptedPdfUrl, pdfUrl]);
-
-  // **UPDATED: Only load regular PDFs (never encrypted ones)**
-  const loadPdfUrl = async () => {
-    if (!contract.s3FileKey) return;
-    
-    // **CRITICAL: Never load encrypted PDFs through this path**
-    if (isContractEncrypted(contract)) {
-      console.log('[PDFEditor] Refusing to load encrypted PDF through regular path');
-      return;
-    }
-    
-    console.log('[PDFEditor] Loading PDF URL for non-encrypted contract:', contract.id);
-    setIsLoadingPdf(true);
-    try {
-      const response = await fetch(`/api/contracts/download-pdf/${contract.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[PDFEditor] Regular PDF URL loaded successfully:', data.downloadUrl);
-        setPdfUrl(data.downloadUrl);
-      } else {
-        throw new Error('Failed to load PDF');
-      }
-    } catch (error) {
-      console.error('[PDFEditor] Error loading PDF:', error);
-      toast({
-        title: "Error Loading PDF",
-        description: "Failed to load the PDF file. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingPdf(false);
-    }
-  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -864,35 +794,6 @@ export default function PDFEditor({
         variant: "destructive",
       });
     }
-  };
-
-  // **NEW: Clear decrypted data to force re-decryption**
-  const handleRedecrypt = async () => {
-    console.log('[PDFEditor] Clearing decrypted data to force re-decryption');
-    
-    // Clean up current URLs
-    if (decryptedPdfUrl) {
-      URL.revokeObjectURL(decryptedPdfUrl);
-    }
-    
-    // Clear state
-    setDecryptedPdfBlob(null);
-    setDecryptedPdfUrl(null);
-    setCacheCheckComplete(false);
-    
-    // Clear cache
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.clearDecryptedPDF(contract.id);
-      console.log('[PDFEditor] Cleared cached decrypted PDF');
-    } catch (error) {
-      console.warn('[PDFEditor] Failed to clear cache:', error);
-    }
-    
-    toast({
-      title: "Cache Cleared",
-      description: "Re-decrypting PDF...",
-    });
   };
 
   // **UPDATED: Enhanced PDF viewer with cache check prevention**
@@ -1237,7 +1138,7 @@ export default function PDFEditor({
                   </div>
                   <h3 className="text-sm font-semibold text-gray-800 mb-1">AI PDF Assistant</h3>
                   <p className="text-xs text-gray-600 max-w-sm mx-auto leading-tight px-2">
-                    Describe how you'd like to improve your PDF contract
+                    Describe how you&apos;d like to improve your PDF contract
                   </p>
                 </div>
 
@@ -1384,7 +1285,7 @@ const AutoDecryptionView = ({
   contract, 
   onDecrypted 
 }: { 
-  contract: any; 
+  contract: Contract; 
   onDecrypted: (blob: Blob) => void; 
 }) => {
   const [decryptionStep, setDecryptionStep] = useState<string>('loading-metadata');
@@ -1444,7 +1345,7 @@ const AutoDecryptionView = ({
           }
         } catch (cacheError) {
           // Fallback to AWS download
-          console.log('[PDFEditor:AutoDecryptionView] Cache miss, downloading from AWS');
+          console.log('[PDFEditor:AutoDecryptionView] Cache miss, downloading from AWS', cacheError);
           const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
           
           if (!response.ok) {
@@ -1481,17 +1382,15 @@ const AutoDecryptionView = ({
         // Initialize SEAL client
         const { SealClient, getAllowlistedKeyServers, SessionKey } = await import('@mysten/seal');
         const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
-        const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
         const { Transaction } = await import('@mysten/sui/transactions');
         const { fromHEX } = await import('@mysten/sui/utils');
-        const { bech32 } = await import('bech32');
         const { genAddressSeed, getZkLoginSignature } = await import('@mysten/sui/zklogin');
 
         console.log('[PDFEditor:AutoDecryptionView] Initializing SUI client...');
         const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
         console.log('[PDFEditor:AutoDecryptionView] Initializing SEAL client...');
         const sealClient = new SealClient({
-          suiClient: suiClient as any,
+          suiClient: suiClient,
           serverConfigs: getAllowlistedKeyServers('testnet').map((id) => ({
             objectId: id,
             weight: 1,
@@ -1549,7 +1448,6 @@ const AutoDecryptionView = ({
         const originalZkState = zkLoginState; // Original session state
 
         const originalJwt = originalZkState.jwt;
-        const originalZkProofs = originalZkState.zkProofs;
         const originalMaxEpoch = originalZkState.maxEpoch;
         // **UPDATED: Get the contract-specific ephemeral keypair from the wallet itself**
         const ephemeralKeypair = contractWallet.ephemeralKeyPair;
@@ -1692,7 +1590,7 @@ const AutoDecryptionView = ({
           packageId: SEAL_PACKAGE_ID,
           ttlMin: TTL_MIN,
           signer: ephemeralKeypair,           // Same ephemeral keypair
-          suiClient: suiClient as any
+          suiClient: suiClient
         });
 
         console.log('[PDFEditor:AutoDecryptionView] SessionKey created successfully:', {
@@ -1769,22 +1667,9 @@ const AutoDecryptionView = ({
     };
 
     autoDecrypt();
-  }, [contract.id]);
+  }, [contract.id, contract.sealAllowlistId, contract.sealDocumentId, contract.sealCapId, contract.metadata?.walrus?.encryption?.allowlistId, contract.metadata?.walrus?.encryption?.documentId, contract.metadata?.walrus?.encryption?.capId, contract.s3FileName, onDecrypted]);
 
-  const getStepMessage = () => {
-    switch (decryptionStep) {
-      case 'loading-metadata': return 'Loading encryption metadata...';
-      case 'downloading': return 'Downloading encrypted PDF...';
-      case 'initializing-seal': return 'Initializing SEAL client...';
-      case 'authorizing': return 'Authorizing ephemeral key...';
-      case 'creating-session': return 'Creating decryption session...';
-      case 'fetching-keys': return 'Fetching decryption keys...';
-      case 'decrypting': return 'Decrypting PDF data...';
-      case 'complete': return 'Decryption complete!';
-      case 'error': return 'Decryption failed';
-      default: return 'Processing...';
-    }
-  };
+  
 
   if (error) {
     return (
@@ -1836,4 +1721,4 @@ const AutoDecryptionView = ({
       </div>
     </div>
   );
-}; 
+};

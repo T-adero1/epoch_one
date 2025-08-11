@@ -1,5 +1,8 @@
 'use client';
 
+// ✅ ADD: Type definitions for IndexedDB (if not available globally)
+type IDBTransactionMode = 'readonly' | 'readwrite' | 'versionchange';
+
 interface CachedPDF {
   contractId: string;
   encryptedData: Uint8Array;

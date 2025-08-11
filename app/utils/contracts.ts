@@ -1,7 +1,7 @@
 import { Contract, ContractStatus, SignatureStatus } from '@prisma/client';
 
 export interface ContractWithRelations extends Contract {
-  signaturePositions?: string; // ✅ Add this
+
   signatures: {
     id: string;
     status: SignatureStatus;

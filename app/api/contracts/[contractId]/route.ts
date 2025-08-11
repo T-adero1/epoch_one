@@ -5,16 +5,16 @@ import { log } from '@/app/utils/logger';
 // GET /api/contracts/[contractId] - Get a single contract by ID
 export async function GET(
   request: Request,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
-    const contractId = await Promise.resolve(params.contractId);
+    const { contractId } = await params;
     
     log.info('Fetching contract by ID', { 
       contractId,
       requestUrl: request.url,
       method: request.method,
-      headers: Object.fromEntries(request.headers.entries())
+      headers: JSON.stringify(Object.fromEntries(request.headers.entries()))
     });
     
     const contract = await prisma.contract.findUnique({
@@ -51,22 +51,23 @@ export async function GET(
     log.debug('Detailed contract data', {
       contractId,
       content: contract.content ? `${contract.content.substring(0, 50)}...` : 'No content',
-      metadata: contract.metadata, // ✅ ADD: Log full metadata
+      metadata: contract.metadata as any, // ✅ FIX: Cast JsonValue to any for logging
       signatures: contract.signatures.map(sig => ({
         id: sig.id,
         userGoogleIdHash: sig.userGoogleIdHash?.substring(0, 8) + '...', // ✅ UPDATED
         email: sig.email, // This might be null in privacy schema
         status: sig.status,
         signedAt: sig.signedAt
-      }))
+      })) as any
     });
     
     return NextResponse.json(contract);
   } catch (error) {
+    const cid = (await params).contractId;
     log.error('Error fetching contract details', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      contractId: await Promise.resolve(params.contractId),
+      contractId: cid,
       requestPath: request.url
     });
     return NextResponse.json(
@@ -79,10 +80,10 @@ export async function GET(
 // PATCH /api/contracts/[contractId] - Update a contract
 export async function PATCH(
   request: Request,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
-    const contractId = await Promise.resolve(params.contractId);
+    const { contractId } = await params;
     const body = await request.json();
     
     log.info('Updating contract', { 
@@ -105,7 +106,7 @@ export async function PATCH(
       log.error('Contract not found for update', { 
         contractId,
         requestPath: new URL(request.url).pathname,
-        response: errorResponse
+        response: errorResponse as any // ✅ FIX: Cast errorResponse to any for logging
       });
       return NextResponse.json(
         errorResponse,
@@ -121,7 +122,7 @@ export async function PATCH(
       // ✅ UPDATED: Log encrypted email info
       hasEncryptedEmails: !!(existingContract.metadata as any)?.encryptedSignerEmails,
       encryptedEmailCount: (existingContract.metadata as any)?.encryptedSignerEmails?.length || 0,
-      signers: (existingContract.metadata as any)?.signers || []
+      signers: ((existingContract.metadata as any)?.signers || []) as any // ✅ FIX: Cast signers array to any
     });
     
     // Special handling for status updates
@@ -141,9 +142,9 @@ export async function PATCH(
           const errorResponse = { error: 'Cannot send contract for signatures without adding signers' };
           log.warn('Cannot set contract to PENDING without signers', { 
             contractId,
-            signers,
+            signers: signers as any, // ✅ FIX: Cast signers to any for logging
             encryptedEmails: encryptedEmails.length,
-            response: errorResponse
+            response: errorResponse as any // ✅ FIX: Cast errorResponse to any for logging
           });
           return NextResponse.json(
             errorResponse,
@@ -159,7 +160,7 @@ export async function PATCH(
     }
     
     // Handle metadata field - preserve existing metadata fields not being updated
-    let updateData: any = {};
+    const updateData: any = {};
     
     // Handle metadata field if present
     if (body.metadata) {
@@ -172,9 +173,9 @@ export async function PATCH(
       // ✅ ADD: Log metadata update
       log.debug('Updating metadata', {
         contractId,
-        existingMetadataKeys: Object.keys(existingContract.metadata as Record<string, any> || {}),
-        newMetadataKeys: Object.keys(body.metadata),
-        mergedMetadataKeys: Object.keys(updateData.metadata),
+        existingMetadataKeys: Object.keys(existingContract.metadata as Record<string, any> || {}) as any, // ✅ FIX: Cast array to any
+        newMetadataKeys: Object.keys(body.metadata) as any, // ✅ FIX: Cast array to any
+        mergedMetadataKeys: Object.keys(updateData.metadata) as any, // ✅ FIX: Cast array to any
         hasEncryptedEmails: !!updateData.metadata.encryptedSignerEmails
       });
     }
@@ -206,7 +207,7 @@ export async function PATCH(
     
     log.debug('Prepared update data', { 
       contractId,
-      updateDataFields: Object.keys(updateData),
+      updateDataFields: Object.keys(updateData) as any, // ✅ FIX: Cast array to any
       hasMetadata: !!updateData.metadata,
       hasEncryptedEmails: !!(updateData.metadata?.encryptedSignerEmails)
     });
@@ -230,13 +231,14 @@ export async function PATCH(
     
     return NextResponse.json(updatedContract);
   } catch (error) {
+    const cid = (await params).contractId;
     const errorResponse = { error: 'Failed to update contract' };
     log.error('Error updating contract', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      contractId: await Promise.resolve(params.contractId),
+      contractId: cid,
       requestPath: request.url,
-      response: errorResponse
+      response: errorResponse as any // ✅ FIX: Cast errorResponse to any for logging
     });
     return NextResponse.json(
       errorResponse,

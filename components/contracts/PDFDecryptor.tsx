@@ -288,7 +288,7 @@ export default function PDFDecryptor({
       setDecryptionStep('preparing');
       
       // **NEW: Check cache first before AWS call**
-      let encryptedData: ArrayBuffer;
+      let encryptedData: ArrayBufferLike; // ✅ Change type to ArrayBufferLike
       
       try {
         const { pdfCache } = await import('@/app/utils/pdfCache');
@@ -297,7 +297,7 @@ export default function PDFDecryptor({
         if (cachedPDF) {
           console.log('[PDFDecryptor] Using cached encrypted PDF');
           setDecryptionStep('cache-hit');
-          encryptedData = cachedPDF.encryptedData.buffer;
+          encryptedData = cachedPDF.encryptedData.buffer; // ✅ No casting needed
           
           // Verify encryption metadata matches
           if (cachedPDF.encryptionMeta.allowlistId !== allowlistId || 
@@ -310,7 +310,7 @@ export default function PDFDecryptor({
         }
       } catch (cacheError) {
         // Fallback to AWS download
-        console.log('[PDFDecryptor] Cache miss, downloading from AWS:', cacheError.message);
+        console.log('[PDFDecryptor] Cache miss, downloading from AWS:', cacheError);
         setDecryptionStep('downloading');
         const response = await fetch(`/api/contracts/download-pdf/${contractId}?view=inline`);
         

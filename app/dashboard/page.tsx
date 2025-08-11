@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -356,7 +356,7 @@ export default function DashboardPage() {
   const [blockchainDetailsContract, setBlockchainDetailsContract] = useState<ContractWithRelations | null>(null);
 
   // Add this near your other state declarations (around line 220):
-  const validationTimeoutRefs = useRef<(NodeJS.Timeout | null)[]>([]);
+  const validationTimeoutRefs = useRef<(number | null)[]>([]);
 
   // Add a new state to track if this is a newly created contract (around line 220):
   const [isNewlyCreatedContract, setIsNewlyCreatedContract] = useState(false);

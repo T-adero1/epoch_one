@@ -26,7 +26,14 @@ function isHashedIdentifier(input: string): boolean {
   return input.length > 40 && !isValidSuiAddress(input) && !input.includes('@');
 }
 
-
+// ✅ FIX: Define proper interface for address sources
+interface AddressSource {
+  input: string;
+  type: 'hashed_email' | 'wallet';
+  source: 'predetermined' | 'direct';
+  address: string;
+  context?: string; // ✅ FIX: Make context optional
+}
 
 // Function to verify objects exist before proceeding
 async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAttempts = 10) {
@@ -132,7 +139,7 @@ export async function POST(req: NextRequest) {
     
     // ENHANCED: Separate hashed emails and wallet addresses, then resolve
     const walletAddresses: string[] = [];
-    const addressSources: { input: string; type: 'hashed_email' | 'wallet'; source: 'predetermined' | 'direct'; address: string }[] = [];
+    const addressSources: AddressSource[] = []; // ✅ FIX: Use proper interface
     
     if (signerAddresses.length > 0) {
       console.log('[API] Processing signer inputs...');
@@ -178,7 +185,7 @@ export async function POST(req: NextRequest) {
               type: 'hashed_email', 
               source: 'predetermined', 
               address: predeterminedAddress,
-              context: 'allowlist-creation' // Track context
+              context: 'allowlist-creation' // ✅ FIX: Now properly typed
             });
             console.log(`[API] Generated predetermined wallet: ${hashedEmail.substring(0, 8)}... -> ${predeterminedAddress.substring(0, 8)}...`);
           } catch (predeterminedError) {
@@ -251,16 +258,24 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
     
-    // Extract the allowlist and cap IDs from the object changes
+    // ✅ FIX: Extract the allowlist and cap IDs with proper type checking
     console.log('[API] Extracting created objects from transaction result...');
     
-    const allowlistObj = result.objectChanges?.find(change => 
-      change.objectType && change.objectType.includes('::allowlist::Allowlist')
-    );
+    const allowlistObj = result.objectChanges?.find(change => {
+      // ✅ FIX: Proper type checking for object changes
+      if ('objectType' in change && change.objectType) {
+        return change.objectType.includes('::allowlist::Allowlist');
+      }
+      return false;
+    }) as any; // Cast to any to access objectId
     
-    const capObj = result.objectChanges?.find(change => 
-      change.objectType && change.objectType.includes('::allowlist::Cap')
-    );
+    const capObj = result.objectChanges?.find(change => {
+      // ✅ FIX: Proper type checking for object changes
+      if ('objectType' in change && change.objectType) {
+        return change.objectType.includes('::allowlist::Cap');
+      }
+      return false;
+    }) as any; // Cast to any to access objectId
     
     if (!allowlistObj || !capObj) {
       console.error('[API] Could not find allowlist or cap objects in results');
@@ -269,8 +284,8 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
     
-    const allowlistId = allowlistObj.objectId;
-    const capId = capObj.objectId;
+    const allowlistId = allowlistObj.objectId; // ✅ FIX: Now properly accessible
+    const capId = capObj.objectId; // ✅ FIX: Now properly accessible
     
     console.log('[API] Allowlist created successfully');
     console.log('[API] Allowlist ID:', allowlistId);

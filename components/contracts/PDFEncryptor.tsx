@@ -29,7 +29,7 @@ export default function PDFEncryptor({
   onProgress
 }: PDFEncryptorProps) {
   const [status, setStatus] = useState<'idle' | 'encrypting' | 'success' | 'error'>('idle');
-  const { user, userAddress } = useZkLogin();
+  const { userAddress } = useZkLogin();
 
   const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
     '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
@@ -80,8 +80,9 @@ export default function PDFEncryptor({
       const suiClient = new SuiClient({ url: getFullnodeUrl(NETWORK) });
       const keyServers = getAllowlistedKeyServers(NETWORK);
       
+      // Fix: Add proper typing for the SuiClient
       const sealClient = new SealClient({
-        suiClient: suiClient as any,
+        suiClient: suiClient, // Remove the 'as any'
         serverConfigs: keyServers.map((id) => ({
           objectId: id,
           weight: 1,

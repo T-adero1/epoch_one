@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { contractId: string } }
+  { params }: { params: Promise<{ contractId: string }> }
 ) {
   try {
     const { contractId } = await params;
@@ -19,7 +19,7 @@ export async function GET(
         s3FileKey: true,
         s3FileName: true,
         s3ContentType: true,
-        ownerId: true,
+        ownerGoogleIdHash: true, // ✅ FIX: Use ownerGoogleIdHash instead of ownerId
       },
     });
 
@@ -30,8 +30,11 @@ export async function GET(
       );
     }
 
-    // Generate signed URL for downloading (attachment)
-    const downloadUrl = await getS3DownloadUrl(contract.s3FileKey, contract.s3FileName);
+    // ✅ FIX: Handle null fileName by converting to undefined
+    const downloadUrl = await getS3DownloadUrl(
+      contract.s3FileKey, 
+      contract.s3FileName || undefined
+    );
 
     return NextResponse.json({
       downloadUrl,

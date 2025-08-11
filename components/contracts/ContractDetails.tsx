@@ -61,8 +61,8 @@ interface Contract {
   description: string | null;
   content: string;
   status: ContractStatus;
-  ownerId: string;
-  ownerGoogleIdHash: string; // ✅ Add this missing property
+  // ✅ FIX: Remove ownerId since we use ownerGoogleIdHash instead
+  ownerGoogleIdHash: string;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date | null;
@@ -138,7 +138,85 @@ export default function ContractDetails({
   
   // **NEW: Track previous contract ID to prevent unnecessary resets**
   const prevContractIdRef = useRef<string | null>(null);
-  
+
+  // ✅ MOVED: All useState hooks to the top level, before any conditional logic
+  const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
+  const [isDecryptingSigners, setIsDecryptingSigners] = useState(false);
+  const [canDecryptSigners, setCanDecryptSigners] = useState(false);
+  const [signersDecrypted, setSignersDecrypted] = useState(false);
+
+  // ✅ FIXED: Move helper function BEFORE any useEffect that uses it
+  const areEmailsEncrypted = (emails: string[]): boolean => {
+    if (!emails || emails.length === 0) return false;
+    
+    // Check if emails look like encrypted data (base64-like strings, not email format)
+    return emails.some(email => {
+      // Encrypted emails will be base64 strings, much longer than typical emails
+      // and won't contain @ symbol or common email patterns
+      return email.length > 50 && 
+             !email.includes('@') && 
+             /^[A-Za-z0-9+/=]+$/.test(email);
+    });
+  };
+
+  // ✅ NOW the useEffect hooks can safely call areEmailsEncrypted
+  // **NEW: Check if current user can decrypt emails**
+  useEffect(() => {
+    const checkDecryptPermissions = async () => {
+      if (!user?.googleId || !contract.ownerGoogleIdHash) {
+        setCanDecryptSigners(false);
+        return;
+      }
+
+      try {
+        const allowed = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
+        setCanDecryptSigners(allowed);
+      } catch (error) {
+        console.error('[ContractDetails] Error checking decrypt permissions:', error);
+        setCanDecryptSigners(false);
+      }
+    };
+
+    checkDecryptPermissions();
+  }, [user?.googleId, contract.ownerGoogleIdHash]);
+
+  // **NEW: Auto-decrypt emails if user is owner and emails are encrypted**
+  useEffect(() => {
+    const autoDecryptSigners = async () => {
+      const signers = contract.metadata?.signers || [];
+      
+      if (!signers.length || !canDecryptSigners || signersDecrypted) return;
+      
+      // Check if emails look encrypted
+      if (!areEmailsEncrypted(signers)) {
+        // Emails are not encrypted, use them as-is
+        setDecryptedSigners(signers);
+        setSignersDecrypted(true);
+        return;
+      }
+
+      // Emails are encrypted, attempt to decrypt
+      if (user?.googleId) {
+        setIsDecryptingSigners(true);
+        try {
+          console.log('[ContractDetails] Auto-decrypting signer emails...');
+          const decrypted = await decryptSignerEmails(signers, user.googleId);
+          setDecryptedSigners(decrypted);
+          setSignersDecrypted(true);
+          console.log('[ContractDetails] Successfully decrypted', decrypted.length, 'signer emails');
+        } catch (error) {
+          console.error('[ContractDetails] Auto-decryption failed:', error);
+          // Keep encrypted emails to show encrypted state
+          setDecryptedSigners([]);
+        } finally {
+          setIsDecryptingSigners(false);
+        }
+      }
+    };
+
+    autoDecryptSigners();
+  }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
+
   const handleSave = (updatedContract: Contract) => {
     setIsEditing(false)
     onUpdate(updatedContract)
@@ -146,8 +224,6 @@ export default function ContractDetails({
   
   // **UPDATED: Fix copySigningLink to handle both signature objects and signer emails**
   const copySigningLink = (signerIdentifier: ContractSignature | string) => {
-    
-    
     const url = `${window.location.origin}/sign/${contract.id}`;
     navigator.clipboard.writeText(url);
     toast({
@@ -782,6 +858,7 @@ export default function ContractDetails({
     );
   };
   
+  // ✅ FIXED: Early return after all hooks are declared
   if (isEditing) {
     return (
       <ContractEditor 
@@ -805,9 +882,9 @@ export default function ContractDetails({
     return (
       <Badge className={variants[status]}>
         {contract.status === 'ACTIVE' && 
-         contract.ownerId === user?.id && 
+         contract.ownerGoogleIdHash === user?.googleId && // ✅ FIX: Use ownerGoogleIdHash instead of ownerId
          !contract.signatures?.some(sig => 
-           sig.userId === contract.ownerId && 
+           sig.userGoogleIdHash === contract.ownerGoogleIdHash && 
            sig.status === 'SIGNED'
          ) ? (
           <span className="text-green-600 font-medium">Ready for Your Signature</span>
@@ -820,82 +897,13 @@ export default function ContractDetails({
     );
   };
 
-  // **NEW: Add state for managing decrypted emails**
-  const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
-  const [isDecryptingSigners, setIsDecryptingSigners] = useState(false);
-  const [canDecryptSigners, setCanDecryptSigners] = useState(false);
-  const [signersDecrypted, setSignersDecrypted] = useState(false);
-
   // **NEW: Helper function to detect if emails are encrypted**
-  const areEmailsEncrypted = (emails: string[]): boolean => {
-    if (!emails || emails.length === 0) return false;
-    
-    // Check if emails look like encrypted data (base64-like strings, not email format)
-    return emails.some(email => {
-      // Encrypted emails will be base64 strings, much longer than typical emails
-      // and won't contain @ symbol or common email patterns
-      return email.length > 50 && 
-             !email.includes('@') && 
-             /^[A-Za-z0-9+/=]+$/.test(email);
-    });
-  };
+  // This function is now declared at the top of the component.
 
   // **NEW: Check if current user can decrypt emails**
-  useEffect(() => {
-    const checkDecryptPermissions = async () => {
-      if (!user?.googleId || !contract.ownerGoogleIdHash) {
-        setCanDecryptSigners(false);
-        return;
-      }
+  // This useEffect hook is now moved to the top of the component.
 
-      try {
-        const allowed = await canDecryptEmails(contract.ownerGoogleIdHash, user.googleId);
-        setCanDecryptSigners(allowed);
-      } catch (error) {
-        console.error('[ContractDetails] Error checking decrypt permissions:', error);
-        setCanDecryptSigners(false);
-      }
-    };
 
-    checkDecryptPermissions();
-  }, [user?.googleId, contract.ownerGoogleIdHash]);
-
-  // **NEW: Auto-decrypt emails if user is owner and emails are encrypted**
-  useEffect(() => {
-    const autoDecryptSigners = async () => {
-      const signers = contract.metadata?.signers || [];
-      
-      if (!signers.length || !canDecryptSigners || signersDecrypted) return;
-      
-      // Check if emails look encrypted
-      if (!areEmailsEncrypted(signers)) {
-        // Emails are not encrypted, use them as-is
-        setDecryptedSigners(signers);
-        setSignersDecrypted(true);
-        return;
-      }
-
-      // Emails are encrypted, attempt to decrypt
-      if (user?.googleId) {
-        setIsDecryptingSigners(true);
-        try {
-          console.log('[ContractDetails] Auto-decrypting signer emails...');
-          const decrypted = await decryptSignerEmails(signers, user.googleId);
-          setDecryptedSigners(decrypted);
-          setSignersDecrypted(true);
-          console.log('[ContractDetails] Successfully decrypted', decrypted.length, 'signer emails');
-        } catch (error) {
-          console.error('[ContractDetails] Auto-decryption failed:', error);
-          // Keep encrypted emails to show encrypted state
-          setDecryptedSigners([]);
-        } finally {
-          setIsDecryptingSigners(false);
-        }
-      }
-    };
-
-    autoDecryptSigners();
-  }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
 
   return (
     <Card className="w-full h-full border-none shadow-none">

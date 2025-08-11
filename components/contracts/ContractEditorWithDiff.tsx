@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Check, X, ChevronDown, ChevronRight, Plus, Minus, Edit3, Undo2 } from 'lucide-react'
 import { ChangeGroup } from '@/app/utils/textDiff'
@@ -267,12 +267,12 @@ export default function ContractEditorWithDiff({
           
           const cleanup = () => {
             clearTimeout(touchTimer);
-            e.target.removeEventListener('touchend', cleanup);
-            e.target.removeEventListener('touchcancel', cleanup);
+            (e.target as HTMLElement).removeEventListener('touchend', cleanup);
+            (e.target as HTMLElement).removeEventListener('touchcancel', cleanup);
           };
           
-          e.target.addEventListener('touchend', cleanup);
-          e.target.addEventListener('touchcancel', cleanup);
+          (e.target as HTMLElement).addEventListener('touchend', cleanup);
+          (e.target as HTMLElement).addEventListener('touchcancel', cleanup);
         }}
         onFocus={() => setFocusedGroup(group.id)}
         tabIndex={showControls ? 0 : -1}
@@ -397,7 +397,7 @@ export default function ContractEditorWithDiff({
         )}
         
         {/* Collapsed preview with mobile-friendly hints */}
-        {!isExpanded && group.type !== 'unchanged' && (
+        {!isExpanded && (group.type as string) !== 'unchanged' && ( // ✅ FIX: Cast to string to avoid type comparison error
           <div className="p-2 bg-white bg-opacity-30 border-t border-gray-200">
             <div className="flex items-center justify-between">
               <div className="text-xs text-gray-600 flex-1 min-w-0">
@@ -450,14 +450,15 @@ export default function ContractEditorWithDiff({
         onKeyDown={(e) => {
           if (e.key === 'Tab') {
             e.preventDefault();
-            const start = e.target.selectionStart;
-            const end = e.target.selectionEnd;
+            const target = e.target as HTMLTextAreaElement; // ✅ FIX: Cast to HTMLTextAreaElement
+            const start = target.selectionStart;
+            const end = target.selectionEnd;
             const newContent = content.substring(0, start) + '\t' + content.substring(end);
             onContentChange(newContent);
             
             // Restore cursor position after the inserted tab
             setTimeout(() => {
-              e.target.selectionStart = e.target.selectionEnd = start + 1;
+              target.selectionStart = target.selectionEnd = start + 1;
             }, 0);
           }
         }}
