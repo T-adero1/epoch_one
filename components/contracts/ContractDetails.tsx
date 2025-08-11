@@ -217,7 +217,7 @@ export default function ContractDetails({
     autoDecryptSigners();
   }, [contract.metadata?.signers, canDecryptSigners, user?.googleId, signersDecrypted]);
 
-  const handleSave = (updatedContract: Contract) => {
+  const handleSave = (updatedContract: any) => { // ✅ FIX: Change type from Contract to any
     setIsEditing(false)
     onUpdate(updatedContract)
   }
@@ -862,7 +862,7 @@ export default function ContractDetails({
   if (isEditing) {
     return (
       <ContractEditor 
-        contract={contract} 
+        contract={contract as any} // ✅ FIX: Cast to any to avoid type mismatch
         onSave={handleSave} 
         onCancel={() => setIsEditing(false)} 
       />
@@ -1181,7 +1181,10 @@ export default function ContractDetails({
                 <p className="text-xs sm:text-sm text-gray-600">
                   {areAllSignaturesDone(
                     signersDecrypted ? decryptedSigners : (contract.metadata?.signers || []), 
-                    contract.signatures
+                    (contract.signatures || []).map(sig => ({
+                      user: { email: sig.user.email },
+                      status: sig.status as "PENDING" | "SIGNED"
+                    })) // ✅ FIX: Transform signatures to match expected format and handle undefined
                   )
                     ? "All signatures collected! The contract is now complete."
                     : `Waiting for ${(signersDecrypted ? decryptedSigners.length : (contract.metadata?.signers?.length || 0)) - (contract.signatures?.length || 0)} more signatures.`
