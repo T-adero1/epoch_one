@@ -61,14 +61,14 @@ class PDFCache {
 
     // **NEW: Check if database is already open and valid**
     if (this.db && !this.db.objectStoreNames.contains('invalid')) {
-      try {
-        // Test the connection with a simple transaction
-        const testTransaction = this.db.transaction([this.pdfStoreName], 'readonly');
-        return Promise.resolve();
-      } catch (error) {
-        console.warn('[PDF_CACHE] Database connection invalid, reinitializing');
-        this.db = null;
-      }
+        try {
+          // Test the connection with a simple transaction
+          this.db.transaction([this.pdfStoreName], 'readonly');
+          return Promise.resolve();
+        } catch (error) {
+          console.warn('[PDF_CACHE] Database connection invalid, reinitializing', error);
+          this.db = null;
+        }
     }
 
     this.initPromise = this._performInit();
@@ -76,7 +76,7 @@ class PDFCache {
   }
 
   private async _performInit(): Promise<void> {
-    return new Promise((resolve, reject) => {
+      return new Promise((resolve, reject) => {
       this.isInitializing = true;
       
       const request = indexedDB.open(this.dbName, this.version);
@@ -468,12 +468,12 @@ class PDFCache {
   async getCacheStats(): Promise<{ count: number; totalSize: number; oldestDate: Date | null }> {
     if (!this.db) await this.init();
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([this.pdfStoreName], 'readonly');
-      const store = transaction.objectStore(this.pdfStoreName);
-      const request = store.getAll();
-      
-      request.onerror = () => reject(request.error);
+      return new Promise((resolve, reject) => {
+        const transaction = this.db!.transaction([this.pdfStoreName], 'readonly');
+        const store = transaction.objectStore(this.pdfStoreName);
+        const request = store.getAll();
+
+        request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const allDocs = request.result as CachedPDF[];
         const totalSize = allDocs.reduce((sum, doc) => sum + doc.fileSize, 0);
@@ -495,16 +495,16 @@ class PDFCache {
     
     const cutoff = Date.now() - this.maxAge;
     
-    return new Promise((resolve, reject) => {
+      return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([this.pdfStoreName], 'readwrite');
       const store = transaction.objectStore(this.pdfStoreName);
       const index = store.index('cachedAt');
-      const request = index.openCursor(IDBKeyRange.upperBound(cutoff));
-      
-      let deletedCount = 0;
-      
-      request.onerror = () => reject(request.error);
-      request.onsuccess = (event) => {
+        const request = index.openCursor(IDBKeyRange.upperBound(cutoff));
+
+        let deletedCount = 0;
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
           cursor.delete();
@@ -523,7 +523,7 @@ class PDFCache {
   async clearAll(): Promise<void> {
     if (!this.db) await this.init();
     
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const transaction = this.db!.transaction([this.pdfStoreName, this.decryptedPdfStoreName, this.sessionKeyStoreName], 'readwrite');
       
       const pdfStore = transaction.objectStore(this.pdfStoreName);
@@ -531,13 +531,13 @@ class PDFCache {
       const sessionStore = transaction.objectStore(this.sessionKeyStoreName);
       
       let completedCount = 0;
-      const onComplete = () => {
-        completedCount++;
-        if (completedCount === 3) {
-          console.log('[PDF_CACHE] Cleared all cached data');
-        resolve();
-        }
-      };
+        const onComplete = () => {
+          completedCount++;
+          if (completedCount === 3) {
+            console.log('[PDF_CACHE] Cleared all cached data');
+            resolve();
+          }
+        };
       
       pdfStore.clear().onsuccess = onComplete;
       decryptedStore.clear().onsuccess = onComplete;

@@ -1288,14 +1288,12 @@ const AutoDecryptionView = ({
   contract: Contract; 
   onDecrypted: (blob: Blob) => void; 
 }) => {
-  const [decryptionStep, setDecryptionStep] = useState<string>('loading-metadata');
-  const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const autoDecrypt = async () => {
       console.log('[PDFEditor:AutoDecryptionView] Starting auto-decryption...');
-      setDecryptionStep('loading-metadata');
       setError(null);
       setProgress(10);
 
@@ -1328,7 +1326,6 @@ const AutoDecryptionView = ({
         }
 
         setProgress(20);
-        setDecryptionStep('downloading');
 
         // Check cache first, then download from AWS if needed
         let encryptedData: ArrayBuffer;
@@ -1376,7 +1373,6 @@ const AutoDecryptionView = ({
 
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 40%');
         setProgress(40);
-        setDecryptionStep('initializing-seal');
 
         console.log('[PDFEditor:AutoDecryptionView] Importing required modules...');
         // Initialize SEAL client
@@ -1401,7 +1397,6 @@ const AutoDecryptionView = ({
         // **STEP 4: Get Contract-Specific Wallet (Updated)**
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 50%');
         setProgress(50);
-        setDecryptionStep('authorizing');
 
         console.log('[PDFEditor:AutoDecryptionView] Getting contract-specific wallet for this contract...');
 
@@ -1464,7 +1459,6 @@ const AutoDecryptionView = ({
         // **Continue with authorization using contract-specific credentials**
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 60%');
         setProgress(60);
-        setDecryptionStep('creating-session');
 
         // **NEW: Get the ephemeral keypair's public key address**
         const ephemeralPublicKeyAddress = ephemeralKeypair.getPublicKey().toSuiAddress();
@@ -1566,7 +1560,6 @@ const AutoDecryptionView = ({
 
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 70%');
         setProgress(70);
-        setDecryptionStep('fetching-keys');
 
         // Create session key with contract-specific credentials
         console.log('[PDFEditor:AutoDecryptionView] Creating session key...');
@@ -1640,7 +1633,6 @@ const AutoDecryptionView = ({
 
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 90%');
         setProgress(90);
-        setDecryptionStep('decrypting');
 
         // Decrypt the data
         console.log('[PDFEditor:AutoDecryptionView] Decrypting data...');
@@ -1652,7 +1644,6 @@ const AutoDecryptionView = ({
 
         console.log('[PDFEditor:AutoDecryptionView] Setting progress to 100%');
         setProgress(100);
-        setDecryptionStep('complete');
 
         // Create blob and call success handler
         console.log('[PDFEditor:AutoDecryptionView] Creating decrypted blob...');
@@ -1662,7 +1653,6 @@ const AutoDecryptionView = ({
       } catch (err) {
         console.error('[PDFEditor:AutoDecryptionView] Auto-decryption failed:', err);
         setError(err instanceof Error ? err.message : 'Failed to decrypt PDF automatically');
-        setDecryptionStep('error');
       }
     };
 

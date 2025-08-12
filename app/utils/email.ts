@@ -85,7 +85,7 @@ export const validateSignerEmails = (emails: string[], currentUserEmail?: string
   const errors: string[] = [];
   const seen = new Set<string>();
   
-  emails.forEach((email, index) => {
+  emails.forEach((email) => {
     const trimmedEmail = email.trim();
     
     if (!trimmedEmail) {

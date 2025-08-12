@@ -77,10 +77,10 @@ export async function decryptContractPDF(params: DecryptionParams): Promise<Decr
       } else {
         throw new Error('Not in cache');
       }
-    } catch (cacheError) {
-      // Fallback to AWS download
-      console.log('[SEAL_DECRYPT] Cache miss, downloading from AWS');
-      const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
+      } catch (cacheError) {
+        // Fallback to AWS download
+        console.log('[SEAL_DECRYPT] Cache miss, downloading from AWS', cacheError);
+        const response = await fetch(`/api/contracts/download-pdf/${contract.id}?view=inline`);
       
       if (!response.ok) {
         throw new Error('Failed to download encrypted PDF from AWS');

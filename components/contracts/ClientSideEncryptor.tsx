@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { SealClient, getAllowlistedKeyServers } from '@mysten/seal';
+import { SealClient } from '@mysten/seal';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromHEX, toHEX } from '@mysten/sui/utils';
-import jsPDF from 'jspdf';
 import { downloadRecoveryData } from '@/app/utils/recoveryData';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { hashGoogleId } from '@/app/utils/privacy'; // Add this import
@@ -832,12 +831,12 @@ async function addContractAppendixToPDF(pdfDoc: PDFDocument, contractId: string,
             
             currentY = sigY - 25;
             addLog(`Added professional signature display for ${sig.userEmail}`);
-          } catch (imageError) {
-            addLog(`Failed to add signature image for ${sig.userEmail}`);
-            addText('[Signature image could not be displayed]', {
-              isItalic: true,
-              size: 10,
-              color: rgb(0.6, 0.6, 0.6),
+            } catch (imageError) {
+              addLog(`Failed to add signature image for ${sig.userEmail}: ${String(imageError)}`);
+              addText('[Signature image could not be displayed]', {
+                isItalic: true,
+                size: 10,
+                color: rgb(0.6, 0.6, 0.6),
               spaceAfter: 20
             });
           }

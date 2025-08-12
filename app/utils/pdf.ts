@@ -87,10 +87,10 @@ export const generateContractPDF = async (
       } else {
         enhancedDocumentContent = generateEnhancedContractDocument(contract);
       }
-    } catch (fetchError) {
-      console.log('[PDF Generation] Failed to fetch signature data, using base document');
-      enhancedDocumentContent = generateEnhancedContractDocument(contract);
-    }
+      } catch (fetchError) {
+        console.log('[PDF Generation] Failed to fetch signature data, using base document', fetchError);
+        enhancedDocumentContent = generateEnhancedContractDocument(contract);
+      }
 
     // Create PDF with the same settings as ClientSideEncryptor
     const pdf = new jsPDF({

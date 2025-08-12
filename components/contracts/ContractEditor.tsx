@@ -13,11 +13,9 @@ import {
   CardTitle 
 } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Save, X, Plus, Trash2, User, Send, ChevronLeft, Sparkles, ArrowRight, Loader2, Brain, Wand2, FileText, Lightbulb, Check, AlertCircle, Info, Square, RotateCcw, Pen, MapPin } from 'lucide-react'
+import { Save, X, Plus, Trash2, User, Send, ChevronLeft, Sparkles, Loader2, Brain, Wand2, Lightbulb, Check, AlertCircle, Info } from 'lucide-react'
 import { updateContract, ContractWithRelations } from '@/app/utils/contracts'
 import { detectGroupedChanges, applyGroupedChanges, ChangeGroup } from '@/app/utils/textDiff'
-import AIChangesReview from './AIChangesReview'
 import ContractEditorWithDiff from './ContractEditorWithDiff'
 import { toast } from '@/components/ui/use-toast'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
@@ -121,10 +119,8 @@ export default function ContractEditor({
   
   // ✅ ADD ALL THESE MISSING STATE VARIABLES:
   // Signature positioning state
-  const [signaturePositions, setSignaturePositions] = useState<SignaturePosition[]>([])
-  const [signerWallets, setSignerWallets] = useState<string[]>([])
-  const [selectedSignerWallet, setSelectedSignerWallet] = useState<string>('')
-  const [isSignatureBoxMode, setIsSignatureBoxMode] = useState(false)
+    const [signaturePositions, setSignaturePositions] = useState<SignaturePosition[]>([])
+    const [signerWallets, setSignerWallets] = useState<string[]>([])
   
   // Track original values to detect changes with proper typing
   const [originalValues, setOriginalValues] = useState<OriginalValues>({
@@ -149,7 +145,7 @@ export default function ContractEditor({
     "Simplify the language for easier understanding",
     "Add liability and insurance provisions"
   ])
-  const [aiSuggestion, setAiSuggestion] = useState<string>('')
+    const [, setAiSuggestion] = useState<string>('')
   const [detectedChangeGroups, setDetectedChangeGroups] = useState<ChangeGroup[]>([])
   const [acceptedGroups, setAcceptedGroups] = useState<string[]>([])
   const [rejectedGroups, setRejectedGroups] = useState<string[]>([])
@@ -163,10 +159,10 @@ export default function ContractEditor({
   const [hasPdfFile, setHasPdfFile] = useState(!!contract.s3FileKey);
   
   // **NEW: Add state for managing decrypted emails**
-  const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
-  const [isDecryptingSigners, setIsDecryptingSigners] = useState(false);
-  const [canDecryptSigners, setCanDecryptSigners] = useState(false);
-  const [signersDecrypted, setSignersDecrypted] = useState(false);
+    const [decryptedSigners, setDecryptedSigners] = useState<string[]>([]);
+    const [, setIsDecryptingSigners] = useState(false);
+    const [canDecryptSigners, setCanDecryptSigners] = useState(false);
+    const [signersDecrypted, setSignersDecrypted] = useState(false);
   
   // **NEW: Check if current user can decrypt emails**
   useEffect(() => {
@@ -549,7 +545,7 @@ export default function ContractEditor({
   }, [startWithAI, content]);
 
   // Add a handler for PDF file updates
-  const handlePdfFileUpdate = (newFile: File) => {
+    const handlePdfFileUpdate = () => {
     // Mark that we now have a PDF file
     setHasPdfFile(true);
     
@@ -751,9 +747,7 @@ export default function ContractEditor({
   };
 
   // ✅ ADD: Computed value for whether emails are decrypted
-  const hasDecryptedEmails = signersDecrypted && decryptedSigners.length > 0;
-
-  return (
+    return (
     <Card className="w-full h-full border-none shadow-none">
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">

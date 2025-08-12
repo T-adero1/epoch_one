@@ -37,9 +37,10 @@ export default function PasswordPage() {
         const data = await response.json();
         setError(data.message || 'Invalid password');
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
-    } finally {
+      } catch (err) {
+        console.error('Password update failed:', err);
+        setError('Something went wrong. Please try again.');
+      } finally {
       setLoading(false);
     }
   };

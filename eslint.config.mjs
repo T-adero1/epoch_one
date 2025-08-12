@@ -27,10 +27,9 @@ const eslintConfig = [
       "no-undef": "error",
       "no-unreachable": "error",
       "no-unexpected-multiline": "error",
-      "@typescript-eslint/no-unused-vars": "error", 
-      
-      
-     
+      "@typescript-eslint/no-unused-vars": "error",
+      // Allow unescaped entities in JSX
+      "react/no-unescaped-entities": "off",
     }
   }
 ];

@@ -79,22 +79,9 @@ function safeStringify(obj: any, depth = 0, maxDepth = 3): string {
     
     return result.join('');
   } catch (e) {
+    console.error('Error stringifying object:', e);
     return '[Error Stringifying]';
   }
-}
-
-// Interface for the session structure
-interface EphemeralSession {
-  user: {
-    zkLoginState: {
-      ephemeralKeyPair: {
-        privateKey: string; // Bech32 format
-        publicKey: string;  // Base64 format
-      }
-    },
-    address: string; // zkLogin address
-  },
-  expiry: number;
 }
 
 // Define Decrypt Button props
@@ -269,11 +256,11 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       });
       
       // STEP 2: Build transaction kind bytes (no gas info)
-      const txKindBytes = await tx.build({ 
-        client: suiClient, 
-        onlyTransactionKind: true 
-      });
-      console.log("[DecryptButton] Transaction kind bytes built");
+        await tx.build({
+          client: suiClient,
+          onlyTransactionKind: true
+        });
+        console.log("[DecryptButton] Transaction kind bytes built");
       
       // STEP 3: Request sponsorship from server
       console.log("[DecryptButton] Requesting transaction sponsorship from server");
@@ -299,12 +286,12 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
 
       if (!sponsorResponse.ok) {
         let errorText;
-        try {
-          const errorJson = await sponsorResponse.json();
-          errorText = JSON.stringify(errorJson);
-        } catch (e) {
-          errorText = await sponsorResponse.text();
-        }
+          try {
+            const errorJson = await sponsorResponse.json();
+            errorText = JSON.stringify(errorJson);
+          } catch {
+            errorText = await sponsorResponse.text();
+          }
         console.error("[DecryptButton] Sponsorship failed:", {
           status: sponsorResponse.status,
           error: errorText
