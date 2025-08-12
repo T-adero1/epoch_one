@@ -1017,7 +1017,7 @@ export default function ContractDetails({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => copySigningLink(signature || signer)} // ✅ Fix: Use signer email if no signature exists
+                                      onClick={() => copySigningLink()}
                                       className="text-xs sm:text-sm"
                                     >
                                       <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
@@ -1105,7 +1105,7 @@ export default function ContractDetails({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => copySigningLink(signature || signer)} // ✅ Fix: Use signer email if no signature exists
+                                      onClick={() => copySigningLink()}
                                       className="text-xs sm:text-sm"
                                     >
                                       <Share2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />

@@ -456,7 +456,7 @@ export default function ContractEditorWithDiff({
   return (
     <div className="h-full overflow-y-auto bg-white">
       <div className="min-h-full">
-        {changeGroups.map((group, index) => renderGroup(group, index))}
+        {changeGroups.map((group) => renderGroup(group))}
       </div>
 
       {/* Keyboard shortcuts help - Mobile Optimized */}

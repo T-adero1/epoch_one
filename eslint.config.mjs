@@ -27,7 +27,6 @@ const eslintConfig = [
       "no-undef": "error",
       "no-unreachable": "error",
       "no-unexpected-multiline": "error",
-      // Enforce detection of unused variables
       "@typescript-eslint/no-unused-vars": "error",
       // Allow unescaped entities in JSX
       "react/no-unescaped-entities": "off",
