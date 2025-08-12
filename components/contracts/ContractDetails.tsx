@@ -309,7 +309,7 @@ export default function ContractDetails({
       
       if (cachedPDF) {
         console.log('[ContractDetails] Found decrypted PDF in cache!');
-        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(cachedPDF.decryptedData)], { type: 'application/pdf' });
         await handleDecryptionSuccess(blob);
       } else {
         console.log('[ContractDetails] No decrypted PDF found in cache');
@@ -1257,7 +1257,7 @@ const AutoDecryptionView = ({
         }
 
         // Convert to blob and notify parent
-        const decryptedBlob = new Blob([result.decryptedData], { type: 'application/pdf' });
+        const decryptedBlob = new Blob([new Uint8Array(result.decryptedData)], { type: 'application/pdf' });
         onDecrypted(decryptedBlob);
 
         if (result.wasFromCache) {

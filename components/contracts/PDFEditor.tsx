@@ -209,7 +209,7 @@ export default function PDFEditor({
       
       if (cachedPDF) {
         console.log('[PDFEditor] Found decrypted PDF in cache!');
-        const blob = new Blob([cachedPDF.decryptedData], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(cachedPDF.decryptedData)], { type: 'application/pdf' });
         await handleDecryptionSuccess(blob);
       } else {
         console.log('[PDFEditor] No decrypted PDF found in cache');
@@ -1647,7 +1647,7 @@ const AutoDecryptionView = ({
 
         // Create blob and call success handler
         console.log('[PDFEditor:AutoDecryptionView] Creating decrypted blob...');
-        const decryptedBlob = new Blob([decryptedData], { type: 'application/pdf' });
+        const decryptedBlob = new Blob([new Uint8Array(decryptedData)], { type: 'application/pdf' });
         onDecrypted(decryptedBlob);
 
       } catch (err) {

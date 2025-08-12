@@ -11,17 +11,23 @@ export interface ZkSignatureData {
 }
 
 export async function createSHA256Hash(input: string | Uint8Array): Promise<string> {
-  let data: Uint8Array;
   if (typeof input === 'string') {
-    data = new TextEncoder().encode(input);
+    const data = new TextEncoder().encode(input);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   } else {
-    data = input;
+    // ✅ FIX: For Uint8Array input, create a proper ArrayBuffer
+    const buffer = new ArrayBuffer(input.length);
+    const view = new Uint8Array(buffer);
+    view.set(input);
+    
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
-  
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
 }
 
 export async function signData(data: string, ephemeralKeyPair: Ed25519Keypair): Promise<string> {
