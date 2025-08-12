@@ -12,30 +12,27 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { 
-  ChevronLeft, 
-  FileText, 
-  Clock, 
-  Edit, 
-  UserCheck, 
-  Send, 
+import {
+  ChevronLeft,
+  FileText,
+  Clock,
+  Edit,
+  UserCheck,
+  Send,
   Share2,
   Lock,
   Loader2,
   AlertTriangle,
   RefreshCw,
-  Shield,
-  ExternalLink,
-  Download
+  Shield
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ContractStatus, SignatureStatus } from '@prisma/client'
 import ContractEditor from './ContractEditor'
 import { Avatar, AvatarFallback} from '@/components/ui/avatar'
-import { generateSigningLink, areAllSignaturesDone } from '@/app/utils/signatures'
+import { areAllSignaturesDone } from '@/app/utils/signatures'
 import { useZkLogin } from '@/app/contexts/ZkLoginContext'
 import { toast } from '@/components/ui/use-toast'
-import EncryptedEmailDisplay from '@/components/contracts/EncryptedEmailDisplay';
 // **NEW: Import email decryption utilities**
 import { decryptSignerEmails, canDecryptEmails } from '@/app/utils/emailEncryption';
 
@@ -122,7 +119,7 @@ export default function ContractDetails({
   setCurrentSessionKey
 }: ContractDetailsProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [copySuccess, setCopySuccess] = useState('')
+  const [copySuccess] = useState('')
   const { user } = useZkLogin();
 
   // **UPDATED: Enhanced PDF viewing state with encryption support**
@@ -223,7 +220,7 @@ export default function ContractDetails({
   }
   
   // **UPDATED: Fix copySigningLink to handle both signature objects and signer emails**
-  const copySigningLink = (signerIdentifier: ContractSignature | string) => {
+  const copySigningLink = () => {
     const url = `${window.location.origin}/sign/${contract.id}`;
     navigator.clipboard.writeText(url);
     toast({
@@ -552,44 +549,7 @@ export default function ContractDetails({
     }
   };
 
-  // **NEW: Download handler for decrypted PDFs**
-  const downloadPdf = async () => {
-    console.log('[ContractDetails] Download PDF requested');
-    try {
-      // Handle decrypted PDF download
-      if (decryptedPdfBlob && decryptedPdfUrl) {
-        console.log('[ContractDetails] Downloading decrypted PDF blob');
-        const link = document.createElement('a');
-        link.href = decryptedPdfUrl;
-        link.download = contract.s3FileName?.replace('.encrypted.', '.') || 'decrypted-contract.pdf';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-      
-      // Handle regular PDF download
-      console.log('[ContractDetails] Downloading regular PDF from server');
-      const response = await fetch(`/api/contracts/download-pdf/${contract.id}/download`);
-      if (!response.ok) throw new Error('Download failed');
-      
-      const data = await response.json();
-      
-      const link = document.createElement('a');
-      link.href = data.downloadUrl;
-      link.download = data.fileName || 'contract.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error('[ContractDetails] Error downloading PDF:', error);
-      toast({
-        title: "Download Failed", 
-        description: "Failed to download PDF. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
+  // Placeholder: download functionality handled elsewhere
 
   // **UPDATED: Enhanced PDF rendering with encryption support and no double loading**
   const renderPDFContent = () => {

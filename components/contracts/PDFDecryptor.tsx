@@ -155,11 +155,11 @@ export default function PDFDecryptor({
         ],
       });
       
-      // Build transaction kind bytes
-      const txKindBytes = await tx.build({ 
-        client: suiClient, 
-        onlyTransactionKind: true 
-      });
+        // Build transaction kind bytes
+        await tx.build({
+          client: suiClient,
+          onlyTransactionKind: true
+        });
       
       // Request sponsorship from server
       const sponsorResponse = await fetch('/api/auth/sponsor', {
@@ -176,12 +176,12 @@ export default function PDFDecryptor({
 
       if (!sponsorResponse.ok) {
         let errorText;
-        try {
-          const errorJson = await sponsorResponse.json();
-          errorText = JSON.stringify(errorJson);
-        } catch (e) {
-          errorText = await sponsorResponse.text();
-        }
+          try {
+            const errorJson = await sponsorResponse.json();
+            errorText = JSON.stringify(errorJson);
+          } catch {
+            errorText = await sponsorResponse.text();
+          }
         throw new Error(`Sponsorship failed: ${sponsorResponse.status} ${errorText}`);
       }
       

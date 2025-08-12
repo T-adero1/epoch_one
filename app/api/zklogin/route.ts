@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { error: `Prover service error: ${response.status}` },
+        { error: `Prover service error: ${response.status}`, details: errorData },
         { status: response.status }
       );
     }

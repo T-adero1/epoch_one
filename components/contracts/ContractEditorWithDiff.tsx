@@ -87,10 +87,7 @@ export default function ContractEditorWithDiff({
   showDiff
 }: ContractEditorWithDiffProps) {
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
-  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
-  const [isSelected, setIsSelected] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
   const [actionHistory, setActionHistory] = useState<{ groupId: string; action: 'accept' | 'reject' }[]>([]);
 
   const handleAcceptGroup = (groupId: string) => {
@@ -127,19 +124,11 @@ export default function ContractEditorWithDiff({
     }
   };
 
-  const toggleExpanded = (groupId: string) => {
-    setExpandedGroups(prev => 
-      prev.includes(groupId) 
-        ? prev.filter(id => id !== groupId)
-        : [...prev, groupId]
-    );
-  };
-
-  const getGroupStatus = (groupId: string) => {
-    if (acceptedGroups.includes(groupId)) return 'accepted';
-    if (rejectedGroups.includes(groupId)) return 'rejected';
-    return 'pending';
-  };
+    const getGroupStatus = (groupId: string) => {
+      if (acceptedGroups.includes(groupId)) return 'accepted';
+      if (rejectedGroups.includes(groupId)) return 'rejected';
+      return 'pending';
+    };
 
   const getGroupIcon = (type: string) => {
     switch (type) {
@@ -223,7 +212,7 @@ export default function ContractEditorWithDiff({
     );
   };
 
-  const renderGroup = (group: ChangeGroup, index: number) => {
+    const renderGroup = (group: ChangeGroup) => {
     const status = getGroupStatus(group.id);
     const isSpacingOnly = isSpacingOnlyChange(group);
     const showControls = group.type !== 'unchanged' && status === 'pending' && !isSpacingOnly;
@@ -251,14 +240,12 @@ export default function ContractEditorWithDiff({
     const groupSummary = getGroupSummary(group);
 
     return (
-      <div 
-        key={group.id} 
-        className={`group ${getGroupStyle(group)} mb-1`}
-        onMouseEnter={() => setHoveredGroup(group.id)}
-        onMouseLeave={() => setHoveredGroup(null)}
-        onClick={(e) => showControls && handleGroupClick(group.id, e)}
-        onContextMenu={(e) => showControls && handleGroupRightClick(group.id, e)}
-        onTouchStart={(e) => {
+        <div
+          key={group.id}
+          className={`group ${getGroupStyle(group)} mb-1`}
+          onClick={(e) => showControls && handleGroupClick(group.id, e)}
+          onContextMenu={(e) => showControls && handleGroupRightClick(group.id, e)}
+          onTouchStart={(e) => {
           if (!showControls) return;
           // Handle long press for mobile reject
           const touchTimer = setTimeout(() => {
@@ -281,7 +268,7 @@ export default function ContractEditorWithDiff({
         <div className="flex items-center justify-between p-2 sm:p-3 bg-white bg-opacity-50">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             {/* Selection checkbox for multi-select */}
-            {showControls && isSelected && (
+            {showControls && (
               <div className="w-4 h-4 bg-purple-500 rounded border-2 border-purple-500 flex items-center justify-center flex-shrink-0">
                 <Check className="h-2 w-2 text-white" />
               </div>
@@ -332,7 +319,7 @@ export default function ContractEditorWithDiff({
           
           {/* Quick action buttons - Always visible on mobile for pending items */}
           {showControls && status === 'pending' && (
-            <div className={`flex gap-1 ${isHovered || isFocused ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'} transition-opacity duration-200`}>
+            <div className={`flex gap-1 ${isFocused ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'} transition-opacity duration-200`}>
               <Button
                 size="sm"
                 variant="outline"

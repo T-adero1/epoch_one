@@ -232,9 +232,9 @@ function HomePageContent() {
             const jwtPayload = JSON.parse(atob(jwt.split('.')[1]));
             console.log('[LOGIN] JWT subject:', jwtPayload.sub);
             console.log('[LOGIN] JWT provider:', jwtPayload.iss);
-          } catch (e) {
-            console.log('[LOGIN] Could not decode JWT for logging');
-          }
+            } catch (e) {
+              console.log('[LOGIN] Could not decode JWT for logging', e);
+            }
           
           await completeLogin(jwt);
           console.log('[LOGIN] Login completed successfully');

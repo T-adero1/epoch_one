@@ -238,11 +238,6 @@ const performanceTracker = {
   }
 };
 
-// Add this function to manage parallel operations
-const runParallel = async <T extends any[]>(...promises: Promise<T[number]>[]) => {
-  return Promise.all(promises);
-};
-
 // Add this to pre-generate keypairs during idle time
 const usePreGeneratedKeys = () => {
   const [preGeneratedKeyPair, setPreGeneratedKeyPair] = useState<Ed25519Keypair | null>(null);

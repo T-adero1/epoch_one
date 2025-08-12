@@ -42,33 +42,11 @@ export async function POST(request: NextRequest) {
     // Forward the pre-encrypted content to the existing upload handler
     // We're leveraging the existing Python backend, but skipping the encryption step
     
-    // Prepare data for standard upload handler
-    const forwardData = {
-      contractId,
-      useSeal: true,
-      isBase64: true,
-      documentContent: encryptedContent, // Already encrypted content in base64
-      signerAddresses,
-      metadata: {
-        walrus: {
-          encryption: {
-            method: 'seal',
-            documentId,
-            allowlistId,
-            salt
-          },
-          authorizedWallets: signerAddresses
-        }
-      },
-      // Add flag to indicate pre-encrypted content
-      preEncrypted: true
-    };
-    
     // Forward to existing upload handler
     // NOTE: In a real implementation, we'd either:
     // 1. Call directly to the Python function if running in a shared environment
     // 2. Make an internal HTTP request to the existing endpoint
-    
+
     // For demo purposes, we'll just mock the response that would come from the upload handler
     const mockResponse = {
       success: true,
