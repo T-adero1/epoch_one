@@ -1,7 +1,7 @@
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { fromB64, toB64 } from '@mysten/sui/utils';
+import { toB64 } from '@mysten/sui/utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { bech32 } from 'bech32';
 
@@ -157,4 +157,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}  

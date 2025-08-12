@@ -40,7 +40,7 @@ export async function POST(
     };
 
     // Update the contract
-    const updatedContract = await prisma.contract.update({
+    await prisma.contract.update({
       where: { id: contractId },
       data: { metadata: updatedMetadata }
     });

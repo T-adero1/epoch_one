@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
 // Get the site password from environment variables
 // Fallback to a default for development or if not set
@@ -52,4 +51,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}  
