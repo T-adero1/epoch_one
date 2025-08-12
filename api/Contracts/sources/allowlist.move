@@ -13,14 +13,12 @@ const EDuplicate: u64 = 2;
 const MARKER: u64 = 3;
 const EExpired: u64 = 4;
 const ENotAuthorized: u64 = 5;
-const EExpirationTooLong: u64 = 6;
 
 public struct Allowlist has key {
     id: UID,
     name: String,
     zklogin_wallets: vector<address>,  // Only zkLogin wallets
     ephemeral_wallets: vector<address>, // Only ephemeral wallets
-    max_ephemeral_duration_ms: u64,    // Maximum allowed ephemeral key duration
 }
 
 public struct Cap has key {
@@ -80,7 +78,6 @@ public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
         zklogin_wallets: vector::empty(),
         ephemeral_wallets: vector::empty(),
         name: name,
-        max_ephemeral_duration_ms: 0, // Default to 0, meaning no max duration
     };
     let cap = Cap {
         id: object::new(ctx),
@@ -117,139 +114,6 @@ public fun remove(allowlist: &mut Allowlist, cap: &Cap, account: address) {
     };
     
     allowlist.zklogin_wallets = new_list;
-}
-
-/// Set maximum ephemeral key duration (admin only)
-public fun set_max_ephemeral_duration(
-    allowlist: &mut Allowlist, 
-    cap: &Cap, 
-    max_duration_ms: u64
-) {
-    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    allowlist.max_ephemeral_duration_ms = max_duration_ms;
-}
-
-/// Get maximum ephemeral key duration
-public fun get_max_ephemeral_duration(allowlist: &Allowlist): u64 {
-    allowlist.max_ephemeral_duration_ms
-}
-
-/// Entry function to set maximum ephemeral key duration
-entry fun set_max_ephemeral_duration_entry(
-    allowlist: &mut Allowlist, 
-    cap: &Cap, 
-    max_duration_ms: u64
-) {
-    set_max_ephemeral_duration(allowlist, cap, max_duration_ms);
-}
-
-/// Helper constants for common durations
-public fun duration_1_hour(): u64 { 3600000 }      // 1 hour in milliseconds
-public fun duration_24_hours(): u64 { 86400000 }   // 24 hours in milliseconds
-public fun duration_7_days(): u64 { 604800000 }    // 7 days in milliseconds
-public fun duration_30_days(): u64 { 2592000000 }  // 30 days in milliseconds
-
-/// Admin function to force expire all ephemeral keys immediately
-entry fun force_expire_all_ephemeral_keys(
-    allowlist: &mut Allowlist,
-    cap: &Cap,
-    clock: &Clock,
-    ctx: &TxContext
-) {
-    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    if (!df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
-        return
-    };
-    
-    let ephem_keys = df::borrow_mut<String, EphemeralKeys>(&mut allowlist.id, ephem_key);
-    let current_time = clock.timestamp_ms();
-    let sender = ctx.sender();
-    
-    // Get all ephemeral keys to remove
-    let mut keys_to_remove = vector::empty<address>();
-    let mut i = 0;
-    while (i < allowlist.ephemeral_wallets.length()) {
-        let ephemeral_addr = allowlist.ephemeral_wallets[i];
-        if (table::contains(&ephem_keys.keys, ephemeral_addr)) {
-            vector::push_back(&mut keys_to_remove, ephemeral_addr);
-        };
-        i = i + 1;
-    };
-    
-    // Clear all ephemeral wallets from the allowlist
-    allowlist.ephemeral_wallets = vector::empty<address>();
-    
-    // Remove all ephemeral keys and emit events
-    i = 0;
-    while (i < keys_to_remove.length()) {
-        let key = keys_to_remove[i];
-        
-        // Remove from table
-        let EphemeralKey { owner: _, expiry: _, document_ids: _ } = 
-            table::remove(&mut ephem_keys.keys, key);
-        
-        // Emit event
-        event::emit(EphemeralKeyExpired {
-            ephemeral_key: key,
-            removed_by: sender
-        });
-        
-        i = i + 1;
-    };
-}
-
-/// Admin function to force expire specific ephemeral keys
-entry fun force_expire_ephemeral_keys(
-    allowlist: &mut Allowlist,
-    cap: &Cap,
-    keys_to_expire: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext
-) {
-    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    if (!df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
-        return
-    };
-    
-    let ephem_keys = df::borrow_mut<String, EphemeralKeys>(&mut allowlist.id, ephem_key);
-    let sender = ctx.sender();
-    
-    let mut i = 0;
-    while (i < keys_to_expire.length()) {
-        let key_to_expire = keys_to_expire[i];
-        
-        // Remove from ephemeral keys table if it exists
-        if (table::contains(&ephem_keys.keys, key_to_expire)) {
-            let EphemeralKey { owner: _, expiry: _, document_ids: _ } = 
-                table::remove(&mut ephem_keys.keys, key_to_expire);
-            
-            // Remove from ephemeral wallets list
-            let mut j = 0;
-            let mut new_ephemeral_list = vector::empty<address>();
-            
-            while (j < vector::length(&allowlist.ephemeral_wallets)) {
-                let addr = *vector::borrow(&allowlist.ephemeral_wallets, j);
-                if (addr != key_to_expire) {
-                    vector::push_back(&mut new_ephemeral_list, addr);
-                };
-                j = j + 1;
-            };
-            
-            allowlist.ephemeral_wallets = new_ephemeral_list;
-            
-            // Emit event
-            event::emit(EphemeralKeyExpired {
-                ephemeral_key: key_to_expire,
-                removed_by: sender
-            });
-        };
-        
-        i = i + 1;
-    };
 }
 
 //////////////////////////////////////////////////////////
@@ -312,7 +176,6 @@ public fun new_allowlist_for_testing(ctx: &mut TxContext): Allowlist {
         name: utf8(b"test"),
         zklogin_wallets: vector::empty(),
         ephemeral_wallets: vector::empty(),
-        max_ephemeral_duration_ms: 0, // Default to 0 for testing
     }
 }
 
@@ -456,14 +319,8 @@ entry fun authorize_ephemeral_key(
         });
     };
     
-    // Get current time and validate expiry duration
+    // Get current time and calculate expiry
     let current_time = clock.timestamp_ms();
-    
-    // Check if expiry duration exceeds maximum allowed (if set)
-    if (allowlist.max_ephemeral_duration_ms > 0) {
-        assert!(expiry_ms <= allowlist.max_ephemeral_duration_ms, EExpirationTooLong);
-    };
-    
     let expiry = current_time + expiry_ms;
     
     // Add or update ephemeral key data
@@ -558,14 +415,8 @@ entry fun extend_ephemeral_key(
     let key_data = table::borrow(&ephem_keys.keys, ephemeral_key);
     assert!(key_data.owner == owner, ENotAuthorized);
     
-    // Calculate new expiry time and validate duration
+    // Calculate new expiry time
     let current_time = clock.timestamp_ms();
-    
-    // Check if new expiry duration exceeds maximum allowed (if set)
-    if (allowlist.max_ephemeral_duration_ms > 0) {
-        assert!(new_expiry_ms <= allowlist.max_ephemeral_duration_ms, EExpirationTooLong);
-    };
-    
     let new_expiry = current_time + new_expiry_ms;
     
     // Remove and re-add with updated expiry
