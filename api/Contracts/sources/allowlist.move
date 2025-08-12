@@ -207,12 +207,32 @@ entry fun add_users_entry(
     // Run cleanup at the beginning
     clean_expired_keys_internal(allowlist, clock);
     
+    let ephem_key = std::string::utf8(b"ephemeral_keys");
+    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key);
+    
     let mut i = 0;
     while (i < users.length()) {
-        // Only add zkLogin wallets if not already in list
-        if (!allowlist.zklogin_wallets.contains(&users[i])) {
-            allowlist.zklogin_wallets.push_back(users[i]);
+        let user = users[i];
+        
+        // Check if this address is an ephemeral key
+        let mut is_ephemeral = false;
+        if (ephem_keys_exist) {
+            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key);
+            is_ephemeral = table::contains(&ephem_keys.keys, user);
         };
+        
+        // Also check if it's in the ephemeral_wallets list
+        if (!is_ephemeral) {
+            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
+        };
+        
+        // Only add to zklogin_wallets if:
+        // 1. Not already in zklogin_wallets list
+        // 2. Not an ephemeral key (in either registry or ephemeral_wallets list)
+        if (!allowlist.zklogin_wallets.contains(&user) && !is_ephemeral) {
+            allowlist.zklogin_wallets.push_back(user);
+        };
+        
         i = i + 1;
     };
 }
@@ -237,13 +257,41 @@ entry fun add_users_and_publish_entry(
     let mut user_key = std::string::utf8(b"users_");
     std::string::append(&mut user_key, blob_id);
     
-    // Add user info under a different key to avoid collision
+    // Filter out ephemeral keys from document-specific users
+    let mut filtered_users = vector::empty<address>();
+    let ephem_key_str = std::string::utf8(b"ephemeral_keys");
+    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
+    
+    let mut i = 0;
+    while (i < users.length()) {
+        let user = users[i];
+        let mut is_ephemeral = false;
+        
+        // Check if user is an ephemeral key
+        if (ephem_keys_exist) {
+            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
+            is_ephemeral = table::contains(&ephem_keys.keys, user);
+        };
+        
+        if (!is_ephemeral) {
+            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
+        };
+        
+        // Only add non-ephemeral users to document-specific list
+        if (!is_ephemeral) {
+            filtered_users.push_back(user);
+        };
+        
+        i = i + 1;
+    };
+    
+    // Add filtered user info under document key
     if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
         let old_users = df::remove<String, DocUsers>(&mut allowlist.id, user_key);
         // We need to do something with old_users because it doesn't have drop
         let DocUsers { users: _ } = old_users; // Explicitly drop fields
     };
-    df::add(&mut allowlist.id, user_key, DocUsers { users });
+    df::add(&mut allowlist.id, user_key, DocUsers { users: filtered_users });
 }
 
 /// Update document access in one transaction - for existing documents
@@ -263,14 +311,43 @@ entry fun update_document_access(
     
     let mut user_key = std::string::utf8(b"users_");
     std::string::append(&mut user_key, blob_id);
+    
+    // Filter out ephemeral keys from document-specific users
+    let mut filtered_users = vector::empty<address>();
+    let ephem_key_str = std::string::utf8(b"ephemeral_keys");
+    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
+    
+    let mut i = 0;
+    while (i < users.length()) {
+        let user = users[i];
+        let mut is_ephemeral = false;
+        
+        // Check if user is an ephemeral key
+        if (ephem_keys_exist) {
+            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
+            is_ephemeral = table::contains(&ephem_keys.keys, user);
+        };
+        
+        if (!is_ephemeral) {
+            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
+        };
+        
+        // Only add non-ephemeral users to document-specific list
+        if (!is_ephemeral) {
+            filtered_users.push_back(user);
+        };
+        
+        i = i + 1;
+    };
+    
     // Update document-specific access list
     if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
         let old_users = df::remove<String, DocUsers>(&mut allowlist.id, user_key);
         let DocUsers { users: _ } = old_users; // Explicitly drop fields
     };
     
-    // Add the new user mapping
-    df::add(&mut allowlist.id, user_key, DocUsers { users });
+    // Add the filtered user mapping
+    df::add(&mut allowlist.id, user_key, DocUsers { users: filtered_users });
 }
 
 // Authorize an ephemeral key for document access
