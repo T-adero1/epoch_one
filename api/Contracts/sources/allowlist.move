@@ -17,7 +17,8 @@ const ENotAuthorized: u64 = 5;
 public struct Allowlist has key {
     id: UID,
     name: String,
-    list: vector<address>,
+    zklogin_wallets: vector<address>,  // Only zkLogin wallets
+    ephemeral_wallets: vector<address>, // Only ephemeral wallets
 }
 
 public struct Cap has key {
@@ -74,7 +75,8 @@ public struct EphemeralKeyExpired has copy, drop {
 public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
     let allowlist = Allowlist {
         id: object::new(ctx),
-        list: vector::empty(),
+        zklogin_wallets: vector::empty(),
+        ephemeral_wallets: vector::empty(),
         name: name,
     };
     let cap = Cap {
@@ -92,8 +94,8 @@ entry fun create_allowlist_entry(name: String, ctx: &mut TxContext) {
 
 public fun add(allowlist: &mut Allowlist, cap: &Cap, account: address) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    assert!(!allowlist.list.contains(&account), EDuplicate);
-    allowlist.list.push_back(account);
+    assert!(!allowlist.zklogin_wallets.contains(&account), EDuplicate);
+    allowlist.zklogin_wallets.push_back(account);
 }
 
 public fun remove(allowlist: &mut Allowlist, cap: &Cap, account: address) {
@@ -103,15 +105,15 @@ public fun remove(allowlist: &mut Allowlist, cap: &Cap, account: address) {
     let mut i = 0;
     let mut new_list = vector::empty<address>();
     
-    while (i < vector::length(&allowlist.list)) {
-        let addr = *vector::borrow(&allowlist.list, i);
+    while (i < vector::length(&allowlist.zklogin_wallets)) {
+        let addr = *vector::borrow(&allowlist.zklogin_wallets, i);
         if (addr != account) {
             vector::push_back(&mut new_list, addr);
         };
         i = i + 1;
     };
     
-    allowlist.list = new_list;
+    allowlist.zklogin_wallets = new_list;
 }
 
 //////////////////////////////////////////////////////////
@@ -123,7 +125,7 @@ public fun namespace(allowlist: &Allowlist): vector<u8> {
     allowlist.id.to_bytes()
 }
 
-/// All allowlisted addresses can access all IDs with the prefix of the allowlist
+/// Only ephemeral wallets can access all IDs with the prefix of the allowlist
 fun approve_internal(caller: address, id: vector<u8>, allowlist: &Allowlist): bool {
     // Check if the id has the right prefix
     let namespace = namespace(allowlist);
@@ -131,8 +133,8 @@ fun approve_internal(caller: address, id: vector<u8>, allowlist: &Allowlist): bo
         return false
     };
 
-    // Check if user is in the allowlist
-    allowlist.list.contains(&caller)
+    // Check if user is in the ephemeral wallets list (not zklogin_wallets)
+    allowlist.ephemeral_wallets.contains(&caller)
 }
 
 // Modified seal_approve function to check ephemeral key expiry
@@ -172,7 +174,8 @@ public fun new_allowlist_for_testing(ctx: &mut TxContext): Allowlist {
     Allowlist {
         id: object::new(ctx),
         name: utf8(b"test"),
-        list: vector::empty(),
+        zklogin_wallets: vector::empty(),
+        ephemeral_wallets: vector::empty(),
     }
 }
 
@@ -192,7 +195,7 @@ public fun destroy_for_testing(allowlist: Allowlist, cap: Cap) {
     object::delete(id);
 }
 
-/// Add multiple users to an allowlist in a single transaction
+/// Add multiple zkLogin users to an allowlist in a single transaction
 entry fun add_users_entry(
     allowlist: &mut Allowlist,
     cap: &Cap,
@@ -204,21 +207,11 @@ entry fun add_users_entry(
     // Run cleanup at the beginning
     clean_expired_keys_internal(allowlist, clock);
     
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key);
-    
     let mut i = 0;
     while (i < users.length()) {
-        // Check if this address is an ephemeral key
-        let mut is_ephemeral = false;
-        if (ephem_keys_exist) {
-            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key);
-            is_ephemeral = table::contains(&ephem_keys.keys, users[i]);
-        };
-        
-        // Only add if not already in list and not an ephemeral key
-        if (!allowlist.list.contains(&users[i]) && !is_ephemeral) {
-            allowlist.list.push_back(users[i]);
+        // Only add zkLogin wallets if not already in list
+        if (!allowlist.zklogin_wallets.contains(&users[i])) {
+            allowlist.zklogin_wallets.push_back(users[i]);
         };
         i = i + 1;
     };
@@ -294,8 +287,8 @@ entry fun authorize_ephemeral_key(
     
     let owner = ctx.sender();
     
-    // Verify owner is in allowlist
-    assert!(allowlist.list.contains(&owner), ENoAccess);
+    // Verify owner is a zkLogin wallet (not ephemeral)
+    assert!(allowlist.zklogin_wallets.contains(&owner), ENoAccess);
     
     // Check document-specific access if it exists
     let mut user_key = std::string::utf8(b"users_");
@@ -305,9 +298,9 @@ entry fun authorize_ephemeral_key(
         assert!(doc_users.users.contains(&owner), ENoAccess);
     };
     
-    // Add ephemeral key to allowlist if not already there
-    if (!allowlist.list.contains(&ephemeral_key)) {
-        allowlist.list.push_back(ephemeral_key);
+    // Add ephemeral key to ephemeral wallets list if not already there
+    if (!allowlist.ephemeral_wallets.contains(&ephemeral_key)) {
+        allowlist.ephemeral_wallets.push_back(ephemeral_key);
     };
     
     // Add ephemeral key to document-specific users if needed
@@ -463,17 +456,24 @@ entry fun revoke_ephemeral_key(
     // Remove the key
     let EphemeralKey { owner: _, expiry: _, document_ids } = table::remove(&mut ephem_keys.keys, ephemeral_key);
     
-    // Also remove from allowlist and document access lists if needed
-    // Note: This is optional and could be skipped for efficiency
-    // This code just removes the ephemeral key from allowlist structures
-    if (allowlist.list.contains(&ephemeral_key)) {
-        allowlist.list = allowlist.list.filter!(|x| x != ephemeral_key);
+    // Also remove from ephemeral wallets list
+    let mut i = 0;
+    let mut new_ephemeral_list = vector::empty<address>();
+    
+    while (i < vector::length(&allowlist.ephemeral_wallets)) {
+        let addr = *vector::borrow(&allowlist.ephemeral_wallets, i);
+        if (addr != ephemeral_key) {
+            vector::push_back(&mut new_ephemeral_list, addr);
+        };
+        i = i + 1;
     };
     
+    allowlist.ephemeral_wallets = new_ephemeral_list;
+    
     // Remove from document-specific lists
-    let mut i = 0;
-    while (i < document_ids.length()) {
-        let blob_id = document_ids[i];
+    let mut doc_i = 0;
+    while (doc_i < document_ids.length()) {
+        let blob_id = document_ids[doc_i];
         let mut user_key = std::string::utf8(b"users_");
         std::string::append(&mut user_key, blob_id);
         
@@ -497,7 +497,7 @@ entry fun revoke_ephemeral_key(
             };
         };
         
-        i = i + 1;
+        doc_i = doc_i + 1;
     };
     
     // Emit event
@@ -541,9 +541,9 @@ fun clean_expired_keys_internal(
     let max_to_check = 5; // Limit checks to avoid excessive gas costs
     let mut checked = 0;
     
-    // Find keys in the allowlist that might be ephemeral keys
-    while (i < allowlist.list.length() && checked < max_to_check) {
-        let potential_key = allowlist.list[i];
+    // Find keys in the ephemeral wallets list
+    while (i < allowlist.ephemeral_wallets.length() && checked < max_to_check) {
+        let potential_key = allowlist.ephemeral_wallets[i];
         
         // Check if it's in the ephemeral keys table
         if (table::contains(&ephem_keys.keys, potential_key)) {
@@ -570,17 +570,17 @@ fun clean_expired_keys_internal(
         
         // Replace the filtered vector implementation with manual removal
         let mut j = 0;
-        let mut new_list = vector::empty<address>();
+        let mut new_ephemeral_list = vector::empty<address>();
         
-        while (j < vector::length(&allowlist.list)) {
-            let addr = *vector::borrow(&allowlist.list, j);
+        while (j < vector::length(&allowlist.ephemeral_wallets)) {
+            let addr = *vector::borrow(&allowlist.ephemeral_wallets, j);
             if (addr != key) {
-                vector::push_back(&mut new_list, addr);
+                vector::push_back(&mut new_ephemeral_list, addr);
             };
             j = j + 1;
         };
         
-        allowlist.list = new_list;
+        allowlist.ephemeral_wallets = new_ephemeral_list;
         i = i + 1;
     };
     
@@ -616,9 +616,9 @@ entry fun clean_expired_keys(
     let mut expired_keys = vector::empty<address>();
     let mut i = 0;
     
-    // Check all entries in the allowlist
-    while (i < allowlist.list.length()) {
-        let potential_key = allowlist.list[i];
+    // Check all entries in the ephemeral wallets list
+    while (i < allowlist.ephemeral_wallets.length()) {
+        let potential_key = allowlist.ephemeral_wallets[i];
         
         // Check if it's in the ephemeral keys table
         if (table::contains(&ephem_keys.keys, potential_key)) {
@@ -644,17 +644,17 @@ entry fun clean_expired_keys(
         
         // Replace filter! with manual removal
         let mut j = 0;
-        let mut new_list = vector::empty<address>();
+        let mut new_ephemeral_list = vector::empty<address>();
         
-        while (j < vector::length(&allowlist.list)) {
-            let addr = *vector::borrow(&allowlist.list, j);
+        while (j < vector::length(&allowlist.ephemeral_wallets)) {
+            let addr = *vector::borrow(&allowlist.ephemeral_wallets, j);
             if (addr != key) {
-                vector::push_back(&mut new_list, addr);
+                vector::push_back(&mut new_ephemeral_list, addr);
             };
             j = j + 1;
         };
         
-        allowlist.list = new_list;
+        allowlist.ephemeral_wallets = new_ephemeral_list;
         
         // Emit event for logging
         event::emit(EphemeralKeyExpired {
