@@ -43,7 +43,7 @@ export async function GET(
       // Return the PDF file directly for inline viewing
       const fileBuffer = await downloadFromS3(contract.s3FileKey);
       
-      return new NextResponse(fileBuffer, {
+      return new NextResponse(new Uint8Array(fileBuffer), {
         headers: {
           'Content-Type': contract.s3ContentType || 'application/pdf',
           'Content-Disposition': 'inline',

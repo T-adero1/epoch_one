@@ -615,7 +615,7 @@ const DecryptButton = forwardRef<{ handleDecrypt: () => Promise<void> }, Decrypt
       try {
         setDecryptionStep('savingFile'); 
         console.log("[DecryptButton] Creating download");
-        blob = new Blob([decryptedData], { type: 'application/pdf' });
+        blob = new Blob([new Uint8Array(decryptedData)], { type: 'application/pdf' });
         console.log("[DecryptButton] blob:", blob);
         url = URL.createObjectURL(blob);
         console.log("[DecryptButton] url:", url);

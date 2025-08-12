@@ -418,7 +418,7 @@ export default function PDFDecryptor({
       setDecryptionStep('complete');
 
       // Create blob from decrypted data
-      const decryptedBlob = new Blob([decryptedData], { type: 'application/pdf' });
+      const decryptedBlob = new Blob([new Uint8Array(decryptedData)], { type: 'application/pdf' });
       
       if (onDecrypted) {
         onDecrypted(decryptedBlob);
