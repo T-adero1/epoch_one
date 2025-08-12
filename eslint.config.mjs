@@ -23,18 +23,14 @@ const eslintConfig = [
       "@typescript-eslint": typescriptEslint,
     },
     rules: {
-      // Only keep absolutely critical errors
+      
       "no-undef": "error",
       "no-unreachable": "error",
       "no-unexpected-multiline": "error",
       "@typescript-eslint/no-unused-vars": "error", 
       
-      // Turn off everything else
-      "@typescript-eslint/no-explicit-any": "off",
-      "react-hooks/exhaustive-deps": "off", 
-      "react/no-unescaped-entities": "off",
-      "no-console": "off",
-      "@next/next/no-img-element": "off",
+      
+     
     }
   }
 ];
