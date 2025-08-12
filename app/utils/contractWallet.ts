@@ -341,7 +341,7 @@ export function getStoredContractWallet(
 }
 
 // **SECURE: Store contract wallet in memory (no localStorage)**
-export function storeContractWallet(_wallet: ContractWallet): void {
+export function storeContractWallet(): void {
   console.log('[SECURE-WALLET] Note: Wallet already stored in memory during creation');
   // This function is kept for API compatibility but actual storage happens in createContractSpecificWallet
 }
