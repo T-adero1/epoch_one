@@ -74,6 +74,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@typescript-eslint/eslint-plugin": "^8.39.1",
+    "@typescript-eslint/parser": "^8.39.1",
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "lightningcss": "^1.28.1",
