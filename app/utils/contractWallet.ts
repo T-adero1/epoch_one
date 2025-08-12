@@ -1,15 +1,9 @@
 
-import { jwtToAddress, generateRandomness, genAddressSeed } from '@mysten/sui/zklogin';
+import { jwtToAddress } from '@mysten/sui/zklogin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { Transaction } from '@mysten/sui/transactions';
 import { hashGoogleId } from './privacy'; // Import for hashing
 import { bech32 } from 'bech32'; // ✅ Add this import
 
-// Known constants for Google OAuth (these are public)
-const GOOGLE_ISSUER = 'https://accounts.google.com';
-const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const NETWORK = 'testnet';
 
 // Contract-specific zkLogin state interface
 interface ContractZkLoginState {
@@ -347,7 +341,7 @@ export function getStoredContractWallet(
 }
 
 // **SECURE: Store contract wallet in memory (no localStorage)**
-export function storeContractWallet(wallet: ContractWallet): void {
+export function storeContractWallet(): void {
   console.log('[SECURE-WALLET] Note: Wallet already stored in memory during creation');
   // This function is kept for API compatibility but actual storage happens in createContractSpecificWallet
 }
