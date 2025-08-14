@@ -7,6 +7,7 @@ use jybr::zklogin_verification;
 use sui::table::{Self, Table};
 use sui::clock::Clock;
 use sui::event;
+use sui::hash;
 
 
 const EInvalidCap: u64 = 0;
@@ -16,13 +17,15 @@ const MARKER: u64 = 3;
 const EExpired: u64 = 4;
 const ENotAuthorized: u64 = 5;
 const EParameterMismatch: u64 = 6;
-
+const EInvalidCode: u64 = 7;           // Add this
+const ENoCodeSet: u64 = 8;             // Add this
 
 public struct Allowlist has key {
     id: UID,
     name: String,
     zklogin_wallets: vector<address>,  // Only zkLogin wallets
     ephemeral_wallets: vector<address>, // Only ephemeral wallets
+    verification_hash: Option<vector<u8>>,  // Add this field
 }
 
 public struct Cap has key {
@@ -82,6 +85,7 @@ public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
         zklogin_wallets: vector::empty(),
         ephemeral_wallets: vector::empty(),
         name: name,
+        verification_hash: option::none(),  // Add this line
     };
     let cap = Cap {
         id: object::new(ctx),
@@ -180,6 +184,7 @@ public fun new_allowlist_for_testing(ctx: &mut TxContext): Allowlist {
         name: utf8(b"test"),
         zklogin_wallets: vector::empty(),
         ephemeral_wallets: vector::empty(),
+        verification_hash: option::none(),
     }
 }
 
@@ -199,6 +204,15 @@ public fun destroy_for_testing(allowlist: Allowlist, cap: Cap) {
     object::delete(id);
 }
 
+/// Internal code verification function
+fun assert_code_internal(allowlist: &Allowlist, code: vector<u8>) {
+    assert!(option::is_some(&allowlist.verification_hash), ENoCodeSet);
+    
+    let code_hash = hash::keccak256(&code);
+    let stored_hash = *option::borrow(&allowlist.verification_hash);
+    assert!(code_hash == stored_hash, EInvalidCode);
+}
+
 /// Add multiple zkLogin users to an allowlist in a single transaction
 entry fun add_users_entry(
     allowlist: &mut Allowlist,
@@ -206,7 +220,8 @@ entry fun add_users_entry(
     users: vector<address>,
     address_seeds: vector<u256>,    // Add this parameter
     issuers: vector<String>,        // Add this parameter
-    clock: &Clock
+    clock: &Clock,
+    _ctx: &TxContext  // Prefix with underscore to suppress warning
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
@@ -263,10 +278,11 @@ entry fun add_users_and_publish_entry(
     address_seeds: vector<u256>,    // Add this
     issuers: vector<String>,        // Add this
     blob_id: String,
-    clock: &Clock
+    clock: &Clock,
+    ctx: &TxContext  // Add ctx parameter
 ) {
     // First add users with zkLogin verification
-    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock);
+    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock, ctx);
     
     // Then publish document
     publish(allowlist, cap, blob_id);
@@ -320,14 +336,15 @@ entry fun update_document_access(
     users: vector<address>,
     address_seeds: vector<u256>,  // Add these parameters
     issuers: vector<String>,      // Add these parameters
-    clock: &Clock
+    clock: &Clock,
+    ctx: &TxContext  // Add ctx parameter
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
     // Run cleanup at the beginning (will happen in add_users_entry)
     
     // Update main allowlist with all users - which now includes cleanup
-    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock);
+    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock, ctx);
     
     let mut user_key = std::string::utf8(b"users_");
     std::string::append(&mut user_key, blob_id);
@@ -772,4 +789,57 @@ entry fun clean_expired_keys(
     } else {
         df::add(&mut allowlist.id, last_cleanup_key, timestamp_to_set);
     };
+}
+
+/// Set verification hash for self-registration (admin only)
+entry fun set_verification_hash(
+    allowlist: &mut Allowlist,
+    cap: &Cap,
+    hash: vector<u8>
+) {
+    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    allowlist.verification_hash = option::some(hash);
+}
+
+/// Remove verification hash to disable self-registration (admin only)
+entry fun disable_self_registration(
+    allowlist: &mut Allowlist,
+    cap: &Cap
+) {
+    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    allowlist.verification_hash = option::none();
+}
+
+/// Self-registration function using code verification
+entry fun self_register_with_code(
+    allowlist: &mut Allowlist,
+    code: vector<u8>,
+    address_seed: u256,
+    issuer: String,
+    ctx: &TxContext
+) {
+    // Check code using internal function
+    assert_code_internal(allowlist, code);
+    
+    // Check zkLogin
+    let user = ctx.sender();
+    assert!(zklogin_verification::is_zklogin_wallet(user, address_seed, &issuer), EInvalidCode);
+    
+    // Check not duplicate
+    assert!(!allowlist.zklogin_wallets.contains(&user), EDuplicate);
+    
+    // Check not ephemeral
+    let ephem_key = std::string::utf8(b"ephemeral_keys");
+    let mut is_ephemeral = false;
+    if (df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
+        let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key);
+        is_ephemeral = table::contains(&ephem_keys.keys, user);
+    };
+    if (!is_ephemeral) {
+        is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
+    };
+    assert!(!is_ephemeral, ENotAuthorized);
+    
+    // Add user
+    allowlist.zklogin_wallets.push_back(user);
 }
