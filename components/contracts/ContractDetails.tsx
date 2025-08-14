@@ -285,32 +285,6 @@ export default function ContractDetails({
     });
   };
 
-  // **UPDATED: Enhanced cache check with proper state management**
-  const checkCacheForDecryptedPDF = async () => {
-    if (!isContractEncrypted() || decryptedPdfBlob) return;
-    
-    setIsCheckingCache(true);
-    console.log('[ContractDetails] Checking IndexDB cache for decrypted PDF...');
-    
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      const cachedPDF = await pdfCache.getDecryptedPDF(contract.id);
-      
-      if (cachedPDF) {
-        console.log('[ContractDetails] Found decrypted PDF in cache!');
-        const blob = new Blob([new Uint8Array(cachedPDF.decryptedData)], { type: 'application/pdf' });
-        await handleDecryptionSuccess(blob);
-      } else {
-        console.log('[ContractDetails] No decrypted PDF found in cache');
-      }
-    } catch (error) {
-      console.warn('[ContractDetails] Cache check failed:', error);
-    } finally {
-      setIsCheckingCache(false);
-      setCacheCheckComplete(true);
-      console.log('[ContractDetails] Cache check complete');
-    }
-  };
 
   // **NEW: Single initialization effect to prevent double loading**
   useEffect(() => {
@@ -329,8 +303,8 @@ export default function ContractDetails({
     console.log('[ContractDetails] Encryption detection result:', isEncrypted);
     
     if (isEncrypted) {
-      console.log('[ContractDetails] Contract is encrypted - checking cache first');
-      checkCacheForDecryptedPDF();
+      console.log('[ContractDetails] Contract is encrypted');
+      // checkCacheForDecryptedPDF();
     } else if (contract.s3FileKey) {
       console.log('[ContractDetails] Contract is not encrypted - loading regular PDF');
       loadPdf();
@@ -392,7 +366,7 @@ export default function ContractDetails({
         console.log('[ContractDetails] Contract became encrypted, switching to encrypted mode');
         setCacheCheckComplete(false);
         setIsCheckingCache(false);
-        checkCacheForDecryptedPDF();
+        
       }
     }
   }, [contract.isEncrypted, contract.sealAllowlistId, contract.metadata?.walrus?.encryption?.allowlistId]);

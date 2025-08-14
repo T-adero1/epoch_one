@@ -15,6 +15,8 @@ const EDuplicate: u64 = 2;
 const MARKER: u64 = 3;
 const EExpired: u64 = 4;
 const ENotAuthorized: u64 = 5;
+const EParameterMismatch: u64 = 6;
+
 
 public struct Allowlist has key {
     id: UID,
@@ -209,8 +211,8 @@ entry fun add_users_entry(
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
     // Verify parameters match
-    assert!(users.length() == address_seeds.length(), 0);
-    assert!(users.length() == issuers.length(), 0);
+    assert!(users.length() == address_seeds.length(), EParameterMismatch);
+    assert!(users.length() == issuers.length(), EParameterMismatch);
     
     // Run cleanup at the beginning
     clean_expired_keys_internal(allowlist, clock);
@@ -316,6 +318,8 @@ entry fun update_document_access(
     cap: &Cap,
     blob_id: String,
     users: vector<address>,
+    address_seeds: vector<u256>,  // Add these parameters
+    issuers: vector<String>,      // Add these parameters
     clock: &Clock
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
@@ -323,7 +327,7 @@ entry fun update_document_access(
     // Run cleanup at the beginning (will happen in add_users_entry)
     
     // Update main allowlist with all users - which now includes cleanup
-    add_users_entry(allowlist, cap, users, vector::empty(), vector::empty(), clock);
+    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock);
     
     let mut user_key = std::string::utf8(b"users_");
     std::string::append(&mut user_key, blob_id);
