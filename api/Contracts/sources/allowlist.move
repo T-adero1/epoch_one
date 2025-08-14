@@ -1,11 +1,13 @@
-module walrus::allowlist;
+module jybr::allowlist;
 
 use std::string::String;
 use sui::dynamic_field as df;
-use walrus::utils::is_prefix;
+use jybr::utils::is_prefix;
+use jybr::zklogin_verification;
 use sui::table::{Self, Table};
 use sui::clock::Clock;
 use sui::event;
+
 
 const EInvalidCap: u64 = 0;
 const ENoAccess: u64 = 1;
@@ -200,9 +202,15 @@ entry fun add_users_entry(
     allowlist: &mut Allowlist,
     cap: &Cap,
     users: vector<address>,
+    address_seeds: vector<u256>,    // Add this parameter
+    issuers: vector<String>,        // Add this parameter
     clock: &Clock
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    
+    // Verify parameters match
+    assert!(users.length() == address_seeds.length(), 0);
+    assert!(users.length() == issuers.length(), 0);
     
     // Run cleanup at the beginning
     clean_expired_keys_internal(allowlist, clock);
@@ -213,6 +221,13 @@ entry fun add_users_entry(
     let mut i = 0;
     while (i < users.length()) {
         let user = users[i];
+        
+        // ✅ ADD: Verify this is a valid zkLogin wallet
+        let is_valid_zklogin = zklogin_verification::is_zklogin_wallet(
+            user,
+            address_seeds[i],
+            &issuers[i]
+        );
         
         // Check if this address is an ephemeral key
         let mut is_ephemeral = false;
@@ -229,7 +244,8 @@ entry fun add_users_entry(
         // Only add to zklogin_wallets if:
         // 1. Not already in zklogin_wallets list
         // 2. Not an ephemeral key (in either registry or ephemeral_wallets list)
-        if (!allowlist.zklogin_wallets.contains(&user) && !is_ephemeral) {
+        // 3. ✅ ADD: Is a valid zkLogin wallet
+        if (!allowlist.zklogin_wallets.contains(&user) && !is_ephemeral && is_valid_zklogin) {
             allowlist.zklogin_wallets.push_back(user);
         };
         
@@ -242,13 +258,13 @@ entry fun add_users_and_publish_entry(
     allowlist: &mut Allowlist,
     cap: &Cap,
     users: vector<address>,
+    address_seeds: vector<u256>,    // Add this
+    issuers: vector<String>,        // Add this
     blob_id: String,
     clock: &Clock
 ) {
-    // Run cleanup at the beginning (will happen in add_users_entry)
-    
-    // First add users - which now includes cleanup
-    add_users_entry(allowlist, cap, users, clock);
+    // First add users with zkLogin verification
+    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock);
     
     // Then publish document
     publish(allowlist, cap, blob_id);
@@ -307,7 +323,7 @@ entry fun update_document_access(
     // Run cleanup at the beginning (will happen in add_users_entry)
     
     // Update main allowlist with all users - which now includes cleanup
-    add_users_entry(allowlist, cap, users, clock);
+    add_users_entry(allowlist, cap, users, vector::empty(), vector::empty(), clock);
     
     let mut user_key = std::string::utf8(b"users_");
     std::string::append(&mut user_key, blob_id);

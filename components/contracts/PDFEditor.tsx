@@ -174,18 +174,7 @@ export default function PDFEditor({
     setDecryptedPdfBlob(decryptedBlob);
     setDecryptedPdfUrl(newUrl);
     
-    // **NEW: Cache the decrypted PDF for future use**
-    try {
-      const { pdfCache } = await import('@/app/utils/pdfCache');
-      await pdfCache.storeDecryptedPDF(
-        contract.id,
-        new Uint8Array(await decryptedBlob.arrayBuffer()),
-        contract.s3FileName || 'decrypted-contract.pdf'
-      );
-      console.log('[PDFEditor] Cached decrypted PDF in IndexDB');
-    } catch (cacheError) {
-      console.warn('[PDFEditor] Failed to cache decrypted PDF:', cacheError);
-    }
+
     
     console.log('[PDFEditor] State updated with decrypted PDF data');
     

@@ -1,4 +1,4 @@
-module walrus::utils;
+module jybr::utils;
 
 /// Returns true if `prefix` is a prefix of `word`.
 public(package) fun is_prefix(prefix: vector<u8>, word: vector<u8>): bool {

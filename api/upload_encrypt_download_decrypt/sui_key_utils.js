@@ -16,6 +16,7 @@ function suiPrivkeyToKeypair(suiPrivateKey) {
     // Check if the key is in bech32 format (starts with suiprivkey1)
     if (suiPrivateKey.startsWith('suiprivkey1')) {
       console.log(' Detected bech32 format private key');
+      
       console.log('- Converting bech32 private key to Sui keypair...');
 
       const decoded = bech32.decode(suiPrivateKey);
@@ -40,7 +41,7 @@ function suiPrivkeyToKeypair(suiPrivateKey) {
       const keypair = Ed25519Keypair.fromSecretKey(secretKey);
       console.log(' Successfully created Ed25519Keypair');
       return keypair;
-    } 
+    }
     // Assume it's a hex string if not bech32
     else {
       console.log(' Detected hex format private key');

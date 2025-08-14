@@ -274,18 +274,7 @@ export default function ContractDetails({
     setDecryptedPdfBlob(decryptedBlob);
     setDecryptedPdfUrl(newUrl);
     
-    // Cache the decrypted PDF
-    // try {
-    //   const { pdfCache } = await import('@/app/utils/pdfCache');
-    //   await pdfCache.storeDecryptedPDF(
-    //     contract.id,
-    //     new Uint8Array(await decryptedBlob.arrayBuffer()),
-    //     contract.s3FileName || 'decrypted-contract.pdf'
-    //   );
-    //   console.log('[ContractDetails] Cached decrypted PDF in IndexDB');
-    // } catch (cacheError) {
-    //   console.warn('[ContractDetails] Failed to cache decrypted PDF:', cacheError);
-    // }
+
     
     console.log('[ContractDetails] State updated with decrypted PDF data');
     
