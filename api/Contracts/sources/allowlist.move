@@ -18,7 +18,8 @@ const EExpired: u64 = 4;
 const ENotAuthorized: u64 = 5;
 const EParameterMismatch: u64 = 6;
 const EInvalidCode: u64 = 7;           // Add this
-const ENoCodeSet: u64 = 8;             // Add this
+const ENoCodeSet: u64 = 8;
+const ONE_HOUR_MS: u64 = 60 * 60 * 1000;             // Add this
 
 public struct Allowlist has key {
     id: UID,
@@ -57,29 +58,88 @@ public struct EphemeralKeyAuthorized has copy, drop {
     blob_id: String
 }
 
-public struct EphemeralKeyExtended has copy, drop {
-    owner: address,
-    ephemeral_key: address,
-    expiry: u64
-}
-
-public struct EphemeralKeyRevoked has copy, drop {
-    owner: address,
-    ephemeral_key: address
-}
-
 public struct EphemeralKeyExpired has copy, drop {
     ephemeral_key: address,
     removed_by: address
 }
 
-//////////////////////////////////////////
-/////// Simple allowlist with an admin cap
+// Add this after your existing event structures (around line 60)
+public struct ZkLoginWalletRevoked has copy, drop {
+    allowlist_id: ID,
+    revoked_wallet: address,
+    revoked_by: address,
+    reason: String,
+    timestamp: u64,
+    batch_operation: bool  // true if part of batch revocation
+}
+
+/// User successfully added to allowlist
+public struct UserAdded has copy, drop {
+    allowlist_id: ID,
+    user_address: address,
+    added_by: address,
+    timestamp: u64,
+    verification_method: String,  // "admin_add" or "self_register"
+}
+
+
+/// Document successfully published
+public struct DocumentPublished has copy, drop {
+    allowlist_id: ID,
+    document_id: String,
+    published_by: address,
+    timestamp: u64,
+}
+
+/// Document access successfully updated
+public struct DocumentAccessUpdated has copy, drop {
+    allowlist_id: ID,
+    document_id: String,
+    updated_by: address,
+    user_count: u64,
+    timestamp: u64,
+    operation_type: String,  // "publish_new" or "update_existing"
+}
+
+/// Ephemeral key successfully revoked
+public struct EphemeralKeyRevoked has copy, drop {
+    owner: address,
+    ephemeral_key: address
+}
+
+
+/// Verification hash successfully updated (admin action)
+public struct VerificationHashUpdated has copy, drop {
+    allowlist_id: ID,
+    updated_by: address,
+    timestamp: u64,
+    action: String,  // "set", "update", or "disabled"
+}
+
+/// Allowlist successfully created
+public struct AllowlistCreated has copy, drop {
+    allowlist_id: ID,
+    name: String,
+    created_by: address,
+    timestamp: u64,
+}
+
+/// Cleanup successfully performed
+public struct CleanupPerformed has copy, drop {
+    allowlist_id: ID,
+    triggered_by: address,
+    expired_keys_removed: u64,
+    timestamp: u64,
+    cleanup_type: String,  // "automatic" or "manual"
+}
+
+
+
 
 /// Create an allowlist with an admin cap.
 /// The associated key-ids are [pkg id]::[allowlist id][nonce] for any nonce (thus
 /// many key-ids can be created for the same allowlist).
-public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
+public fun create_allowlist(name: String, clock: &Clock, ctx: &mut TxContext): Cap {
     let allowlist = Allowlist {
         id: object::new(ctx),
         zklogin_wallets: vector::empty(),
@@ -91,38 +151,24 @@ public fun create_allowlist(name: String, ctx: &mut TxContext): Cap {
         id: object::new(ctx),
         allowlist_id: object::id(&allowlist),
     };
+    
+    // ✅ ADD: Emit AllowlistCreated event
+    event::emit(AllowlistCreated {
+        allowlist_id: object::id(&allowlist),
+        name,
+        created_by: ctx.sender(),
+        timestamp: clock.timestamp_ms(),
+    });
+    
     transfer::share_object(allowlist);
     cap
 }
 
 // convenience function to create a allowlist and send it back to sender (simpler ptb for cli)
-entry fun create_allowlist_entry(name: String, ctx: &mut TxContext) {
-    transfer::transfer(create_allowlist(name, ctx), ctx.sender());
+entry fun create_allowlist_entry(name: String, clock: &Clock, ctx: &mut TxContext) {
+    transfer::transfer(create_allowlist(name, clock, ctx), ctx.sender());
 }
 
-public fun add(allowlist: &mut Allowlist, cap: &Cap, account: address) {
-    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    assert!(!allowlist.zklogin_wallets.contains(&account), EDuplicate);
-    allowlist.zklogin_wallets.push_back(account);
-}
-
-public fun remove(allowlist: &mut Allowlist, cap: &Cap, account: address) {
-    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    
-    // Manual implementation to replace filter!
-    let mut i = 0;
-    let mut new_list = vector::empty<address>();
-    
-    while (i < vector::length(&allowlist.zklogin_wallets)) {
-        let addr = *vector::borrow(&allowlist.zklogin_wallets, i);
-        if (addr != account) {
-            vector::push_back(&mut new_list, addr);
-        };
-        i = i + 1;
-    };
-    
-    allowlist.zklogin_wallets = new_list;
-}
 
 //////////////////////////////////////////////////////////
 /// Access control
@@ -175,33 +221,25 @@ public fun publish(allowlist: &mut Allowlist, cap: &Cap, blob_id: String) {
     df::add(&mut allowlist.id, blob_id, MARKER);
 }
 
-#[test_only]
-public fun new_allowlist_for_testing(ctx: &mut TxContext): Allowlist {
-    use std::string::utf8;
-
-    Allowlist {
-        id: object::new(ctx),
-        name: utf8(b"test"),
-        zklogin_wallets: vector::empty(),
-        ephemeral_wallets: vector::empty(),
-        verification_hash: option::none(),
-    }
+/// Helper function to create document-specific user key
+fun create_user_key(blob_id: String): String {
+    let mut user_key = std::string::utf8(b"users_");
+    std::string::append(&mut user_key, blob_id);
+    user_key
 }
 
-#[test_only]
-public fun new_cap_for_testing(ctx: &mut TxContext, allowlist: &Allowlist): Cap {
-    Cap {
-        id: object::new(ctx),
-        allowlist_id: object::id(allowlist),
-    }
-}
-
-#[test_only]
-public fun destroy_for_testing(allowlist: Allowlist, cap: Cap) {
-    let Allowlist { id, .. } = allowlist;
-    object::delete(id);
-    let Cap { id, .. } = cap;
-    object::delete(id);
+/// Helper function to check if a user is an ephemeral key
+fun is_user_ephemeral(allowlist: &Allowlist, user: address): bool {
+    let ephem_key_str = std::string::utf8(b"ephemeral_keys");
+    
+    if (df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key_str)) {
+        let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
+        if (table::contains(&ephem_keys.keys, user)) {
+            return true
+        };
+    };
+    
+    allowlist.ephemeral_wallets.contains(&user)
 }
 
 /// Internal code verification function
@@ -218,10 +256,10 @@ entry fun add_users_entry(
     allowlist: &mut Allowlist,
     cap: &Cap,
     users: vector<address>,
-    address_seeds: vector<u256>,    // Add this parameter
-    issuers: vector<String>,        // Add this parameter
+    address_seeds: vector<u256>,
+    issuers: vector<String>,
     clock: &Clock,
-    _ctx: &TxContext  // Prefix with underscore to suppress warning
+    ctx: &TxContext
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
@@ -232,9 +270,6 @@ entry fun add_users_entry(
     // Run cleanup at the beginning
     clean_expired_keys_internal(allowlist, clock);
     
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key);
-    
     let mut i = 0;
     while (i < users.length()) {
         let user = users[i];
@@ -243,156 +278,124 @@ entry fun add_users_entry(
         let is_valid_zklogin = zklogin_verification::is_zklogin_wallet(
             user,
             address_seeds[i],
-            &issuers[i]
+            &issuers[i],
+            ctx
         );
         
-        // Check if this address is an ephemeral key
-        let mut is_ephemeral = false;
-        if (ephem_keys_exist) {
-            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key);
-            is_ephemeral = table::contains(&ephem_keys.keys, user);
-        };
+        // ✅ REPLACE: Use helper function
+        let is_ephemeral = is_user_ephemeral(allowlist, user);
         
-        // Also check if it's in the ephemeral_wallets list
-        if (!is_ephemeral) {
-            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
-        };
-        
-        // Only add to zklogin_wallets if:
-        // 1. Not already in zklogin_wallets list
-        // 2. Not an ephemeral key (in either registry or ephemeral_wallets list)
-        // 3. ✅ ADD: Is a valid zkLogin wallet
+        // Only add to zklogin_wallets if valid and not ephemeral
         if (!allowlist.zklogin_wallets.contains(&user) && !is_ephemeral && is_valid_zklogin) {
             allowlist.zklogin_wallets.push_back(user);
+            
+            // ✅ ADD: Emit UserAdded event
+            event::emit(UserAdded {
+                allowlist_id: object::id(allowlist),
+                user_address: user,
+                added_by: ctx.sender(),
+                timestamp: clock.timestamp_ms(),
+                verification_method: std::string::utf8(b"admin_add")
+            });
         };
         
         i = i + 1;
     };
 }
 
-/// Add users and publish document in one transaction
-entry fun add_users_and_publish_entry(
+/// Universal internal function for managing documents and users
+entry fun manage_documents_and_users_internal(
     allowlist: &mut Allowlist,
     cap: &Cap,
     users: vector<address>,
-    address_seeds: vector<u256>,    // Add this
-    issuers: vector<String>,        // Add this
-    blob_id: String,
+    address_seeds: vector<u256>,
+    issuers: vector<String>,
+    blob_ids: vector<String>,
+    should_publish: bool,  // Controls whether to publish documents
     clock: &Clock,
-    ctx: &TxContext  // Add ctx parameter
-) {
-    // First add users with zkLogin verification
-    add_users_entry(allowlist, cap, users, address_seeds, issuers, clock, ctx);
-    
-    // Then publish document
-    publish(allowlist, cap, blob_id);
-    
-    // Create a modified key for the users mapping to avoid collision
-    let mut user_key = std::string::utf8(b"users_");
-    std::string::append(&mut user_key, blob_id);
-    
-    // Filter out ephemeral keys from document-specific users
-    let mut filtered_users = vector::empty<address>();
-    let ephem_key_str = std::string::utf8(b"ephemeral_keys");
-    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
-    
-    let mut i = 0;
-    while (i < users.length()) {
-        let user = users[i];
-        let mut is_ephemeral = false;
-        
-        // Check if user is an ephemeral key
-        if (ephem_keys_exist) {
-            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
-            is_ephemeral = table::contains(&ephem_keys.keys, user);
-        };
-        
-        if (!is_ephemeral) {
-            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
-        };
-        
-        // Only add non-ephemeral users to document-specific list
-        if (!is_ephemeral) {
-            filtered_users.push_back(user);
-        };
-        
-        i = i + 1;
-    };
-    
-    // Add filtered user info under document key
-    if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
-        let old_users = df::remove<String, DocUsers>(&mut allowlist.id, user_key);
-        // We need to do something with old_users because it doesn't have drop
-        let DocUsers { users: _ } = old_users; // Explicitly drop fields
-    };
-    df::add(&mut allowlist.id, user_key, DocUsers { users: filtered_users });
-}
-
-/// Update document access in one transaction - for existing documents
-entry fun update_document_access(
-    allowlist: &mut Allowlist,
-    cap: &Cap,
-    blob_id: String,
-    users: vector<address>,
-    address_seeds: vector<u256>,  // Add these parameters
-    issuers: vector<String>,      // Add these parameters
-    clock: &Clock,
-    ctx: &TxContext  // Add ctx parameter
+    ctx: &TxContext
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
-    // Run cleanup at the beginning (will happen in add_users_entry)
+    // Verify parameters match
+    assert!(users.length() == address_seeds.length(), EParameterMismatch);
+    assert!(users.length() == issuers.length(), EParameterMismatch);
     
-    // Update main allowlist with all users - which now includes cleanup
+    // Respect Move 2024 limits
+    assert!(blob_ids.length() <= 1000, 0); // Max dynamic fields per transaction
+    assert!(blob_ids.length() > 0, 0);     // Must have at least one document
+    
+    // First add users with zkLogin verification (happens once for all docs)
     add_users_entry(allowlist, cap, users, address_seeds, issuers, clock, ctx);
     
-    let mut user_key = std::string::utf8(b"users_");
-    std::string::append(&mut user_key, blob_id);
-    
-    // Filter out ephemeral keys from document-specific users
-    let mut filtered_users = vector::empty<address>();
-    let ephem_key_str = std::string::utf8(b"ephemeral_keys");
-    let ephem_keys_exist = df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
-    
-    let mut i = 0;
-    while (i < users.length()) {
-        let user = users[i];
-        let mut is_ephemeral = false;
+    // Process each document
+    let mut doc_i = 0;
+    while (doc_i < blob_ids.length()) {
+        let blob_id = &blob_ids[doc_i];
         
-        // Check if user is an ephemeral key
-        if (ephem_keys_exist) {
-            let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key_str);
-            is_ephemeral = table::contains(&ephem_keys.keys, user);
+        // Conditionally publish document
+        if (should_publish) {
+            publish(allowlist, cap, *blob_id);
+            
+            // ✅ ADD: Emit DocumentPublished event
+            event::emit(DocumentPublished {
+                allowlist_id: object::id(allowlist),
+                document_id: *blob_id,
+                published_by: ctx.sender(),
+                timestamp: clock.timestamp_ms()
+            });
         };
         
-        if (!is_ephemeral) {
-            is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
+        // ✅ Use helper function
+        let user_key = create_user_key(*blob_id);
+        
+        // Filter out ephemeral keys from document-specific users
+        let mut filtered_users = vector::empty<address>();
+        let mut user_i = 0;
+        
+        while (user_i < users.length()) {
+            let user = users[user_i];
+            
+            // ✅ Use helper function
+            if (!is_user_ephemeral(allowlist, user)) {
+                filtered_users.push_back(user);
+            };
+            
+            user_i = user_i + 1;
         };
         
-        // Only add non-ephemeral users to document-specific list
-        if (!is_ephemeral) {
-            filtered_users.push_back(user);
+        // Update document-specific access list
+        if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
+            let old_users = df::remove<String, DocUsers>(&mut allowlist.id, user_key);
+            let DocUsers { users: _ } = old_users; // Explicitly drop fields
         };
         
-        i = i + 1;
+        // Add the filtered user mapping
+        df::add(&mut allowlist.id, user_key, DocUsers { users: filtered_users });
+        
+        // ✅ ADD: Emit DocumentAccessUpdated event
+        event::emit(DocumentAccessUpdated {
+            allowlist_id: object::id(allowlist),
+            document_id: *blob_id,
+            updated_by: ctx.sender(),
+            user_count: filtered_users.length(),
+            timestamp: clock.timestamp_ms(),
+            operation_type: if (should_publish) { 
+                std::string::utf8(b"publish_new") 
+            } else { 
+                std::string::utf8(b"update_existing") 
+            }
+        });
+        
+        doc_i = doc_i + 1;
     };
-    
-    // Update document-specific access list
-    if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
-        let old_users = df::remove<String, DocUsers>(&mut allowlist.id, user_key);
-        let DocUsers { users: _ } = old_users; // Explicitly drop fields
-    };
-    
-    // Add the filtered user mapping
-    df::add(&mut allowlist.id, user_key, DocUsers { users: filtered_users });
 }
 
 // Authorize an ephemeral key for document access
 entry fun authorize_ephemeral_key(
     allowlist: &mut Allowlist,
     ephemeral_key: address,
-    blob_id: String,
-    expiry_ms: u64,
+    blob_ids: vector<String>,    // ← UPGRADED: Multiple documents
     clock: &Clock,
     ctx: &mut TxContext
 ) {
@@ -404,12 +407,32 @@ entry fun authorize_ephemeral_key(
     // Verify owner is a zkLogin wallet (not ephemeral)
     assert!(allowlist.zklogin_wallets.contains(&owner), ENoAccess);
     
-    // Check document-specific access if it exists
-    let mut user_key = std::string::utf8(b"users_");
-    std::string::append(&mut user_key, blob_id);
-    if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
-        let doc_users = df::borrow<String, DocUsers>(&allowlist.id, user_key);
-        assert!(doc_users.users.contains(&owner), ENoAccess);
+    // Respect Move 2024 limits
+    assert!(blob_ids.length() <= 1000, 0);
+    assert!(blob_ids.length() > 0, 0);
+    
+    // Process each document - CONSOLIDATED: check access AND add ephemeral key in one loop
+    let mut doc_i = 0;
+    while (doc_i < blob_ids.length()) {
+        let blob_id = &blob_ids[doc_i];
+        
+        // ✅ REPLACE: Use helper function
+        let user_key = create_user_key(*blob_id);
+        
+        // Check document-specific access AND add ephemeral key in single operation
+        if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
+            let doc_users = df::borrow_mut<String, DocUsers>(&mut allowlist.id, user_key);
+            
+            // Check access permission
+            assert!(doc_users.users.contains(&owner), ENoAccess);
+            
+            // Add ephemeral key if not already there
+            if (!doc_users.users.contains(&ephemeral_key)) {
+                doc_users.users.push_back(ephemeral_key);
+            };
+        };
+        
+        doc_i = doc_i + 1;
     };
     
     // Add ephemeral key to ephemeral wallets list if not already there
@@ -417,15 +440,7 @@ entry fun authorize_ephemeral_key(
         allowlist.ephemeral_wallets.push_back(ephemeral_key);
     };
     
-    // Add ephemeral key to document-specific users if needed
-    if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
-        let doc_users = df::borrow_mut<String, DocUsers>(&mut allowlist.id, user_key);
-        if (!doc_users.users.contains(&ephemeral_key)) {
-            doc_users.users.push_back(ephemeral_key);
-        };
-    };
-    
-    // Get the ephemeral keys registry or create it
+    // Get or create ephemeral keys registry
     let ephem_key = std::string::utf8(b"ephemeral_keys");
     if (!df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
         df::add(&mut allowlist.id, ephem_key, EphemeralKeys {
@@ -433,32 +448,33 @@ entry fun authorize_ephemeral_key(
         });
     };
     
-    // Get current time and calculate expiry
+    // Calculate expiry with hardcoded 1 hour
     let current_time = clock.timestamp_ms();
-    let expiry = current_time + expiry_ms;
+    let expiry = current_time + ONE_HOUR_MS;
     
     // Add or update ephemeral key data
     let ephem_keys = df::borrow_mut<String, EphemeralKeys>(&mut allowlist.id, ephem_key);
     
-    // Prepare document IDs list
-    let mut document_ids = vector::empty<String>();
-    vector::push_back(&mut document_ids, blob_id);
-    
-    // If key exists, update it
-    if (table::contains(&ephem_keys.keys, ephemeral_key)) {
+    // Prepare combined document IDs list - fix the warning here
+    let document_ids = if (table::contains(&ephem_keys.keys, ephemeral_key)) {
         let existing_key = table::borrow(&ephem_keys.keys, ephemeral_key);
-        
-        // Only allow owner to update their own ephemeral keys
         assert!(existing_key.owner == owner, ENotAuthorized);
         
-        // Remove existing key data
         let _old_key = table::remove(&mut ephem_keys.keys, ephemeral_key);
+        let mut existing_docs = _old_key.document_ids;
         
-        // Keep existing document IDs and add new one if not already there
-        document_ids = _old_key.document_ids;
-        if (!vector::contains(&document_ids, &blob_id)) {
-            vector::push_back(&mut document_ids, blob_id);
+        // Add new document IDs if not already there
+        let mut i = 0;
+        while (i < blob_ids.length()) {
+            if (!vector::contains(&existing_docs, &blob_ids[i])) {
+                vector::push_back(&mut existing_docs, blob_ids[i]);
+            };
+            i = i + 1;
         };
+        
+        existing_docs  // Return merged list
+    } else {
+        blob_ids  // Return new list directly
     };
     
     // Add the ephemeral key data
@@ -468,13 +484,17 @@ entry fun authorize_ephemeral_key(
         document_ids
     });
     
-    // Emit event for confirmation
-    event::emit(EphemeralKeyAuthorized {
-        owner,
-        ephemeral_key,
-        expiry,
-        blob_id
-    });
+    // Emit events for each document
+    let mut i = 0;
+    while (i < blob_ids.length()) {
+        event::emit(EphemeralKeyAuthorized {
+            owner,
+            ephemeral_key,
+            expiry,
+            blob_id: blob_ids[i]
+        });
+        i = i + 1;
+    };
 }
 
 // Function to verify an ephemeral key's validity
@@ -482,7 +502,7 @@ entry fun authorize_ephemeral_key(
 public fun verify_ephemeral_key(
     allowlist: &Allowlist,
     ephemeral_key: address,
-    blob_id: String,
+    blob_ids: vector<String>,    // ← UPGRADED: Check multiple documents
     clock: &Clock
 ): bool {
     let ephem_key = std::string::utf8(b"ephemeral_keys");
@@ -506,49 +526,18 @@ public fun verify_ephemeral_key(
         return false
     };
     
-    // Check if document ID is in the allowed list
-    vector::contains(&key_data.document_ids, &blob_id)
+    // Check if ALL document IDs are in the allowed list
+    let mut i = 0;
+    while (i < blob_ids.length()) {
+        if (!vector::contains(&key_data.document_ids, &blob_ids[i])) {
+            return false
+        };
+        i = i + 1;
+    };
+    
+    true
 }
 
-// Let the ephemeral key owner extend the expiry
-entry fun extend_ephemeral_key(
-    allowlist: &mut Allowlist,
-    ephemeral_key: address,
-    new_expiry_ms: u64,
-    clock: &Clock,
-    ctx: &TxContext
-) {
-    let owner = ctx.sender();
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    
-    assert!(df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key), 0);
-    
-    let ephem_keys = df::borrow_mut<String, EphemeralKeys>(&mut allowlist.id, ephem_key);
-    assert!(table::contains(&ephem_keys.keys, ephemeral_key), 0);
-    
-    let key_data = table::borrow(&ephem_keys.keys, ephemeral_key);
-    assert!(key_data.owner == owner, ENotAuthorized);
-    
-    // Calculate new expiry time
-    let current_time = clock.timestamp_ms();
-    let new_expiry = current_time + new_expiry_ms;
-    
-    // Remove and re-add with updated expiry
-    let old_key = table::remove(&mut ephem_keys.keys, ephemeral_key);
-    
-    table::add(&mut ephem_keys.keys, ephemeral_key, EphemeralKey {
-        owner: old_key.owner,
-        expiry: new_expiry,
-        document_ids: old_key.document_ids
-    });
-    
-    // Emit event
-    event::emit(EphemeralKeyExtended {
-        owner,
-        ephemeral_key,
-        expiry: new_expiry
-    });
-}
 
 // Revoke an ephemeral key
 entry fun revoke_ephemeral_key(
@@ -588,8 +577,9 @@ entry fun revoke_ephemeral_key(
     let mut doc_i = 0;
     while (doc_i < document_ids.length()) {
         let blob_id = document_ids[doc_i];
-        let mut user_key = std::string::utf8(b"users_");
-        std::string::append(&mut user_key, blob_id);
+        
+        // ✅ REPLACE: Use helper function
+        let user_key = create_user_key(blob_id);
         
         if (df::exists_with_type<String, DocUsers>(&allowlist.id, user_key)) {
             let doc_users = df::borrow_mut<String, DocUsers>(&mut allowlist.id, user_key);
@@ -614,11 +604,12 @@ entry fun revoke_ephemeral_key(
         doc_i = doc_i + 1;
     };
     
-    // Emit event
+    // ✅ ADD: Emit EphemeralKeyRevoked event (was removed accidentally)
     event::emit(EphemeralKeyRevoked {
         owner,
         ephemeral_key
     });
+   
 }
 
 // Internal cleanup function that can be called by other functions
@@ -708,6 +699,15 @@ fun clean_expired_keys_internal(
     } else {
         df::add(&mut allowlist.id, last_cleanup_key, timestamp_to_set);
     };
+
+    // ✅ ADD: Emit CleanupPerformed event for automatic cleanup
+    event::emit(CleanupPerformed {
+        allowlist_id: object::id(allowlist),
+        triggered_by: @0x0, // System-triggered
+        expired_keys_removed: expired_keys.length(),
+        timestamp: current_time,
+        cleanup_type: std::string::utf8(b"automatic")
+    });
 }
 
 // Keep the dedicated cleanup function too for manual cleanup
@@ -789,25 +789,61 @@ entry fun clean_expired_keys(
     } else {
         df::add(&mut allowlist.id, last_cleanup_key, timestamp_to_set);
     };
+
+    // ✅ ADD: Emit CleanupPerformed event
+    event::emit(CleanupPerformed {
+        allowlist_id: object::id(allowlist),
+        triggered_by: ctx.sender(),
+        expired_keys_removed: expired_keys.length(),
+        timestamp: current_time,
+        cleanup_type: std::string::utf8(b"manual")
+    });
 }
 
 /// Set verification hash for self-registration (admin only)
 entry fun set_verification_hash(
     allowlist: &mut Allowlist,
     cap: &Cap,
-    hash: vector<u8>
+    hash: vector<u8>,
+    clock: &Clock,
+    ctx: &TxContext
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    
+    let action = if (option::is_some(&allowlist.verification_hash)) {
+        std::string::utf8(b"update")
+    } else {
+        std::string::utf8(b"set")
+    };
+    
     allowlist.verification_hash = option::some(hash);
+    
+    // ✅ ONLY emit on successful update
+    event::emit(VerificationHashUpdated {
+        allowlist_id: object::id(allowlist),
+        updated_by: ctx.sender(),
+        timestamp: clock.timestamp_ms(),
+        action
+    });
 }
 
 /// Remove verification hash to disable self-registration (admin only)
 entry fun disable_self_registration(
     allowlist: &mut Allowlist,
-    cap: &Cap
+    cap: &Cap,
+    clock: &Clock,
+    ctx: &TxContext
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     allowlist.verification_hash = option::none();
+    
+    // ✅ ADD: Emit VerificationHashUpdated event
+    event::emit(VerificationHashUpdated {
+        allowlist_id: object::id(allowlist),
+        updated_by: ctx.sender(),
+        timestamp: clock.timestamp_ms(),
+        action: std::string::utf8(b"disabled")
+    });
 }
 
 /// Self-registration function using code verification
@@ -816,6 +852,7 @@ entry fun self_register_with_code(
     code: vector<u8>,
     address_seed: u256,
     issuer: String,
+    clock: &Clock,  // Add clock parameter
     ctx: &TxContext
 ) {
     // Check code using internal function
@@ -823,23 +860,80 @@ entry fun self_register_with_code(
     
     // Check zkLogin
     let user = ctx.sender();
-    assert!(zklogin_verification::is_zklogin_wallet(user, address_seed, &issuer), EInvalidCode);
+    assert!(zklogin_verification::is_zklogin_wallet(user, address_seed, &issuer, ctx), EInvalidCode);
     
     // Check not duplicate
     assert!(!allowlist.zklogin_wallets.contains(&user), EDuplicate);
     
-    // Check not ephemeral
-    let ephem_key = std::string::utf8(b"ephemeral_keys");
-    let mut is_ephemeral = false;
-    if (df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
-        let ephem_keys = df::borrow<String, EphemeralKeys>(&allowlist.id, ephem_key);
-        is_ephemeral = table::contains(&ephem_keys.keys, user);
-    };
-    if (!is_ephemeral) {
-        is_ephemeral = allowlist.ephemeral_wallets.contains(&user);
-    };
-    assert!(!is_ephemeral, ENotAuthorized);
+    // ✅ REPLACE: Use helper function
+    assert!(!is_user_ephemeral(allowlist, user), ENotAuthorized);
     
     // Add user
     allowlist.zklogin_wallets.push_back(user);
+    
+    // ✅ ONLY emit event on SUCCESS
+    event::emit(UserAdded {
+        allowlist_id: object::id(allowlist),
+        user_address: user,
+        added_by: user,
+        timestamp: clock.timestamp_ms(),
+        verification_method: std::string::utf8(b"self_register")
+    });
+}
+
+
+/// Universal zkLogin wallet revocation function - handles single and batch operations
+entry fun revoke_zklogin_wallets(
+    allowlist: &mut Allowlist,
+    cap: &Cap,
+    wallets_to_revoke: vector<address>,
+    reasons: vector<String>,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    assert!(wallets_to_revoke.length() == reasons.length(), EParameterMismatch);
+    
+    // Respect Move 2024 limits - max 100 wallets per transaction
+    assert!(wallets_to_revoke.length() <= 100, EParameterMismatch);
+    assert!(wallets_to_revoke.length() > 0, EParameterMismatch); // Must revoke at least one
+    
+    let admin = ctx.sender();
+    let timestamp = clock.timestamp_ms();
+    let is_batch = wallets_to_revoke.length() > 1;
+
+    let mut i = 0;
+    while (i < wallets_to_revoke.length()) {
+        let wallet = wallets_to_revoke[i];
+        let reason = &reasons[i];
+        
+        // Only revoke if wallet exists in zklogin_wallets
+        if (allowlist.zklogin_wallets.contains(&wallet)) {
+            // Remove from zklogin_wallets using existing pattern
+            let mut j = 0;
+            let mut new_list = vector::empty<address>();
+            
+            while (j < vector::length(&allowlist.zklogin_wallets)) {
+                let addr = *vector::borrow(&allowlist.zklogin_wallets, j);
+                if (addr != wallet) {
+                    vector::push_back(&mut new_list, addr);
+                };
+                j = j + 1;
+            };
+            
+            allowlist.zklogin_wallets = new_list;
+            
+            // Emit single event for each revocation
+            event::emit(ZkLoginWalletRevoked {
+                allowlist_id: object::id(allowlist),
+                revoked_wallet: wallet,
+                revoked_by: admin,
+                reason: *reason,
+                timestamp,
+                batch_operation: is_batch
+            });
+        };
+        
+        i = i + 1;
+    };
 }

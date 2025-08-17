@@ -2,17 +2,36 @@ module jybr::zklogin_verification;
 
 use std::string::String;
 use sui::zklogin_verified_issuer;
+use sui::event;
 
-/// Verify that an address is a valid zkLogin wallet
-/// Returns true if the address was derived using zkLogin with the given parameters
+/// Event emitted for successful zkLogin verifications
+public struct ZkLoginVerified has copy, drop {
+    wallet_address: address,
+    issuer: String,
+    verified_by: address
+}
+
+/// Verify zkLogin wallet 
 public fun is_zklogin_wallet(
     wallet_address: address,
     address_seed: u256,
-    issuer: &String
+    issuer: &String,
+    ctx: &TxContext
 ): bool {
-    zklogin_verified_issuer::check_zklogin_issuer(
+    let result = zklogin_verified_issuer::check_zklogin_issuer(
         wallet_address,
         address_seed,
         issuer
-    )
+    );
+    
+    // Only emit on success to avoid spam
+    if (result) {
+        event::emit(ZkLoginVerified {
+            wallet_address,
+            issuer: *issuer,
+            verified_by: ctx.sender()
+        });
+    };
+    
+    result
 }
