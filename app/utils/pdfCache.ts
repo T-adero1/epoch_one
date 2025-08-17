@@ -17,15 +17,6 @@ interface CachedPDF {
   };
 }
 
-// **NEW: Decrypted PDF caching interface**
-interface CachedDecryptedPDF {
-  contractId: string;
-  decryptedData: Uint8Array;
-  fileName: string;
-  fileSize: number;
-  cachedAt: number;
-}
-
 // **UPDATED: Session Key caching interface**
 interface CachedSessionKey {
   allowlistId: string; // **UPDATED: Use allowlistId as primary key instead of packageId**
@@ -40,12 +31,10 @@ class PDFCache {
   private dbName = 'epoch-pdf-cache';
   private version = 6;
   private pdfStoreName = 'encrypted-pdfs';
-  private decryptedPdfStoreName = 'decrypted-pdfs';
   private sessionKeyStoreName = 'session-keys';
   private db: IDBDatabase | null = null;
   private maxDocs = 5;
   private maxAge = 7 * 24 * 60 * 60 * 1000;
-  private maxDecryptedAge = 2 * 60 * 60 * 1000;
   
   // **NEW: Add initialization tracking**
   private initPromise: Promise<void> | null = null;
@@ -118,13 +107,6 @@ class PDFCache {
           }
           const pdfStore = db.createObjectStore(this.pdfStoreName, { keyPath: 'contractId' });
           pdfStore.createIndex('cachedAt', 'cachedAt', { unique: false });
-          
-          // **NEW: Create decrypted PDF store**
-          if (db.objectStoreNames.contains(this.decryptedPdfStoreName)) {
-            db.deleteObjectStore(this.decryptedPdfStoreName);
-          }
-          const decryptedStore = db.createObjectStore(this.decryptedPdfStoreName, { keyPath: 'contractId' });
-          decryptedStore.createIndex('cachedAt', 'cachedAt', { unique: false });
           
           // **UPDATED: Create session key store with allowlistId as primary key**
           if (db.objectStoreNames.contains(this.sessionKeyStoreName)) {
@@ -259,76 +241,6 @@ class PDFCache {
             console.log('[PDF_CACHE] No valid session key found for allowlist:', allowlistId);
             resolve(null);
           }
-        };
-      });
-    });
-  }
-
-  // **UPDATED: Decrypted PDF Management with improved error handling**
-  async storeDecryptedPDF(
-    contractId: string,
-    decryptedData: Uint8Array,
-    fileName: string
-  ): Promise<void> {
-    const cachedDecryptedPDF: CachedDecryptedPDF = {
-      contractId,
-      decryptedData,
-      fileName,
-      fileSize: decryptedData.length,
-      cachedAt: Date.now()
-    };
-
-    return this.executeTransaction(this.decryptedPdfStoreName, 'readwrite', (store) => {
-      return new Promise<void>((resolve, reject) => {
-        const request = (store as IDBObjectStore).put(cachedDecryptedPDF);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          console.log('[PDF_CACHE] Stored decrypted PDF for contract:', contractId, `(${(decryptedData.length / 1024).toFixed(1)} KB)`);
-          resolve();
-        };
-      });
-    });
-  }
-
-  async getDecryptedPDF(contractId: string): Promise<CachedDecryptedPDF | null> {
-    return this.executeTransaction(this.decryptedPdfStoreName, 'readonly', (store) => {
-      return new Promise<CachedDecryptedPDF | null>((resolve, reject) => {
-        const request = (store as IDBObjectStore).get(contractId);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const result = request.result as CachedDecryptedPDF;
-          
-          if (result) {
-            const isExpired = Date.now() - result.cachedAt > this.maxDecryptedAge;
-            
-            if (isExpired) {
-              console.log('[PDF_CACHE] Cached decrypted PDF expired for contract:', contractId);
-              // Remove expired document
-              this.executeTransaction(this.decryptedPdfStoreName, 'readwrite', (deleteStore) => {
-                (deleteStore as IDBObjectStore).delete(contractId);
-              }).catch(console.warn);
-              resolve(null);
-            } else {
-              console.log('[PDF_CACHE] Retrieved decrypted PDF from cache for contract:', contractId);
-              resolve(result);
-            }
-          } else {
-            console.log('[PDF_CACHE] No cached decrypted PDF found for contract:', contractId);
-            resolve(null);
-          }
-        };
-      });
-    });
-  }
-
-  async clearDecryptedPDF(contractId: string): Promise<void> {
-    return this.executeTransaction(this.decryptedPdfStoreName, 'readwrite', (store) => {
-      return new Promise<void>((resolve, reject) => {
-        const request = (store as IDBObjectStore).delete(contractId);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          console.log('[PDF_CACHE] Cleared decrypted PDF for contract:', contractId);
-          resolve();
         };
       });
     });
@@ -524,23 +436,21 @@ class PDFCache {
     if (!this.db) await this.init();
     
     return new Promise((resolve) => {
-      const transaction = this.db!.transaction([this.pdfStoreName, this.decryptedPdfStoreName, this.sessionKeyStoreName], 'readwrite');
+      const transaction = this.db!.transaction([this.pdfStoreName, this.sessionKeyStoreName], 'readwrite');
       
       const pdfStore = transaction.objectStore(this.pdfStoreName);
-      const decryptedStore = transaction.objectStore(this.decryptedPdfStoreName);
       const sessionStore = transaction.objectStore(this.sessionKeyStoreName);
       
       let completedCount = 0;
         const onComplete = () => {
           completedCount++;
-          if (completedCount === 3) {
+          if (completedCount === 2) {
             console.log('[PDF_CACHE] Cleared all cached data');
             resolve();
           }
         };
       
       pdfStore.clear().onsuccess = onComplete;
-      decryptedStore.clear().onsuccess = onComplete;
       sessionStore.clear().onsuccess = onComplete;
     });
   }

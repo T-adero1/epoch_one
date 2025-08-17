@@ -693,7 +693,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         },
         randomness: generateRandomness(),
         jwt: null,
-        maxEpoch: currentEpoch + 1, // Valid for 10 epochs
+        maxEpoch: currentEpoch + 1, // Valid for 1 epoch
         zkProofs: null,
       };
       
