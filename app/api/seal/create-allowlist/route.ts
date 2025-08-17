@@ -10,7 +10,7 @@ import { generatePredeterminedWalletForAllowlist } from '@/app/utils/predetermin
 const prisma = new PrismaClient();
 
 // Constants
-const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID!;
 
 const MODULE_NAME = 'allowlist';
 const NETWORK = 'testnet';
@@ -33,6 +33,8 @@ interface AddressSource {
   source: 'predetermined' | 'direct';
   address: string;
   context?: string; // ✅ FIX: Make context optional
+  addressSeed?: string;     // ✅ ADD: For zkLogin wallets
+  issuer?: string;          // ✅ ADD: For zkLogin wallets
 }
 
 // Function to verify objects exist before proceeding
@@ -128,7 +130,7 @@ async function verifyObjectsExist(client: SuiClient, objectIds: string[], maxAtt
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { contractId, signerAddresses } = body;
+    const { contractId, signerAddresses, addressSeed } = body; // ✅ ADD: addressSeed to destructuring
     
     if (!contractId || !signerAddresses || !Array.isArray(signerAddresses)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -195,10 +197,10 @@ export async function POST(req: NextRequest) {
         }
       }
       
-      console.log('[API] Final wallet addresses for allowlist:', walletAddresses.map(addr => addr.substring(0, 8) + '...'));
-      console.log('[API] Address sources:', addressSources.map(source => ({
+      console.log('[API] Address sources summary:', addressSources.map(source => ({
         type: source.type,
         source: source.source,
+        hasZkLoginData: !!(source.addressSeed && source.issuer),
         inputPreview: source.input.substring(0, 8) + '...',
         addressPreview: source.address.substring(0, 8) + '...'
       })));
@@ -228,7 +230,10 @@ export async function POST(req: NextRequest) {
     
     tx.moveCall({
       target: `${SEAL_PACKAGE_ID}::${MODULE_NAME}::create_allowlist_entry`,
-      arguments: [tx.pure.string(allowlistName)]
+      arguments: [
+        tx.pure.string(allowlistName),
+        tx.object('0x6') // ✅ ADD: Clock parameter required by your contract
+      ]
     });
     
     // Build transaction
@@ -309,6 +314,8 @@ export async function POST(req: NextRequest) {
           addSignersTx.object(allowlistId),
           addSignersTx.object(capId),
           addSignersTx.pure.vector('address', walletAddresses),
+          addSignersTx.pure.vector('u256', walletAddresses.map(() => addressSeed || '0')), // ✅ FIX: Map to same length as wallets
+          addSignersTx.pure.vector('string', walletAddresses.map(() => 'https://accounts.google.com')), // ✅ FIX: Map to same length
           addSignersTx.object('0x6') // Clock object
         ]
       });

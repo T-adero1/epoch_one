@@ -280,7 +280,46 @@ async function createNewSessionKey(params: {
 
   // Sponsor and execute authorization transaction
   const docId = documentId.startsWith('0x') ? documentId.substring(2) : documentId;
-  
+
+  // ✅ Extract JWT expiry from the JWT token
+  const jwtExpiryMs = (() => {
+    try {
+      console.log('[SEAL_DECRYPT] Extracting JWT expiry from token...');
+      const jwtParts = zkLoginState.jwt.split('.');
+      
+      if (jwtParts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+      
+      const jwtPayload = JSON.parse(atob(jwtParts[1]));
+      console.log('[SEAL_DECRYPT] JWT payload extracted:', { 
+        sub: jwtPayload.sub?.substring(0, 8) + '...', 
+        exp: jwtPayload.exp,
+        iat: jwtPayload.iat 
+      });
+      
+      if (!jwtPayload.exp) {
+        throw new Error('JWT missing expiry (exp) field');
+      }
+      
+      const expiryMs = jwtPayload.exp * 1000;
+      const timeUntilExpiry = expiryMs - Date.now();
+      
+      console.log('[SEAL_DECRYPT] JWT expires at:', new Date(expiryMs).toISOString());
+      console.log('[SEAL_DECRYPT] Time until expiry:', Math.round(timeUntilExpiry / 1000 / 60), 'minutes');
+      
+      if (timeUntilExpiry <= 0) {
+        console.warn('[SEAL_DECRYPT] JWT is already expired!');
+      }
+      
+      return expiryMs;
+      
+    } catch (error) {
+      console.warn('[SEAL_DECRYPT] Failed to parse JWT expiry, using 24h fallback:', error);
+      return Date.now() + (24 * 60 * 60 * 1000);
+    }
+  })();
+
   const sponsorResponse = await fetch('/api/auth/sponsor', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -289,7 +328,9 @@ async function createNewSessionKey(params: {
       allowlistId,
       ephemeralAddress: ephemeralPublicKeyAddress,
       documentId: docId,
-      validityMs: 60 * 60 * 1000
+      validityMs: 60 * 60 * 1000,
+      encryptedJWT: zkLoginState.encryptedJWT, 
+      jwtExpiryMs: jwtExpiryMs 
     })
   });
 

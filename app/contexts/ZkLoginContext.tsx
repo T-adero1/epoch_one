@@ -26,6 +26,7 @@ interface ZkLoginState {
   } | null;
   randomness: string | null;
   jwt: string | null;
+  encryptedJWT: string | null; // ✅ ADD: Just this one line
   maxEpoch: number | null;
   zkProofs: {
     proofPoints: {
@@ -194,6 +195,7 @@ interface ZkLoginContextType extends LoginState {
   updateUserProfile: (userData: Partial<User>) => void;
   checkSessionValidity: () => void;
   executeTransaction: (txb: Transaction) => Promise<{ digest: string }>;
+  setEncryptedJWT: (encryptedJWT: string) => void; // ✅ ADD: Just this one line
 }
 
 // Create context with default value
@@ -207,6 +209,7 @@ const ZkLoginContext = createContext<ZkLoginContextType>({
   updateUserProfile: () => {},
   checkSessionValidity: () => {},
   executeTransaction: async () => ({ digest: '' }),
+  setEncryptedJWT: () => {}, // ✅ ADD: Just this one line
 });
 
 export const useZkLogin = () => useContext(ZkLoginContext);
@@ -694,6 +697,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
         },
         randomness: generateRandomness(),
         jwt: null,
+        encryptedJWT: null, // Initialize encryptedJWT
         maxEpoch: currentEpoch + 1, // Valid for 1 epoch
         zkProofs: null,
       };
@@ -999,6 +1003,22 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     }
   };
 
+  // Function to set encrypted JWT (called once from ClientSideEncryptor)
+  const setEncryptedJWT = useCallback((encryptedJWT: string) => {
+    if (!state.isAuthenticated) return;
+    
+    dispatch({ type: 'UPDATE_ZKLOGIN_STATE', payload: { encryptedJWT } });
+    
+    // Update localStorage
+    if (typeof window !== 'undefined') {
+      const currentSession = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || '{}');
+      if (currentSession.zkLoginState) {
+        currentSession.zkLoginState.encryptedJWT = encryptedJWT;
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(currentSession));
+      }
+    }
+  }, [state.isAuthenticated]);
+
   // Context value with state and actions
   const value: ZkLoginContextType = {
     ...state,
@@ -1010,6 +1030,7 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
     updateUserProfile,
     checkSessionValidity,
     executeTransaction,
+    setEncryptedJWT, // ✅ ADD: Just this one line
   };
 
   return (

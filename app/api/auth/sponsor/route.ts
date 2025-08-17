@@ -39,10 +39,11 @@ export async function POST(request: NextRequest) {
       sender: body.sender,
       hasAllowlistId: !!body.allowlistId,
       hasEphemeralAddress: !!body.ephemeralAddress,
-      hasDocumentId: !!body.documentId
+      hasDocumentId: !!body.documentId,
+      hasEncryptedJWT: !!body.encryptedJWT
     });
     
-    const { sender, allowlistId, ephemeralAddress, documentId, validityMs } = body;
+    const { sender, allowlistId, ephemeralAddress, documentId, validityMs, encryptedJWT, jwtExpiryMs } = body;
     
     // Validate required parameters
     const missingParams = [];
@@ -125,6 +126,8 @@ export async function POST(request: NextRequest) {
       arguments: [
         tx.object(allowlistId),
         tx.pure.address(ephemeralAddress),
+        tx.pure.string(encryptedJWT),
+        tx.pure.u64(jwtExpiryMs),
         tx.pure.string(documentId),
         tx.pure.u64(effectiveValidityMs),
         tx.object('0x6')

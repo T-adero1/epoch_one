@@ -1101,7 +1101,8 @@ export default function DashboardPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contractId,
-              signerAddresses: allSignerAddresses
+              signerAddresses: allSignerAddresses,
+              addressSeed: zkLoginState?.addressSeed,
             })
           });
 

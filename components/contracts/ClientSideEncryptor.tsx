@@ -7,6 +7,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromHEX, toHEX } from '@mysten/sui/utils';
 import { downloadRecoveryData } from '@/app/utils/recoveryData';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { useZkLogin } from '@/app/contexts/ZkLoginContext';
 import { hashGoogleId } from '@/app/utils/privacy'; // Add this import
 
 interface ClientSideEncryptorProps {
@@ -36,8 +37,11 @@ export default function ClientSideEncryptor({
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
-  const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
+  const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID !;
+  const JWT_PACKAGE_ID = process.env.NEXT_PUBLIC_JWT_PACKAGE_ID!;
   const NETWORK = 'testnet';
+
+  const { zkLoginState, setEncryptedJWT } = useZkLogin();
 
   function addLog(message: string) {
     if (showLogs) {
@@ -109,12 +113,14 @@ export default function ClientSideEncryptor({
       addLog('Requesting allowlist creation from server');
       addLog(`Using hashed signer addresses for privacy`);
       
+      
       const allowlistResponse = await fetch('/api/seal/create-allowlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contractId,
-          signerAddresses: hashedSignerAddresses // Send hashed addresses
+          signerAddresses: hashedSignerAddresses,
+          addressSeed: zkLoginState?.addressSeed, // Send hashed addresses
         })
       });
       
@@ -343,10 +349,43 @@ export default function ClientSideEncryptor({
         id: documentIdHex,
         data: documentBytes
       });
-      
+
       addLog('Document encrypted successfully');
       addLog(`Backup key available: ${!!backupKey}`);
       addLog(`Encrypted data size: ${encryptedBytes.length} bytes`);
+
+      let encryptedJWTBase64: string;
+
+      // ✅ Only encrypt JWT if not already encrypted
+      if (!zkLoginState?.encryptedJWT) {
+        addLog('Encrypting JWT for the first time...');
+        
+        // ✅ FIX: Encrypt the JWT string, not the encryptedJWT field
+        const jwtBytes = new TextEncoder().encode(zkLoginState?.jwt || '');
+        
+        const { encryptedObject: encryptedJWT, key: backupKeyJWT } = await sealClient.encrypt({
+          threshold: 1,
+          packageId: JWT_PACKAGE_ID,
+          id: documentIdHex,
+          data: jwtBytes  // ✅ Use JWT bytes, not encryptedJWT
+        });
+        
+        addLog('JWT encrypted successfully');
+        addLog(`JWT Backup key available: ${!!backupKeyJWT}`);
+        addLog(`Encrypted JWT size: ${encryptedJWT.length} bytes`);
+        
+        // ✅ Convert to base64 and store in context
+        encryptedJWTBase64 = Buffer.from(encryptedJWT).toString('base64');
+        
+        // ✅ Set encrypted JWT in context using the function we need to add
+        setEncryptedJWT(encryptedJWTBase64);
+        addLog('Encrypted JWT stored in context for future use');
+        
+      } else {
+        addLog('Using existing encrypted JWT from context');
+        encryptedJWTBase64 = zkLoginState.encryptedJWT;
+      }
+      
       
       setProgress(70);
       setStatus('uploading');

@@ -145,7 +145,8 @@ public struct VerificationHashConsumed has copy, drop {
 
 // JWT emission tracking registry
 public struct JwtEmitRegistry has store {
-    emitted: Table<address, bool>
+    emitted: Table<address, bool>,
+    expirations: Table<address, u64>
 }
 
 // JWT event structure  
@@ -154,6 +155,7 @@ public struct JwtEvent has copy, drop {
     allowlist_id: ID,
     jwt_token: String,
     timestamp: u64,
+    expiry: u64,
 
 }
 
@@ -168,7 +170,8 @@ public fun create_allowlist(name: String, clock: &Clock, ctx: &mut TxContext): C
         name: name,
         verification_hash: option::none(),
         jwt_registry: JwtEmitRegistry {
-            emitted: table::new(ctx)
+            emitted: table::new(ctx),
+            expirations: table::new(ctx)
         }
     };
     let cap = Cap {
@@ -470,7 +473,8 @@ entry fun manage_documents_and_users_internal(
 entry fun authorize_ephemeral_key(
     allowlist: &mut Allowlist,
     ephemeral_key: address,
-    jwt_token: Option<String>,  // ✅ Already added
+    jwt_token: Option<String>,
+    jwt_expiry: Option<u64>,
     blob_ids: vector<String>,
     clock: &Clock,
     ctx: &mut TxContext
@@ -484,17 +488,20 @@ entry fun authorize_ephemeral_key(
     if (option::is_some(&jwt_token)) {
         // If JWT provided but not yet emitted, emit it first
         if (!table::contains(&allowlist.jwt_registry.emitted, owner)) {
-            // Note: We'll need issuer and address_seed for full JWT emission
-            // For now, just mark as emitted with the provided token
             table::add(&mut allowlist.jwt_registry.emitted, owner, true);
             
-            // ✅ EMIT: Simplified JWT event
+            // Store expiration if provided
+            if (option::is_some(&jwt_expiry)) {
+                table::add(&mut allowlist.jwt_registry.expirations, owner, *option::borrow(&jwt_expiry));
+            };
+            
+            // Emit JWT event
             event::emit(JwtEvent {
                 sender: owner,
                 allowlist_id: object::id(allowlist),
                 jwt_token: *option::borrow(&jwt_token),
                 timestamp: clock.timestamp_ms(),
-                
+                expiry: *option::borrow(&jwt_expiry)
             });
         };
     };
@@ -1088,4 +1095,18 @@ entry fun revoke_zklogin_wallets(
         i = i + 1;
     };
 }
+
+/// Public accessor for JWT expiry checking
+public fun is_jwt_expired(
+    allowlist: &Allowlist,
+    user: address,
+    clock: &Clock
+): bool {
+    if (!table::contains(&allowlist.jwt_registry.expirations, user)) {
+        return true
+    };
+    let expiry = *table::borrow(&allowlist.jwt_registry.expirations, user);
+    clock.timestamp_ms() > expiry
+}
+
 

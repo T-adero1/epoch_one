@@ -34,7 +34,7 @@ export default function PDFEncryptor({
   const SEAL_PACKAGE_ID = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID || 
     '0xb5c84864a69cb0b495caf548fa2bf0d23f6b69b131fa987d6f896d069de64429';
   const NETWORK = 'testnet';
-
+  const { zkLoginState } = useZkLogin();
   const createDocumentIdFromAllowlist = (allowlistId: string) => {
     const cleanAllowlistId = allowlistId.startsWith('0x') ? allowlistId.slice(2) : allowlistId;
     const allowlistBytes = fromHEX(cleanAllowlistId);
@@ -65,7 +65,8 @@ export default function PDFEncryptor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contractId,
-          signerAddresses: allSignerAddresses
+          signerAddresses: allSignerAddresses,
+          addressSeed: zkLoginState?.addressSeed,
         })
       });
 
