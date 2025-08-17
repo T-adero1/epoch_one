@@ -21,12 +21,14 @@ const EInvalidCode: u64 = 7;           // Add this
 const ENoCodeSet: u64 = 8;
 const ONE_HOUR_MS: u64 = 60 * 60 * 1000;             // Add this
 
+
 public struct Allowlist has key {
     id: UID,
     name: String,
     zklogin_wallets: vector<address>,  // Only zkLogin wallets
     ephemeral_wallets: vector<address>, // Only ephemeral wallets
-    verification_hash: Option<vector<u8>>,  // Add this field
+    verification_hash: Option<vector<vector<u8>>>,
+    jwt_registry: JwtEmitRegistry,
 }
 
 public struct Cap has key {
@@ -133,8 +135,27 @@ public struct CleanupPerformed has copy, drop {
     cleanup_type: String,  // "automatic" or "manual"
 }
 
+/// Event emitted when a verification hash is consumed (one-time use)
+public struct VerificationHashConsumed has copy, drop {
+    allowlist_id: ID,
+    consumed_by: address,
+    timestamp: u64,
+    remaining_hashes: u64
+}
 
+// JWT emission tracking registry
+public struct JwtEmitRegistry has store {
+    emitted: Table<address, bool>
+}
 
+// JWT event structure  
+public struct JwtEvent has copy, drop {
+    sender: address,
+    allowlist_id: ID,
+    jwt_token: String,
+    timestamp: u64,
+
+}
 
 /// Create an allowlist with an admin cap.
 /// The associated key-ids are [pkg id]::[allowlist id][nonce] for any nonce (thus
@@ -145,7 +166,10 @@ public fun create_allowlist(name: String, clock: &Clock, ctx: &mut TxContext): C
         zklogin_wallets: vector::empty(),
         ephemeral_wallets: vector::empty(),
         name: name,
-        verification_hash: option::none(),  // Add this line
+        verification_hash: option::none(),
+        jwt_registry: JwtEmitRegistry {
+            emitted: table::new(ctx)
+        }
     };
     let cap = Cap {
         id: object::new(ctx),
@@ -197,6 +221,11 @@ entry fun seal_approve(id: vector<u8>, allowlist: &Allowlist, clock: &Clock, ctx
     
     // First check if it's a regular allowlisted address
     if (approve_internal(sender, id, allowlist)) {
+        // ✅ ADD: If sender is a zkLogin wallet, require JWT emission
+        if (allowlist.zklogin_wallets.contains(&sender)) {
+            assert!(table::contains(&allowlist.jwt_registry.emitted, sender), ENoAccess);
+        };
+        
         // Check if this is an ephemeral key
         let ephem_key = std::string::utf8(b"ephemeral_keys");
         if (df::exists_with_type<String, EphemeralKeys>(&allowlist.id, ephem_key)) {
@@ -242,13 +271,59 @@ fun is_user_ephemeral(allowlist: &Allowlist, user: address): bool {
     allowlist.ephemeral_wallets.contains(&user)
 }
 
-/// Internal code verification function
-fun assert_code_internal(allowlist: &Allowlist, code: vector<u8>) {
+/// Helper function that checks if user is zkLogin wallet AND has emitted JWT
+/// Only call this when you want to enforce JWT emission for zkLogin wallets
+fun check_zklogin_with_jwt(allowlist: &Allowlist, user: address): bool {
+    // First check if they're a zkLogin wallet
+    if (!allowlist.zklogin_wallets.contains(&user)) {
+        return false
+    };
+    
+    // If they are a zkLogin wallet, they MUST have emitted JWT
+    table::contains(&allowlist.jwt_registry.emitted, user)
+}
+
+/// Internal code verification function - removes hash after use with event
+fun assert_code_internal(allowlist: &mut Allowlist, code: vector<u8>, ctx: &TxContext, clock: &Clock) {
     assert!(option::is_some(&allowlist.verification_hash), ENoCodeSet);
     
+    // ✅ FIX: Store allowlist_id BEFORE mutable borrow
+    let allowlist_id = object::id(allowlist);
+    let sender = ctx.sender();
+    let timestamp = clock.timestamp_ms();
+    
     let code_hash = hash::keccak256(&code);
-    let stored_hash = *option::borrow(&allowlist.verification_hash);
-    assert!(code_hash == stored_hash, EInvalidCode);
+    let stored_hashes = option::borrow_mut(&mut allowlist.verification_hash);
+    
+    // Find and remove the hash if it exists
+    let mut i = 0;
+    let mut found = false;
+    while (i < stored_hashes.length() && !found) {
+        if (stored_hashes[i] == code_hash) {
+            vector::remove(stored_hashes, i);
+            found = true;
+        } else {
+            i = i + 1;
+        };
+    };
+    
+    assert!(found, EInvalidCode);
+    
+    // Store remaining count before potentially setting to None
+    let remaining_count = stored_hashes.length();
+    
+    // If no hashes left, set to None
+    if (stored_hashes.length() == 0) {
+        allowlist.verification_hash = option::none();
+    };
+    
+    // ✅ FIX: Now emit event using pre-stored values
+    event::emit(VerificationHashConsumed {
+        allowlist_id,
+        consumed_by: sender,
+        timestamp,
+        remaining_hashes: remaining_count
+    });
 }
 
 /// Add multiple zkLogin users to an allowlist in a single transaction
@@ -395,7 +470,8 @@ entry fun manage_documents_and_users_internal(
 entry fun authorize_ephemeral_key(
     allowlist: &mut Allowlist,
     ephemeral_key: address,
-    blob_ids: vector<String>,    // ← UPGRADED: Multiple documents
+    jwt_token: Option<String>,  // ✅ Already added
+    blob_ids: vector<String>,
     clock: &Clock,
     ctx: &mut TxContext
 ) {
@@ -404,8 +480,27 @@ entry fun authorize_ephemeral_key(
     
     let owner = ctx.sender();
     
-    // Verify owner is a zkLogin wallet (not ephemeral)
-    assert!(allowlist.zklogin_wallets.contains(&owner), ENoAccess);
+    // ✅ ADD: Handle optional JWT emission BEFORE checking zkLogin status
+    if (option::is_some(&jwt_token)) {
+        // If JWT provided but not yet emitted, emit it first
+        if (!table::contains(&allowlist.jwt_registry.emitted, owner)) {
+            // Note: We'll need issuer and address_seed for full JWT emission
+            // For now, just mark as emitted with the provided token
+            table::add(&mut allowlist.jwt_registry.emitted, owner, true);
+            
+            // ✅ EMIT: Simplified JWT event
+            event::emit(JwtEvent {
+                sender: owner,
+                allowlist_id: object::id(allowlist),
+                jwt_token: *option::borrow(&jwt_token),
+                timestamp: clock.timestamp_ms(),
+                
+            });
+        };
+    };
+    
+    // ✅ NOW: Check zkLogin wallet status AND JWT emission
+    assert!(check_zklogin_with_jwt(allowlist, owner), ENoAccess);
     
     // Respect Move 2024 limits
     assert!(blob_ids.length() <= 1000, 0);
@@ -811,14 +906,18 @@ entry fun set_verification_hash(
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
     
     let action = if (option::is_some(&allowlist.verification_hash)) {
-        std::string::utf8(b"update")
+        // ✅ ADD: Add to existing vector
+        let hashes = option::borrow_mut(&mut allowlist.verification_hash);
+        if (!hashes.contains(&hash)) {  // Avoid duplicates
+            hashes.push_back(hash);
+        };
+        std::string::utf8(b"added")
     } else {
+        // ✅ CREATE: New vector with first hash
+        allowlist.verification_hash = option::some(vector[hash]);
         std::string::utf8(b"set")
     };
     
-    allowlist.verification_hash = option::some(hash);
-    
-    // ✅ ONLY emit on successful update
     event::emit(VerificationHashUpdated {
         allowlist_id: object::id(allowlist),
         updated_by: ctx.sender(),
@@ -827,36 +926,88 @@ entry fun set_verification_hash(
     });
 }
 
-/// Remove verification hash to disable self-registration (admin only)
-entry fun disable_self_registration(
+/// Add additional verification hash (admin only)
+entry fun add_verification_hash(
     allowlist: &mut Allowlist,
     cap: &Cap,
+    hash: vector<u8>,
     clock: &Clock,
     ctx: &TxContext
 ) {
     assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
-    allowlist.verification_hash = option::none();
     
-    // ✅ ADD: Emit VerificationHashUpdated event
+    if (option::is_none(&allowlist.verification_hash)) {
+        // If no hashes exist, create with this hash
+        allowlist.verification_hash = option::some(vector[hash]);
+    } else {
+        // Add to existing hashes
+        let hashes = option::borrow_mut(&mut allowlist.verification_hash);
+        // Respect Move 2024 limits
+        assert!(hashes.length() < 50, EParameterMismatch); // Max 50 codes
+        if (!hashes.contains(&hash)) {  // Avoid duplicates
+            hashes.push_back(hash);
+        };
+    };
+    
     event::emit(VerificationHashUpdated {
         allowlist_id: object::id(allowlist),
         updated_by: ctx.sender(),
         timestamp: clock.timestamp_ms(),
-        action: std::string::utf8(b"disabled")
+        action: std::string::utf8(b"added")
+    });
+}
+
+/// Remove specific verification hash (admin only)
+entry fun remove_verification_hash(
+    allowlist: &mut Allowlist,
+    cap: &Cap,
+    hash: vector<u8>,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(cap.allowlist_id == object::id(allowlist), EInvalidCap);
+    assert!(option::is_some(&allowlist.verification_hash), ENoCodeSet);
+    
+    let hashes = option::borrow_mut(&mut allowlist.verification_hash);
+    
+    // Find and remove the hash
+    let mut i = 0;
+    let mut found = false;
+    while (i < hashes.length() && !found) {
+        if (hashes[i] == hash) {
+            vector::remove(hashes, i);
+            found = true;
+        } else {
+            i = i + 1;
+        };
+    };
+    
+    assert!(found, EInvalidCode);
+    
+    // If no hashes left, make it None
+    if (hashes.length() == 0) {
+        allowlist.verification_hash = option::none();
+    };
+    
+    event::emit(VerificationHashUpdated {
+        allowlist_id: object::id(allowlist),
+        updated_by: ctx.sender(),
+        timestamp: clock.timestamp_ms(),
+        action: std::string::utf8(b"removed")
     });
 }
 
 /// Self-registration function using code verification
 entry fun self_register_with_code(
-    allowlist: &mut Allowlist,
+    allowlist: &mut Allowlist,  // ✅ CHANGED: Now mutable
     code: vector<u8>,
     address_seed: u256,
     issuer: String,
-    clock: &Clock,  // Add clock parameter
+    clock: &Clock,
     ctx: &TxContext
 ) {
-    // Check code using internal function
-    assert_code_internal(allowlist, code);
+    // Check code using internal function (which now removes the hash)
+    assert_code_internal(allowlist, code, ctx, clock);  // ✅ Now modifies allowlist
     
     // Check zkLogin
     let user = ctx.sender();
@@ -937,3 +1088,4 @@ entry fun revoke_zklogin_wallets(
         i = i + 1;
     };
 }
+
