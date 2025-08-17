@@ -40,6 +40,7 @@ interface ZkLoginState {
     headerBase64: string;
   } | null;
   salt?: string; // Add salt to state for tracking
+  addressSeed?: string; // Add address seed to state for reuse
 }
 
 interface LoginState {
@@ -805,12 +806,13 @@ export const ZkLoginProvider: React.FC<{children: React.ReactNode}> = ({ childre
       
       saveUserToDatabase(userData); 
 
-      // Update zkLoginState with salt for consistency
+      // Update zkLoginState with salt and addressSeed for consistency
       const updatedZkLoginState: ZkLoginState = {
         ...intermediateState,
         jwt,
         zkProofs,
         salt,
+        addressSeed,
       };
       
       console.log('[ZKLOGIN:RAW:STATE] 💾 Complete zkLoginState:', JSON.stringify(updatedZkLoginState, null, 2));
